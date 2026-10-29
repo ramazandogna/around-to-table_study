@@ -9,5 +9,10 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"],
   },
+  "durable_objects": {
+    "bindings": [{ "name": "AREAS", "class_name": "AreaRoom" }],
+  },
+  // The free plan only supports SQLite-backed Durable Objects.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AreaRoom"] }],
   "observability": { "enabled": true },
 }
