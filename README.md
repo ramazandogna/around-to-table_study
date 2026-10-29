@@ -100,7 +100,7 @@ Yes, in pieces. No app combines "study together quietly in a library and slowly 
 
 | Part | Difficulty | Note |
 |---|---|---|
-| Map + movement + camera | 🟢 Easy | Phaser + Tiled are built for this |
+| Isometric world + movement + camera | 🟡 Medium | three.js with Kenney's CC0 3D kits |
 | Responsive (phone + desktop) | 🟡 Medium | Touch controls and the on-screen keyboard take effort |
 | Real-time multiplayer | 🟡 Medium | A well-understood problem at small scale (≤200 users) |
 | Area rules (caps, cooldown, limits) | 🟢 Easy | Must be enforced on the server |
@@ -113,7 +113,7 @@ Estimate: one developer with AI assistance, 10–15 hours a week, **2–3 months
 
 ## Tech (short)
 
-TypeScript · **Phaser 3** (game) · **React** (menus) · **Cloudflare Workers + Durable Objects** (real-time rooms) · **Cloudflare D1** (database) · Tiled (maps) · Kenney CC0 assets.
+TypeScript · **three.js** (isometric 3D world) · **React** (menus) · **Cloudflare Workers + Durable Objects** (real-time rooms) · **Cloudflare D1** (database) · Kenney CC0 3D assets.
 Everything runs on **free tiers**. Cloudflare was chosen over Vercel because the game needs persistent WebSocket connections, which serverless functions can't hold.
 
 ## Development
@@ -131,10 +131,9 @@ Checks (all must pass before a commit): `pnpm format:check`, `pnpm lint`, `pnpm 
 
 | Folder | What lives there |
 |---|---|
-| `apps/client` | Vite + React (UI) + Phaser 3 (world) |
+| `apps/client` | Vite + React (UI) + three.js (isometric world) |
 | `apps/server` | Cloudflare Worker: API, static assets, later Durable Objects |
 | `packages/shared` | Types, constants and rules shared by client and server |
-| `maps/` | Tiled map sources |
 | `docs/decisions.md` | Why things are the way they are |
 
 ## Follow / contribute
