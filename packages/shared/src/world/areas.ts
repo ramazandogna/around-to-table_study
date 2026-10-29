@@ -17,6 +17,8 @@ export type AreaDefinition = {
   /** Where new arrivals stand when they did not come through a door. */
   spawn: { x: number; y: number };
   renovation: readonly RenovationZone[];
+  /** Decorative carpets; walkable, drawn under furniture. */
+  rugs: readonly Rect[];
 };
 
 export const AREAS: Record<AreaId, AreaDefinition> = {
@@ -40,6 +42,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     doors: { [TILE.doorToLibrary]: 'library', [TILE.doorToSmoking]: 'smoking' },
     spawn: { x: 14, y: 7 },
     renovation: [],
+    rugs: [{ x: 13, y: 1, w: 4, h: 10 }],
   },
   library: {
     id: 'library',
@@ -49,13 +52,13 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
       '#......................................#',
       '#P....................................P#',
       '#......................................#',
-      '#...........S.S.S.S..S.S.S.S...........#',
-      '#.......S.S.TTTTTTTTTTTTTTTT.S.S.......#',
-      '#.......TTTTTTTTTTTTTTTTTTTTTTTT.......#',
-      '#.....STTTTTTTTTTTTTTTTTTTTTTTTTTS.....#',
-      '#.......TTTTTTTTTTTTTTTTTTTTTTTT.......#',
-      '#.......S.S.TTTTTTTTTTTTTTTT.S.S.......#',
-      '#...........S.S.S.S..S.S.S.S...........#',
+      '#......................................#',
+      '#......................................#',
+      '#........S.S.S.S.S....S.S.S.S.S........#',
+      '#......STTTTTTTTTTTTTTTTTTTTTTTTS......#',
+      '#........S.S.S.S.S....S.S.S.S.S........#',
+      '#......................................#',
+      '#......................................#',
       '#B....................................B#',
       '#B....................................B#',
       '#B....................................B#',
@@ -66,6 +69,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     spawn: { x: 6, y: 14 },
     // Only the left end of the table is open at launch.
     renovation: [{ x: 16, y: 2, w: 23, h: 14, unlockAtUsers: 50 }],
+    rugs: [{ x: 5, y: 6, w: 30, h: 5 }],
   },
   smoking: {
     id: 'smoking',
@@ -84,5 +88,6 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     doors: { [TILE.doorToHall]: 'hall' },
     spawn: { x: 8, y: 5 },
     renovation: [],
+    rugs: [{ x: 4, y: 3, w: 6, h: 4 }],
   },
 };

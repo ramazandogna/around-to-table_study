@@ -15,7 +15,8 @@ import { t, type MessageKey } from '../../i18n/t';
 import { useGameStore } from '../../state/store';
 import { cameraCenter, zoomFor } from '../camera';
 import { Character } from '../objects/Character';
-import { drawArea } from '../render/drawArea';
+import { WALL_TOP_ROWS, drawArea } from '../render/drawArea';
+import { preloadTilesets } from '../render/tileset';
 
 type AreaSceneData = { area?: AreaId; from?: AreaId };
 
@@ -46,6 +47,10 @@ export class AreaScene extends Phaser.Scene {
     this.areaId = data.area ?? 'hall';
     this.arrivedFrom = data.from;
     this.leaving = false;
+  }
+
+  preload(): void {
+    preloadTilesets(this);
   }
 
   create(): void {
@@ -99,7 +104,13 @@ export class AreaScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const target = {
       x: cameraCenter(this.player.sprite.x, this.grid.width * TILE_SIZE, cam.width / cam.zoom),
-      y: cameraCenter(this.player.sprite.y, this.grid.height * TILE_SIZE, cam.height / cam.zoom),
+      y:
+        cameraCenter(
+          this.player.sprite.y + WALL_TOP_ROWS * TILE_SIZE,
+          (this.grid.height + WALL_TOP_ROWS) * TILE_SIZE,
+          cam.height / cam.zoom,
+        ) -
+        WALL_TOP_ROWS * TILE_SIZE,
     };
     this.cameraTarget.x += (target.x - this.cameraTarget.x) * lerp;
     this.cameraTarget.y += (target.y - this.cameraTarget.y) * lerp;
