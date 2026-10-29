@@ -40,13 +40,121 @@ button {
   height: 100dvh;
 }
 
-.game-canvas {
+.world-canvas {
   position: absolute;
   inset: 0;
+  overflow: hidden;
+  touch-action: none;
 }
 
-.game-canvas canvas {
-  image-rendering: pixelated;
+.world-canvas canvas {
+  display: block;
+}
+
+.world-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.world-fader {
+  position: absolute;
+  inset: 0;
+  background: var(--color-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+  z-index: 2;
+}
+
+.world-fader--dark {
+  opacity: 1;
+}
+
+.world-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 14px;
+  z-index: 3;
+}
+
+.avatar-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(-50%);
+}
+
+.avatar-name {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgb(29 22 18 / 0.7);
+  color: #f5ecd7;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.avatar-label--self .avatar-name {
+  background: rgb(201 103 47 / 0.9);
+}
+
+.avatar-bubble {
+  position: relative;
+  max-width: 200px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: #fffaf0;
+  color: #2b2118;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.25);
+  opacity: 0;
+  transform: translateY(4px) scale(0.95);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.avatar-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  border: 6px solid transparent;
+  border-top-color: #fffaf0;
+  border-bottom: 0;
+  transform: translateX(-50%);
+}
+
+.avatar-bubble--visible {
+  opacity: 1;
+  transform: none;
+}
+
+.avatar-bubble:empty {
+  display: none;
+}
+
+.world-sign {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgb(43 33 24 / 0.85);
+  color: #f5ecd7;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.world-sign--warning {
+  background: #1d1d1d;
+  color: #f2c230;
+  border: 1px solid #f2c230;
 }
 
 .hud-title {

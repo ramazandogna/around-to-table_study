@@ -1,10 +1,11 @@
 import { APP_NAME } from '@att/shared';
-import { GameCanvas } from './game/GameCanvas';
+
 import { t } from './i18n/t';
 import { useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { NameGate } from './ui/NameGate';
 import { Notice } from './ui/Notice';
+import { WorldCanvas } from './world/WorldCanvas';
 
 export function App() {
   const session = useGameStore((s) => s.session);
@@ -16,7 +17,7 @@ export function App() {
 
   return (
     <main className="app">
-      <GameCanvas />
+      <WorldCanvas />
       <header className="hud-title">
         <span>{APP_NAME}</span>
         <span className="hud-area">

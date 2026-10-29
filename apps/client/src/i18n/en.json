@@ -2,7 +2,7 @@
   "area.hall": "Entrance Hall",
   "area.library": "Library",
   "area.smoking": "Smoking Room",
-  "hint.controls": "tap to walk · WASD / arrows · enter to chat",
+  "hint.controls": "tap to walk · arrows / WASD · enter to chat",
   "hud.here": "here",
   "hud.offline": "reconnecting…",
   "blocked.renovation": "this part of the library is under renovation.",
@@ -19,5 +19,8 @@
   "chat.send": "Send",
   "notice.rate_limited": "slow down a little.",
   "notice.replaced": "you opened the library in another tab.",
-  "notice.offline": "connection lost, reconnecting…"
+  "notice.offline": "connection lost, reconnecting…",
+  "sign.elevator": "Elevator",
+  "world.loading": "opening the library…",
+  "world.failed": "Could not load the library. Please refresh."
 }
