@@ -1,0 +1,9 @@
+{
+  "area.hall": "Entrance Hall",
+  "area.library": "Library",
+  "area.smoking": "Smoking Room",
+  "hint.controls": "tap to walk · WASD / arrows",
+  "blocked.renovation": "this part of the library is under renovation.",
+  "blocked.elevator": "the elevator opens soon.",
+  "sign.renovation": "UNDER RENOVATION"
+}
