@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+playwright-report/
+test-results/
+
+# Private docs (kept local)
+prompt.md
+prompt-for-me.md
+ROADMAP.md
+
+# Local assets
+assets/
