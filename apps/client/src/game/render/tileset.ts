@@ -1,9 +1,10 @@
 import type Phaser from 'phaser';
 
-/** Kenney "Roguelike pack" and "Roguelike Indoor pack" (CC0): 16×16 tiles with 1px spacing. */
+/** Kenney "Roguelike" base, indoor and characters packs (CC0): 16×16 tiles with 1px spacing. */
 export const SHEETS = {
   base: { key: 'base', url: 'tiles/roguelike-base.png' },
   indoor: { key: 'indoor', url: 'tiles/roguelike-indoor.png' },
+  characters: { key: 'characters', url: 'tiles/roguelike-characters.png' },
 } as const;
 
 export function preloadTilesets(scene: Phaser.Scene): void {
