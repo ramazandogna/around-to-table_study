@@ -4,15 +4,7 @@ import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
-const appearance = z.object({
-  skin: z.number().int(),
-  pants: z.number().int(),
-  shoes: z.number().int(),
-  top: z.number().int(),
-  hair: z.number().int(),
-  hairColor: z.number().int(),
-  beard: z.number().int(),
-});
+const appearance = z.object({ skin: z.number().int() });
 
 /** Longest text a client may send in one message, before area rules apply. */
 export const MAX_CHAT_LENGTH = 300;
