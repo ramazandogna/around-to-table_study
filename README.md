@@ -116,6 +116,27 @@ Estimate: one developer with AI assistance, 10–15 hours a week, **2–3 months
 TypeScript · **Phaser 3** (game) · **React** (menus) · **Cloudflare Workers + Durable Objects** (real-time rooms) · **Cloudflare D1** (database) · Tiled (maps) · Kenney CC0 assets.
 Everything runs on **free tiers**. Cloudflare was chosen over Vercel because the game needs persistent WebSocket connections, which serverless functions can't hold.
 
+## Development
+
+Requirements: Node 24 (see `.nvmrc`) and pnpm 10.
+
+```bash
+pnpm install
+pnpm build                       # build the client once
+pnpm --filter @att/server dev    # Worker + game at http://localhost:8787
+pnpm --filter @att/client dev    # or: Vite with hot reload at http://localhost:5173
+```
+
+Checks (all must pass before a commit): `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
+
+| Folder | What lives there |
+|---|---|
+| `apps/client` | Vite + React (UI) + Phaser 3 (world) |
+| `apps/server` | Cloudflare Worker: API, static assets, later Durable Objects |
+| `packages/shared` | Types, constants and rules shared by client and server |
+| `maps/` | Tiled map sources |
+| `docs/decisions.md` | Why things are the way they are |
+
 ## Follow / contribute
 
 - ⭐ Star the repo and turn on **Watch → Releases** to hear about new versions.
