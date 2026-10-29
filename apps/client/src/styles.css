@@ -1,0 +1,46 @@
+:root {
+  --color-bg: #2b2118;
+  --color-text: #e8d9b5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: system-ui, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.app {
+  position: relative;
+  height: 100dvh;
+}
+
+.game-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.game-canvas canvas {
+  image-rendering: pixelated;
+}
+
+.hud-title {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 16px;
+  font-family: monospace;
+  font-size: 14px;
+  pointer-events: none;
+}

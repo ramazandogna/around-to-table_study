@@ -1,0 +1,1 @@
+# Copy to apps/server/.dev.vars for local secrets. Never commit .dev.vars.
