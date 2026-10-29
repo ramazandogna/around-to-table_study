@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 /** Text is rendered this many times larger and scaled down, so it stays crisp at any zoom. */
-const TEXT_RESOLUTION = 4;
+export const TEXT_RESOLUTION = 4;
 
 /** A short-lived single-line bubble that floats above a character. */
 export class SpeechBubble extends Phaser.GameObjects.Text {

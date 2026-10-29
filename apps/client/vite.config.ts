@@ -14,6 +14,6 @@ export default defineConfig({
   },
   server: {
     // During development the Worker runs on wrangler's default port.
-    proxy: { '/api': 'http://localhost:8787' },
+    proxy: { '/api': { target: 'http://localhost:8787', ws: true } },
   },
 });
