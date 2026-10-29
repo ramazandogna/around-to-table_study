@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "deploy": "pnpm build && pnpm --filter @att/server deploy"
+    "deploy": "pnpm build && pnpm --filter @att/server run deploy"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
