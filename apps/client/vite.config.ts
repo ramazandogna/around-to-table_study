@@ -8,7 +8,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rolldownOptions: {
       output: {
-        advancedChunks: { groups: [{ name: 'phaser', test: /node_modules[\\/]phaser/ }] },
+        codeSplitting: { groups: [{ name: 'phaser', test: /node_modules[\\/]phaser/ }] },
       },
     },
   },
