@@ -2,6 +2,19 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-29: Multiplayer on plain Durable Objects
+- **Decision:** One `AreaRoom` Durable Object per area, using the WebSocket Hibernation API directly instead of `partyserver`. The client uses `partysocket`'s `ReconnectingWebSocket`.
+- **Why:** The server side is ~200 lines without the extra framework, and hibernation is the part that keeps us on the free plan. Per-connection state lives in the socket attachment so it survives hibernation.
+- **Movement:** clients send only a target tile. The server checks reachability with the shared A* and broadcasts the target; every client walks remote players there with the same pathfinding. A rejected move gets a `placed` reply that snaps the player back.
+- **Reconnects:** the server places a returning player at the door they came through; the client then walks to where it actually is.
+
+## 2026-10-29: Guest sessions are HMAC-signed tokens
+- **Decision:** `POST /api/guest` returns `payload.signature` (HMAC-SHA256 with `SESSION_SECRET`). The token is stored in localStorage and sent when opening an area socket. Guest tokens do not expire yet.
+- **Why:** No database is needed for Phase 2, and nobody can join as someone else. Expiry and revocation come with real accounts in Phase 5.
+
+## 2026-10-29: Characters from Kenney Roguelike Characters
+- **Decision:** Characters are composited from Kenney layers (body, pants, shoes, top, beard, hair). `Appearance` stores indices into `CHARACTER_PARTS`, so the server validates looks by range. The pack only has front-facing sprites, so walking is a small hop and left/right is a horizontal flip.
+
 ## 2026-10-29: Top-down pixel view with Kenney Roguelike tiles
 - **Decision:** Stay with a top-down 16×16 pixel view using Kenney's CC0 "Roguelike pack" (floors, walls, windows, doors, chairs, carpets) and "Roguelike Indoor pack" (tables, plants, shelves). Both sheets live in `apps/client/public/tiles/` so CI and deploys have them. The "Isometric Miniature Library" pack is not used: it is isometric and rendered, not pixel art.
 - **Layouts stay ASCII** in `packages/shared/src/world/areas.ts`; `drawArea.ts` maps each character to Kenney frames (wall rims are auto-tiled from neighbors). This keeps one source of truth for collision on client and server. Tiled maps can replace this when areas need hand-placed decoration.
