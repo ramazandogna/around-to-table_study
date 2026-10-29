@@ -2,9 +2,11 @@
 
 Non-obvious technical decisions, newest first.
 
-## 2026-10-29: Top-down pixel view, placeholder art drawn in code
-- **Decision:** Stay with a top-down pixel view. The Kenney "Isometric Miniature Library" pack is not used: it is isometric, rendered (not pixel art) and has no floors, walls or characters. Until a matching top-down tileset is chosen, areas are ASCII layouts in `packages/shared/src/world/areas.ts` drawn with flat colors.
-- **Why:** Matches the square characters, stays crisp on phones, and keeps pathfinding simple. The layouts live in `shared` so the server can validate movement against the same collision data in Phase 2.
+## 2026-10-29: Top-down pixel view with Kenney Roguelike tiles
+- **Decision:** Stay with a top-down 16×16 pixel view using Kenney's CC0 "Roguelike pack" (floors, walls, windows, doors, chairs, carpets) and "Roguelike Indoor pack" (tables, plants, shelves). Both sheets live in `apps/client/public/tiles/` so CI and deploys have them. The "Isometric Miniature Library" pack is not used: it is isometric and rendered, not pixel art.
+- **Layouts stay ASCII** in `packages/shared/src/world/areas.ts`; `drawArea.ts` maps each character to Kenney frames (wall rims are auto-tiled from neighbors). This keeps one source of truth for collision on client and server. Tiled maps can replace this when areas need hand-placed decoration.
+- **Bookcases:** Kenney has no full bookcase tile, so the indoor shelf tile is refilled with book spines in Kenney palette colors at runtime (`bookcase.ts`).
+- **The library table** is one long oval table (Kenney's oval table pieces are one row tall), with chairs on both sides.
 
 ## 2026-10-29: Grid movement with 4-directional A*
 - **Decision:** Characters move tile by tile. Tapping runs A* in `shared`; tapping a blocked tile walks next to it. Renovation zones and the elevator are blocked with an explanation bubble.
