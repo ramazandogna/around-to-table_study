@@ -1,0 +1,29 @@
+# Lessons
+
+What building the prototype taught us, as rules for the next phases. Newest first within each group.
+
+## Testing and verification
+- **Test like a player.** Tap what a player would tap (the glass of a door, a chair, a person), not a tile coordinate. A door you could only enter by tapping the floor behind it felt like an invisible wall, and tile-based tests missed it.
+- **Check every screen on a phone and a desktop size** before calling it done, with screenshots.
+- **Measure, don't guess.** The walk looked like sliding until its speed was measured from the clip. Fonts are checked for clear digits and Turkish letters before they are adopted (Pixelify Sans turned 2 and 5 into Z and S).
+- **Locale-aware text from day one.** Lowercasing "IŞIK" letter by letter gave "işık"; the whole message has to be handled at once.
+
+## 3D and art
+- **Learn a model's texture layout by rendering it.** Put a labeled grid (and then labeled bands) on the model and look at it from four sides; guessing from the shipped skins was wrong about the torso and arms.
+- **Painted details have limits.** Hair painted on the head cannot reach the shoulders, so long, bob and short hair look alike. Real hairstyles need hair meshes or a modular character.
+- **Never put two surfaces at the same height where they overlap.** Coplanar faces flicker as the camera moves (z-fighting). Offset them or stop them from overlapping.
+- **Things behind a wall still show above it** in an isometric view; height plus depth decides what is hidden.
+- **Get a reference image before art work.** The Stardew Valley screenshot turned into a panel style in one pass; vague wishes take many rounds.
+- **Make art decisions before polishing.** Furniture size, chair height and poses are tuned to the character, so a room is polished after its characters are chosen, not before.
+- **Keep systems apart from art.** Appearance, status and rules are data in `shared`; how they are drawn lives in one client module, so swapping models does not touch the rest.
+
+## Layout and design
+- **Lay rooms out by how people move.** Entrance and main destination on one straight line, service desks facing arrivals, side rooms off the main path, arriving and leaving never crossing.
+- **Make doors read as doors without labels:** frame, leaves, doormat and a sign, and let them open as people approach.
+- **Rooms should fit their content.** Big empty floors look unfinished; shrink the room before adding filler.
+
+## Process
+- **One cycle = one roadmap step + the top 3–5 issues**, then commit, deploy and try it on a phone.
+- **Fix what breaks the core loop immediately** (entering, walking, sitting, seeing others); everything else goes on the list and is polished in the phase that touches that room anyway.
+- **Feedback works best one topic per message**, with a screenshot, "expected vs. saw" and a priority (must / nice).
+- **Restart the dev server cleanly.** A leftover `workerd` process locks the local SQLite file; stop every `wrangler`/`workerd` process before starting again.

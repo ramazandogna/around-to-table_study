@@ -2,6 +2,17 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-30: Characters are painted from a look
+- **Decision:** a look is `{ skin, hair, hairColor, top, topColor, bottom, bottomColor }`, each an index into `LOOK_OPTIONS` in `shared` (validated by range in zod). `world/skin.ts` paints a 512 px texture on Kenney's UV layout in its flat style (face, ears, hair edge, sleeves, neckline, hems, jeans stitching, shoes) and caches it per look. The Kenney skin PNGs are gone.
+- **Why:** the shipped skins are zombies, bloodied survivors and a cyborg, or half-photographic; none fit a study app, and they cannot be mixed. Painting gives a real creator today with no new assets.
+- **Where it shows:** the creator (`ui/CharacterCreator.tsx`, Stardew-style arrows and swatches with a turning 3D preview) runs before entering, for players from before it existed, and in the game as the Wardrobe. A `look` message changes the look live; others get `looked`.
+- **Limit:** hair is painted on the head, so long styles cannot reach the shoulders. Real hairstyles need hair meshes or a modular character pack, which is the next character decision.
+
+## 2026-10-30: Area rules live in `shared/rules.ts`
+- **Decision:** `AREA_RULES` holds each area's chat length, cooldown, caps, links and the flags for effects, sounds, DMs and the chat log. `applyAreaRules` cleans a message, blocks links where they are not allowed and lowercases it where caps are not. The server applies it to every message; the chat bar mirrors it for early feedback.
+- **Turkish-aware lowercasing:** "İ" always becomes "i"; "I" becomes "ı" only when the text has Turkish-only letters, so English "I" still becomes "i". The chat bar keeps the typed text and only shows it lowercase (with `lang="tr"` for Turkish), so the whole message is lowercased at once and "IŞIK" becomes "ışık", not "işık".
+- **Cooldown:** the time of each person's last message is stored per area in Durable Object storage, so leaving and coming back does not reset the library's 75 seconds. Early messages get `rate_limited` with the time left, which the send button shows as a countdown.
+
 ## 2026-10-30: The hall is laid out by how people move
 - **Decision:** the hall has a street entrance (`O` tiles, drawn as a door, never walkable) at the bottom, in line with the library's glass doors; new arrivals start just inside it. The rug runs straight from one to the other. Reception stands front right, facing the people coming in, on the way to the elevator; the smoking room and sofas are on the left.
 - **Why:** reception should face the entrance and arriving and leaving should not cross (feedback from an interior designer). Before, people appeared in the middle of the room and the desk faced nothing in particular.

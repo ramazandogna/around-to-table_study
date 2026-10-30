@@ -3,7 +3,7 @@
 > **Don't study alone. Take a seat.**
 > A cozy, browser-based isometric library where people study "together" in silence, take breaks in a chatty smoking room, and slowly become friends.
 
-**Status:** 🟡 Idea / planning · No playable build yet · No code written
+**Status:** 🟢 Early prototype, playable in the browser: **[around-the-table.ramazandogna.workers.dev](https://around-the-table.ramazandogna.workers.dev/)**
 
 ---
 
@@ -135,6 +135,7 @@ Checks (all must pass before a commit): `pnpm format:check`, `pnpm lint`, `pnpm 
 | `apps/server` | Cloudflare Worker: API, static assets, later Durable Objects |
 | `packages/shared` | Types, constants and rules shared by client and server |
 | `docs/decisions.md` | Why things are the way they are |
+| `docs/lessons.md` | What building it taught us, as rules for what comes next |
 
 ## Follow / contribute
 
