@@ -1,8 +1,9 @@
 import {
+  AREA_RULES,
+  applyAreaRules,
   createAreaGrid,
   findPath,
   isValidAppearance,
-  normalizeChat,
   parseClientMessage,
   type Appearance,
   type AreaGrid,
@@ -39,9 +40,6 @@ type StoredStudy = Omit<StudyStatus, 'timer'> & {
 const NO_STUDY: StoredStudy = { activity: null, timer: null, dnd: false };
 const MOVES_PER_SECOND = 10;
 const STATUSES_PER_SECOND = 4;
-const SAY_COOLDOWN_MS = 1000;
-/** Area rules (limits per area) arrive in Phase 3; until then every area uses this. */
-const CHAT_MAX_LENGTH = 200;
 const CLOSE_REPLACED = 4000;
 
 export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-area' } as const;
@@ -81,7 +79,9 @@ export class AreaRoom extends DurableObject<Env> {
     const message = typeof raw === 'string' ? parseClientMessage(raw) : null;
     const me = this.load(ws);
     if (!message || !me) return this.send(ws, { t: 'error', code: 'bad_message' });
-    this.handle(ws, me, message, Date.now());
+    // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
+    const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
+    this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
   }
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
@@ -128,6 +128,15 @@ export class AreaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'moved', id: me.id, to: message.to }, ws);
         return;
       }
+      case 'look': {
+        if (!me.joined) return;
+        // Looks and statuses share one small budget; both change rarely.
+        const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
+        if (!statuses) return this.send(ws, { t: 'error', code: 'rate_limited' });
+        this.save(ws, { ...me, statuses, look: message.look });
+        this.broadcast({ t: 'looked', id: me.id, look: message.look }, ws);
+        return;
+      }
       case 'status': {
         if (!me.joined || !me.tile) return;
         const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
@@ -139,12 +148,17 @@ export class AreaRoom extends DurableObject<Env> {
       }
       case 'say': {
         if (!me.joined) return;
-        const wait = me.lastSayAt + SAY_COOLDOWN_MS - now;
+        const rules = AREA_RULES[me.area];
+        const wait = me.lastSayAt + rules.cooldownMs - now;
         if (wait > 0) return this.send(ws, { t: 'error', code: 'rate_limited', retryInMs: wait });
-        const text = normalizeChat(message.text, CHAT_MAX_LENGTH);
-        if (!text) return;
+        const result = applyAreaRules(message.text, rules);
+        if (!result.ok) {
+          if (result.reason === 'link') this.send(ws, { t: 'error', code: 'link_blocked' });
+          return;
+        }
         this.save(ws, { ...me, lastSayAt: now });
-        this.broadcast({ t: 'said', id: me.id, text });
+        void this.ctx.storage.put(saidKey(me.id), now);
+        this.broadcast({ t: 'said', id: me.id, text: result.text });
         return;
       }
     }
@@ -232,6 +246,8 @@ export class AreaRoom extends DurableObject<Env> {
     ws.serializeAttachment(connection);
   }
 }
+
+const saidKey = (id: string) => `said:${id}`;
 
 function snapshot(c: Connection, now: number): PlayerSnapshot {
   return {
