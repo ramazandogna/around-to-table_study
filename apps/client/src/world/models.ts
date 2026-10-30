@@ -46,8 +46,11 @@ export type ModelTemplate = { parts: ModelPart[]; size: Vector3 };
 
 export type Furniture = Record<FurnitureName, ModelTemplate>;
 
-/** Kenney's furniture grid is 10 units per tile. */
-const KENNEY_UNITS_PER_TILE = 10;
+/**
+ * A tile is about a meter, so people sit shoulder to shoulder. Kenney's own
+ * grid is twice that (10 units), which made rooms look empty and far apart.
+ */
+const KENNEY_UNITS_PER_TILE = 5;
 const MODEL_PATH = 'models/furniture/';
 
 /** Phong materials from the MTL files look plastic; matte standard materials suit the art. */

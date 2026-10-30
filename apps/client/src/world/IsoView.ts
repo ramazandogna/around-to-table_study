@@ -4,7 +4,7 @@ import {
   DirectionalLight,
   HemisphereLight,
   OrthographicCamera,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   Plane,
   Raycaster,
   Scene,
@@ -19,7 +19,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 const ISO_DIRECTION = new Vector3(1, 1.05, 1).normalize();
 const CAMERA_DISTANCE = 40;
 /** World units visible across the shorter side of the screen. */
-const VIEW_SHORT_SIDE = { phone: 5.5, desktop: 8 };
+const VIEW_SHORT_SIDE = { phone: 8, desktop: 11 };
 const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 3;
 
@@ -42,7 +42,7 @@ export class IsoView {
     this.renderer = new WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap;
     container.appendChild(this.renderer.domElement);
 
     const labels = this.labels.domElement;

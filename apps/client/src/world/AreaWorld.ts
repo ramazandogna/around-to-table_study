@@ -13,7 +13,7 @@ import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
 import { loadLook } from '../net/session';
 import { useGameStore } from '../state/store';
-import { Avatar } from './Avatar';
+import { Avatar, type SeatLookup } from './Avatar';
 import { buildArea, type BuiltArea } from './buildArea';
 import type { CharacterKit } from './characters';
 import type { IsoView } from './IsoView';
@@ -79,7 +79,7 @@ export class AreaWorld {
 
     const look = loadLook();
     const start = from ? this.grid.arrivalPoint(from) : this.grid.area.spawn;
-    this.player = new Avatar(this.assets.characters, look, start, session.name, true);
+    this.player = new Avatar(this.assets.characters, look, start, session.name, true, this.seats);
     this.view.add(this.player.root);
     this.view.follow(start.x + 0.5, start.y + 0.5, 1);
 
@@ -182,10 +182,19 @@ export class AreaWorld {
 
   private addOther(player: PlayerSnapshot): void {
     this.others.get(player.id)?.dispose();
-    const avatar = new Avatar(this.assets.characters, player.look, player.tile, player.name, false);
+    const avatar = new Avatar(
+      this.assets.characters,
+      player.look,
+      player.tile,
+      player.name,
+      false,
+      this.seats,
+    );
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
   }
+
+  private readonly seats: SeatLookup = (tile) => this.grid.seatFacing(tile);
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
     if (useGameStore.getState().typing || !(event.code in KEY_DIRECTIONS)) return;

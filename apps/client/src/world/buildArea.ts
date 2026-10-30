@@ -14,7 +14,7 @@ import {
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { t } from '../i18n/t';
 import { facing, instance, type Placement } from './instancing';
-import type { Furniture } from './models';
+import type { Furniture, ModelTemplate } from './models';
 
 /** Top of the floor tiles; furniture stands on this. */
 export const FLOOR_Y = 0.05;
@@ -34,6 +34,16 @@ const DOORS: ReadonlySet<string> = new Set([
   TILE.doorToLibrary,
   TILE.doorToSmoking,
 ]);
+
+/** Chairs are pushed this far from the tile center, so their front edge meets the table. */
+export const CHAIR_INSET = 0.2;
+/** Kenney's chair is tall next to its characters; a lower seat lets their feet reach the floor. */
+const CHAIR_SQUASH = 0.75;
+/** Top of the chair seat cushion above the floor (the model's seat is at 0.48). */
+export const SEAT_HEIGHT = 0.48 * CHAIR_SQUASH;
+/** Table top surface; seated forearms rest on it. */
+const TABLE_HEIGHT = 0.62;
+const TABLE_DEPTH = 1.2;
 
 const tileCenter = (x: number, y: number) => ({ x: x + 0.5, z: y + 0.5 });
 
@@ -68,7 +78,11 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
       if (inside || DOORS.has(at(x, y))) floor.push(tileCenter(x, y));
     }
   }
-  root.add(instance(furniture.floorFull, floor, { material: floorMaterial, castShadow: false }));
+  // The floor model covers two tiles; halving it keeps the 0.05 thickness that FLOOR_Y assumes.
+  const floorTiles = floor.map((p) => ({ ...p, scale: [0.5, 0.5, 0.5] as const }));
+  root.add(
+    instance(furniture.floorFull, floorTiles, { material: floorMaterial, castShadow: false }),
+  );
   const slab = new Mesh(
     new BoxGeometry(W - 2, 0.3, H - 2),
     new MeshStandardMaterial({ color: style.slab, roughness: 1 }),
@@ -110,12 +124,14 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
       const { x: cx, z: cz } = tileCenter(x, y);
       switch (c) {
         case TILE.seat: {
-          const [dx, dz] = tableDirection(at, x, y);
+          const toTable = grid.seatFacing({ x, y }) ?? { x: 0, y: 1 };
           seats.push({
-            x: cx + dx * 0.12,
-            z: cz + dz * 0.12,
+            x: cx + toTable.x * CHAIR_INSET,
+            z: cz + toTable.y * CHAIR_INSET,
             y: FLOOR_Y,
-            rotation: facing(dx, dz),
+            // The Kenney chair's backrest is on +z, so it faces -z like the bookcase.
+            rotation: facing(toTable.x, toTable.y) + Math.PI,
+            scale: [1, CHAIR_SQUASH, 1],
           });
           break;
         }
@@ -132,13 +148,23 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
           });
           break;
         case TILE.bench: {
-          // Sofas face the middle of the room; like bookcases, they open towards -z.
+          // A sofa covers two bench tiles; it faces the middle of the room and opens towards -z.
+          let runStart = x;
+          while (at(runStart - 1, y) === TILE.bench) runStart--;
+          if ((x - runStart) % 2 === 1) break;
+          const pair = at(x + 1, y) === TILE.bench;
           const dz = y < H / 2 ? 1 : -1;
-          sofas.push({ x: cx, z: cz, y: FLOOR_Y, rotation: facing(0, dz) + Math.PI });
+          sofas.push({
+            x: pair ? x + 1 : cx,
+            z: cz,
+            y: FLOOR_Y,
+            rotation: facing(0, dz) + Math.PI,
+            ...(pair ? {} : { scale: [0.5, 1, 1] as const }),
+          });
           break;
         }
         case TILE.ashtray:
-          sideTables.push({ x: cx, z: cz, y: FLOOR_Y, scale: [0.7, 1, 0.7] });
+          sideTables.push({ x: cx, z: cz, y: FLOOR_Y, scale: [0.45, 1, 0.45] });
           break;
         case TILE.bookcase: {
           const [dx, dz] = awayFromWall(x, y, W, H);
@@ -155,7 +181,9 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
             rotation,
             scale: [0.96 / furniture.bookcaseClosedWide.size.x, 1, 1],
           });
-          books.push(...fillShelves(bx, bz, dx, dz, rotation, x, y));
+          books.push(
+            ...fillShelves(furniture.bookcaseClosedWide.size.y, { bx, bz, dx, dz, rotation }, x, y),
+          );
           break;
         }
       }
@@ -218,9 +246,16 @@ function buildWalls(
     else plain.push(placement);
   }
   const plaster = { materialsByName: { _defaultMat: material } };
-  root.add(instance(furniture.wall, plain, plaster));
-  root.add(instance(furniture.wallWindow, windows, plaster));
-  root.add(instance(furniture.wallDoorway, doorways, plaster));
+  // Wall pieces are two tiles wide; each tile gets a half-width piece.
+  const perTile = (model: ModelTemplate, placements: Placement[]) =>
+    instance(
+      model,
+      placements.map((p) => ({ ...p, scale: [1 / model.size.x, 1, 1] as const })),
+      plaster,
+    );
+  root.add(perTile(furniture.wall, plain));
+  root.add(perTile(furniture.wallWindow, windows));
+  root.add(perTile(furniture.wallDoorway, doorways));
 
   // Doors in the (hidden) front walls get a free-standing frame so people can see them.
   const frames: Placement[] = [];
@@ -237,19 +272,6 @@ function buildWalls(
   root.add(instance(furniture.doorway, elevator));
 }
 
-/** Direction from a seat to the table it belongs to. */
-function tableDirection(
-  at: (x: number, y: number) => string,
-  x: number,
-  y: number,
-): [number, number] {
-  if (at(x, y + 1) === TILE.table) return [0, 1];
-  if (at(x, y - 1) === TILE.table) return [0, -1];
-  if (at(x + 1, y) === TILE.table) return [1, 0];
-  if (at(x - 1, y) === TILE.table) return [-1, 0];
-  return [0, 1];
-}
-
 function awayFromWall(x: number, y: number, W: number, H: number): [number, number] {
   if (y === 1) return [0, 1];
   if (x === 1) return [1, 0];
@@ -258,15 +280,15 @@ function awayFromWall(x: number, y: number, W: number, H: number): [number, numb
   return [0, 1];
 }
 
-/** Shelf heights in the Kenney bookcase, measured from the model. */
-const SHELF_HEIGHTS = [0.07, 0.31, 0.55];
+/** Shelf heights in the Kenney bookcase, as fractions of its height. */
+const SHELF_LEVELS = [0.089, 0.392, 0.696];
+const SHELF_SLOTS = [-0.3, 0, 0.3];
+
+type Shelf = { bx: number; bz: number; dx: number; dz: number; rotation: number };
 
 function fillShelves(
-  bx: number,
-  bz: number,
-  dx: number,
-  dz: number,
-  rotation: number,
+  height: number,
+  { bx, bz, dx, dz, rotation }: Shelf,
   tx: number,
   ty: number,
 ): Placement[] {
@@ -274,17 +296,18 @@ function fillShelves(
   const sideX = -dz;
   const sideZ = dx;
   const placements: Placement[] = [];
-  SHELF_HEIGHTS.forEach((height, shelf) => {
-    for (let slot = 0; slot < 4; slot++) {
-      if (noise(tx, ty, shelf * 4 + slot) < 0.18) continue;
-      const along = -0.33 + slot * 0.22 + (noise(tx, ty, slot + 9) - 0.5) * 0.04;
+  SHELF_LEVELS.forEach((level, shelf) => {
+    SHELF_SLOTS.forEach((slot, i) => {
+      if (noise(tx, ty, shelf * 4 + i) < 0.15) return;
+      const along = slot + (noise(tx, ty, i + 9) - 0.5) * 0.04;
       placements.push({
         x: bx + sideX * along,
         z: bz + sideZ * along,
-        y: FLOOR_Y + height,
+        y: FLOOR_Y + level * height,
         rotation: rotation + (noise(tx, ty, shelf) < 0.5 ? 0 : Math.PI),
+        scale: [1, 1.3, 1],
       });
-    }
+    });
   });
   return placements;
 }
@@ -303,13 +326,14 @@ function buildTables(grid: AreaGrid, furniture: Furniture, root: Group): MeshSta
       const length = match[0].length;
       const centerX = start + length / 2;
       const z = y + 0.5;
-      const height = 0.36;
+      const height = TABLE_HEIGHT - 0.05;
 
-      const top = stadium(length - 0.1, 0.92, 0.05);
+      // The round ends reach past the last side seats, so every chair faces a straight edge.
+      const top = stadium(length + 0.3, TABLE_DEPTH, 0.05);
       top.position.set(centerX, FLOOR_Y + height, z);
-      const cloth = stadium(length - 0.9, 0.36, 0.01);
+      const cloth = stadium(length - 0.5, 0.4, 0.01);
       cloth.material = runner;
-      cloth.position.set(centerX, FLOOR_Y + height + 0.05, z);
+      cloth.position.set(centerX, FLOOR_Y + TABLE_HEIGHT, z);
       top.material = wood;
       for (const mesh of [top, cloth]) {
         mesh.castShadow = true;
@@ -317,27 +341,27 @@ function buildTables(grid: AreaGrid, furniture: Furniture, root: Group): MeshSta
         root.add(mesh);
       }
 
-      for (let lx = start + 0.6; lx < start + length; lx += 3) {
-        for (const side of [-0.3, 0.3]) {
-          const leg = new Mesh(new CylinderGeometry(0.035, 0.035, height, 8), wood);
-          leg.position.set(lx, FLOOR_Y + height / 2, z + side);
-          leg.castShadow = true;
-          root.add(leg);
-        }
+      // Pedestals run down the middle so seated knees fit under the top.
+      for (let lx = start + 1; lx < start + length; lx += 3) {
+        const leg = new Mesh(new CylinderGeometry(0.07, 0.11, height, 10), wood);
+        leg.position.set(lx, FLOOR_Y + height / 2, z);
+        leg.castShadow = true;
+        root.add(leg);
       }
 
-      const surface = FLOOR_Y + height + 0.05;
+      const surface = FLOOR_Y + TABLE_HEIGHT;
       for (let i = 0; i < length; i++) {
         const x = start + i + 0.5;
-        if (i % 6 === 2) lamps.push({ x, z, y: surface });
+        if (i % 4 === 2) lamps.push({ x, z, y: surface, scale: [0.7, 0.7, 0.7] });
         // Laptops and books in front of some seats, facing whoever sits there.
         for (const side of [-1, 1]) {
           const seat = grid.tileAt({ x: start + i, y: y + side });
           if (seat !== TILE.seat) continue;
           const roll = noise(start + i, y, side);
-          const spot = { x, z: z + side * 0.26, y: surface };
-          if (roll < 0.35) laptops.push({ ...spot, rotation: facing(0, -side) });
-          else if (roll < 0.6) books.push({ ...spot, rotation: roll * 10 });
+          const spot = { x, z: z + side * 0.32, y: surface };
+          if (roll < 0.35) {
+            laptops.push({ ...spot, rotation: facing(0, -side), scale: [0.75, 0.75, 0.75] });
+          } else if (roll < 0.6) books.push({ ...spot, rotation: roll * 10 });
         }
       }
     }
@@ -373,9 +397,15 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
   if (middle) {
     const top = FLOOR_Y + furniture.desk.size.y;
     root.add(
-      instance(furniture.laptop, [{ x: middle.x, z: middle.z, y: top, rotation: facing(0, -1) }]),
+      instance(furniture.laptop, [
+        { x: middle.x, z: middle.z, y: top, rotation: facing(0, -1), scale: [0.75, 0.75, 0.75] },
+      ]),
     );
-    root.add(instance(furniture.lampRoundTable, [{ x: middle.x - 1.5, z: middle.z, y: top }]));
+    root.add(
+      instance(furniture.lampRoundTable, [
+        { x: middle.x - 1.5, z: middle.z, y: top, scale: [0.7, 0.7, 0.7] },
+      ]),
+    );
   }
   // Floor lamps next to plants give rooms some warm vertical accents.
   const lamps: Placement[] = [];
@@ -427,22 +457,23 @@ function buildRenovation(
     opacity: 0.45,
     depthWrite: false,
   });
-  const volume = new Mesh(new BoxGeometry(zone.w, 1.5, zone.h), shade);
-  volume.position.set(zone.x + zone.w / 2, 0.75, zone.y + zone.h / 2);
+  // Tall enough to dim the bookcases, low enough not to read as a wall.
+  const volume = new Mesh(new BoxGeometry(zone.w, 1.7, zone.h), shade);
+  volume.position.set(zone.x + zone.w / 2, 0.85, zone.y + zone.h / 2);
   volume.renderOrder = 1;
   root.add(volume);
 
   const tapeMaterial = new MeshStandardMaterial({ map: TAPE_TEXTURE.clone(), roughness: 0.6 });
   tapeMaterial.map?.repeat.set(zone.h * 2, 1);
-  const tape = new Mesh(new BoxGeometry(0.02, 0.07, zone.h), tapeMaterial);
-  tape.position.set(zone.x, FLOOR_Y + 0.45, zone.y + zone.h / 2);
+  const tape = new Mesh(new BoxGeometry(0.02, 0.1, zone.h), tapeMaterial);
+  tape.position.set(zone.x, FLOOR_Y + 0.9, zone.y + zone.h / 2);
   tape.castShadow = true;
   root.add(tape);
 
   const post = new MeshStandardMaterial({ color: 0xf2c230, roughness: 0.6 });
   for (let z = zone.y; z <= zone.y + zone.h; z += 2) {
-    const pole = new Mesh(new CylinderGeometry(0.03, 0.05, 0.5, 8), post);
-    pole.position.set(zone.x, FLOOR_Y + 0.25, z);
+    const pole = new Mesh(new CylinderGeometry(0.04, 0.07, 0.95, 8), post);
+    pole.position.set(zone.x, FLOOR_Y + 0.475, z);
     pole.castShadow = true;
     root.add(pole);
   }
@@ -462,7 +493,7 @@ function buildRenovation(
       t('sign.renovation'),
       'world-sign world-sign--warning',
       zone.x + 1.2,
-      1.1,
+      2.1,
       zone.y + zone.h / 2,
     ),
   );
@@ -483,7 +514,7 @@ function addDoorSigns(grid: AreaGrid, root: Group): void {
           label,
           'world-sign',
           x + 0.5 + (x === 0 ? 0.6 : 0),
-          1.55,
+          2.45,
           y + 0.5 + (y === 0 ? 0.6 : 0),
         ),
       );
