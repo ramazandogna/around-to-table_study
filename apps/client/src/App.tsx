@@ -1,4 +1,5 @@
 import { APP_NAME } from '@att/shared';
+import { useEffect } from 'react';
 
 import { t } from './i18n/t';
 import { useGameStore } from './state/store';
@@ -11,7 +12,9 @@ import { CharacterCreator } from './ui/CharacterCreator';
 import { Notice } from './ui/Notice';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
+import { startSocial } from './net/social';
 import { EmoteMenu } from './ui/EmoteMenu';
+import { FriendsLink, FriendsPanel } from './ui/Friends';
 import { StartOver } from './ui/StartOver';
 import { StatusDialog } from './ui/StatusDialog';
 import { TimerHud } from './ui/TimerHud';
@@ -24,6 +27,9 @@ export function App() {
   const connected = useGameStore((s) => s.connected);
   const playersHere = useGameStore((s) => s.playersHere);
   const look = useGameStore((s) => s.look);
+
+  // Friends and presence follow the player across rooms, so they live outside the world.
+  useEffect(() => (session && look ? startSocial(session) : undefined), [session, look]);
 
   // Everyone makes a character first; players from before the creator only pick a look.
   if (!session || !look) {
@@ -44,12 +50,14 @@ export function App() {
         </span>
         <div className="hud-links">
           <StatusDialog />
+          <FriendsLink />
           <Wardrobe />
           <StartOver />
         </div>
       </header>
       <TimerHud />
       <aside className="hud-side">
+        <FriendsPanel />
         <NoticeBoard />
         <PlayerCard />
       </aside>

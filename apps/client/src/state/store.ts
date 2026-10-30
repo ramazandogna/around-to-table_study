@@ -3,11 +3,13 @@ import {
   type Activity,
   type Appearance,
   type AreaId,
+  type Friend,
   type StatusLines,
   type StudyStatus,
 } from '@att/shared';
 import { create } from 'zustand';
 import type { AreaConnection } from '../net/AreaConnection';
+import type { SocialConnection } from '../net/SocialConnection';
 import {
   loadLines,
   loadLook,
@@ -26,7 +28,11 @@ export type Notice =
   | 'poked'
   | 'dnd'
   | 'unavailable'
-  | 'not_allowed';
+  | 'not_allowed'
+  | 'friend_request'
+  | 'friend_accepted'
+  | 'unknown_user'
+  | 'too_many';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -68,6 +74,10 @@ type GameState = {
   lines: StatusLines;
   area: AreaId;
   connection: AreaConnection | null;
+  social: SocialConnection | null;
+  /** Friends, requests both ways, and where online friends are. */
+  friends: Friend[];
+  friendsOpen: boolean;
   connected: boolean;
   playersHere: number;
   /** True while the chat input has focus, so the keyboard does not walk the character. */
@@ -102,6 +112,9 @@ type GameState = {
   setLook: (look: Appearance) => void;
   setArea: (area: AreaId) => void;
   setConnection: (connection: AreaConnection | null) => void;
+  setSocial: (social: SocialConnection | null) => void;
+  setFriends: (friends: Friend[]) => void;
+  setFriendsOpen: (open: boolean) => void;
   setConnected: (connected: boolean) => void;
   setPlayersHere: (count: number) => void;
   setTyping: (typing: boolean) => void;
@@ -133,6 +146,9 @@ export const useGameStore = create<GameState>((set) => ({
   lines: loadLines(),
   area: 'hall',
   connection: null,
+  social: null,
+  friends: [],
+  friendsOpen: false,
   connected: false,
   playersHere: 1,
   typing: false,
@@ -161,6 +177,9 @@ export const useGameStore = create<GameState>((set) => ({
   // Each room has its own chat and people, so nothing carries over.
   setArea: (area) => set({ area, chatLog: [], unread: 0, selected: null, boardOpen: false }),
   setConnection: (connection) => set({ connection }),
+  setSocial: (social) => set({ social }),
+  setFriends: (friends) => set({ friends }),
+  setFriendsOpen: (friendsOpen) => set({ friendsOpen }),
   setConnected: (connected) => set({ connected }),
   setPlayersHere: (playersHere) => set({ playersHere }),
   setTyping: (typing) => set({ typing }),

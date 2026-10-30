@@ -86,6 +86,7 @@ export class Avatar {
   private linesOpenTimer = 0;
   private linesPinned = false;
   private crowded = false;
+  private friend = false;
   private lines: StatusLines = EMPTY_LINES;
   private bubbleShift = 0;
   private readonly label: CSS2DObject;
@@ -228,6 +229,14 @@ export class Avatar {
     this.updateLinesFold();
   }
 
+  /** Friends get a ⭐ on their name tag and keep their lines open in a crowd, like your own. */
+  setFriend(friend: boolean): void {
+    if (friend === this.friend) return;
+    this.friend = friend;
+    this.label.element.classList.toggle('avatar-label--friend', friend);
+    this.updateLinesFold();
+  }
+
   private pinLines(): void {
     window.clearTimeout(this.linesOpenTimer);
     this.linesPinned = true;
@@ -239,7 +248,7 @@ export class Avatar {
   }
 
   private updateLinesFold(): void {
-    const folded = this.crowded && !this.isSelf && !this.linesPinned;
+    const folded = this.crowded && !this.isSelf && !this.friend && !this.linesPinned;
     this.linesBox.classList.toggle('avatar-lines--folded', folded);
   }
 

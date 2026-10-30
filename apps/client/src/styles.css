@@ -134,6 +134,14 @@ button {
   display: block;
 }
 
+.avatar-label--friend .avatar-name {
+  background: rgb(63 107 74 / 0.9);
+}
+
+.avatar-label--friend .avatar-name::before {
+  content: '⭐ ';
+}
+
 .avatar-label--self .avatar-name {
   background: rgb(201 103 47 / 0.9);
 }
@@ -1231,4 +1239,71 @@ button:disabled {
 
 .status-form .option-label {
   width: auto;
+}
+
+/* ---------- Friends ---------- */
+
+.hud-badge {
+  display: inline-block;
+  margin-left: 4px;
+  text-decoration: none;
+}
+
+.friend-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.friend-name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.friend-where {
+  font-size: 12px;
+  color: var(--panel-ink-soft);
+}
+
+.presence {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--panel-edge-mid);
+  border-radius: 50%;
+  background: var(--panel-well);
+}
+
+.presence--online {
+  border-color: #2f6b3a;
+  background: #5fbf6a;
+}
+
+.mini-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mini-button--ok {
+  border-color: var(--panel-edge);
+  color: var(--panel-ok);
 }

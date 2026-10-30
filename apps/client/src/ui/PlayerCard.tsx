@@ -5,6 +5,13 @@ import { useGameStore, type Selected } from '../state/store';
 import { DOING_ICON, MOOD_ICON } from '../state/study';
 import { Choice, Panel } from './Panel';
 
+const FRIEND_LABEL = {
+  none: 'card.friend',
+  incoming: 'card.friend.accept',
+  outgoing: 'card.friend.sent',
+  friend: 'card.friend.done',
+} as const;
+
 /** What you can do with someone after tapping them: poke, whisper and, later, friends and groups. */
 export function PlayerCard() {
   const selected = useGameStore((s) => s.selected);
@@ -15,6 +22,8 @@ export function PlayerCard() {
 function Card({ id, name, lines }: Selected) {
   const area = useGameStore((s) => s.area);
   const connection = useGameStore((s) => s.connection);
+  const social = useGameStore((s) => s.social);
+  const friendship = useGameStore((s) => s.friends.find((f) => f.id === id)?.state ?? null);
   const cooldownUntil = useGameStore((s) => s.cooldownUntil[s.area] ?? 0);
   const store = useGameStore.getState();
   const rules = AREA_RULES[area];
@@ -95,11 +104,14 @@ function Card({ id, name, lines }: Selected) {
             onSelect={() => setWhispering(true)}
           />
           <Choice
-            icon="🤝"
-            label={t('card.friend')}
-            hint={t('card.soon')}
-            disabled
-            onSelect={close}
+            icon={friendship === 'friend' ? '⭐' : '🤝'}
+            label={t(FRIEND_LABEL[friendship ?? 'none'])}
+            hint={t(`${FRIEND_LABEL[friendship ?? 'none']}.hint`)}
+            disabled={friendship === 'friend' || friendship === 'outgoing'}
+            onSelect={() => {
+              social?.befriend(id);
+              close();
+            }}
           />
           <Choice
             icon="👥"

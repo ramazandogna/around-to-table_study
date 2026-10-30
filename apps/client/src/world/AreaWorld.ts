@@ -94,6 +94,7 @@ export class AreaWorld {
         this.player?.setLook(state.look);
         this.connection?.changeLook(state.look);
       }
+      if (state.friends !== before.friends) this.markFriends();
       if (state.lines !== before.lines) {
         this.player?.setLines(state.lines);
         this.connection?.setLines(state.lines);
@@ -329,6 +330,7 @@ export class AreaWorld {
     );
     avatar.setStatus(player.status);
     avatar.setLines(player.lines);
+    avatar.setFriend(this.isFriend(player.id));
     avatar.onTap = () => this.select(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
@@ -364,6 +366,14 @@ export class AreaWorld {
   private readonly onPointerLeave = () => {
     this.pointer = null;
   };
+
+  private isFriend(id: string): boolean {
+    return useGameStore.getState().friends.some((f) => f.id === id && f.state === 'friend');
+  }
+
+  private markFriends(): void {
+    for (const [id, other] of this.others) other.setFriend(this.isFriend(id));
+  }
 
   private personAt(tile: Point): string | null {
     for (const [id, other] of this.others) if (sameTile(other.tile, tile)) return id;
