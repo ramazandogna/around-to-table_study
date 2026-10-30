@@ -65,6 +65,25 @@ describe('renovation zone', () => {
   });
 });
 
+describe('seatFacing', () => {
+  const grid = createAreaGrid('library');
+
+  it('points every library seat at the table', () => {
+    AREAS.library.layout.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        if (c !== 'S') return;
+        const toTable = grid.seatFacing({ x, y });
+        expect(toTable).not.toBeNull();
+        if (toTable) expect(grid.tileAt({ x: x + toTable.x, y: y + toTable.y })).toBe('T');
+      }),
+    );
+  });
+
+  it('ignores tiles that are not seats', () => {
+    expect(grid.seatFacing(AREAS.library.spawn)).toBeNull();
+  });
+});
+
 describe('findPath', () => {
   const grid = createAreaGrid('hall');
 
@@ -80,6 +99,14 @@ describe('findPath', () => {
     const path = findPath(grid, { x: 6, y: 2 }, { x: 6, y: 4 });
     expect(path?.length).toBeGreaterThan(2);
     expect(path?.every((p) => grid.isWalkable(p))).toBe(true);
+  });
+
+  it('walks around chairs on the way to a seat', () => {
+    const library = createAreaGrid('library');
+    const goal = { x: 8, y: 7 };
+    const path = findPath(library, { x: 8, y: 10 }, goal);
+    expect(path?.at(-1)).toEqual(goal);
+    expect(path?.slice(0, -1).some((p) => library.tileAt(p) === 'S')).toBe(false);
   });
 
   it('reports the elevator as blocked', () => {

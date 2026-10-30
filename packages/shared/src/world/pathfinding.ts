@@ -1,11 +1,15 @@
 import type { AreaGrid, Point } from './grid';
+import { TILE } from './tiles';
+
+/** Walking through a chair is allowed but avoided, unless the chair is where you're going. */
+const SEAT_STEP_COST = 5;
 
 const key = (p: Point) => `${p.x},${p.y}`;
 const manhattan = (a: Point, b: Point) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
 /**
  * 4-directional A*. Returns the steps from `start` (exclusive) to `goal`
- * (inclusive), or null when the goal cannot be reached.
+ * (inclusive), or null when the goal cannot be reached. Paths go around seats.
  */
 export function findPath(grid: AreaGrid, start: Point, goal: Point): Point[] | null {
   if (!grid.isWalkable(goal)) return null;
@@ -39,7 +43,9 @@ export function findPath(grid: AreaGrid, start: Point, goal: Point): Point[] | n
     open.delete(currentKey);
     for (const next of grid.neighbors(current)) {
       const nextKey = key(next);
-      const tentative = (g.get(currentKey) ?? Infinity) + 1;
+      const isGoal = next.x === goal.x && next.y === goal.y;
+      const cost = !isGoal && grid.tileAt(next) === TILE.seat ? SEAT_STEP_COST : 1;
+      const tentative = (g.get(currentKey) ?? Infinity) + cost;
       if (tentative < (g.get(nextKey) ?? Infinity)) {
         cameFrom.set(nextKey, current);
         g.set(nextKey, tentative);

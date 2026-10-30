@@ -50,6 +50,14 @@ export class AreaGrid {
     return this.blockReason(p) === null;
   }
 
+  /** For a seat tile, the direction towards the table it belongs to. */
+  seatFacing(p: Point): Point | null {
+    if (this.tileAt(p) !== TILE.seat) return null;
+    return (
+      DIRECTIONS.find((d) => this.tileAt({ x: p.x + d.x, y: p.y + d.y }) === TILE.table) ?? null
+    );
+  }
+
   doorTarget(p: Point): AreaId | null {
     return this.area.doors[this.tileAt(p)] ?? null;
   }
