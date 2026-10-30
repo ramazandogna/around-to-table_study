@@ -2,6 +2,14 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-31: Social layer: room chat, player card, notice boards
+- **Room chat:** every room except the library has a chat panel (`AreaRules.chatLog`). It is per room and starts empty on entering; there is no global chat across rooms, so a room stays a place. "Do not disturb" hides other people's lines too.
+- **Player card:** tapping a person or their name opens a card. Poke (one per 10 s, only the target sees it) and whisper (same room only, not in the library, shares the room's chat cooldown) work now. Friends and groups are shown as "coming soon" because they need accounts (Phase 5).
+- **Do not disturb is enforced on the server:** pokes and whispers to someone with 🔕 are refused with `dnd`.
+- **Timers belong to the library.** Standing up with a running timer asks: short break (keeps it), finish (stops it) or stay. Leaving the library asks too, and leaving ends the timer; staying steps back inside.
+- **Notice boards** are a layout tile (`N`), so they block walking like furniture. One stands beside the way in, in the hall and in the library; it opens when you stop next to it. Events are a list in `apps/client/src/content/announcements.ts` until there is an admin screen.
+- **Hover:** with a mouse, the tile under the pointer lights up when a tap would act on it (yellow for people, doors, seats and boards).
+
 ## 2026-10-30: Characters are painted from a look
 - **Decision:** a look is `{ skin, hair, hairColor, top, topColor, bottom, bottomColor }`, each an index into `LOOK_OPTIONS` in `shared` (validated by range in zod). `world/skin.ts` paints a 512 px texture on Kenney's UV layout in its flat style (face, ears, hair edge, sleeves, neckline, hems, jeans stitching, shoes) and caches it per look. The Kenney skin PNGs are gone.
 - **Why:** the shipped skins are zombies, bloodied survivors and a cyborg, or half-photographic; none fit a study app, and they cannot be mixed. Painting gives a real creator today with no new assets.

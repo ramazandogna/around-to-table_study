@@ -6,6 +6,7 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Test like a player.** Tap what a player would tap (the glass of a door, a chair, a person), not a tile coordinate. A door you could only enter by tapping the floor behind it felt like an invisible wall, and tile-based tests missed it.
 - **Check every screen on a phone and a desktop size** before calling it done, with screenshots.
 - **Measure, don't guess.** The walk looked like sliding until its speed was measured from the clip. Fonts are checked for clear digits and Turkish letters before they are adopted (Pixelify Sans turned 2 and 5 into Z and S).
+- **Check HUD panels against the world labels.** Three's label renderer gives every label its own z-index, so names and signs drew over panels on phones until the label layer got a stacking context of its own.
 - **Locale-aware text from day one.** Lowercasing "IŞIK" letter by letter gave "işık"; the whole message has to be handled at once.
 
 ## 3D and art
@@ -19,6 +20,8 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 
 ## Layout and design
 - **Lay rooms out by how people move.** Entrance and main destination on one straight line, service desks facing arrivals, side rooms off the main path, arriving and leaving never crossing.
+- **Put boards and signs where nothing frames them.** The first notice board stood behind the entrance's door frame and was hard to see; move it until a screenshot shows it plainly.
+- **Ask before throwing away someone's progress.** Standing up or leaving with a timer running asks first, and "stay" is always one of the answers.
 - **Make doors read as doors without labels:** frame, leaves, doormat and a sign, and let them open as people approach.
 - **Rooms should fit their content.** Big empty floors look unfinished; shrink the room before adding filler.
 
