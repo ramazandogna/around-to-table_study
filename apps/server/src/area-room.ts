@@ -30,6 +30,7 @@ type Connection = {
   lastSayAt: number;
   study: StoredStudy;
   statuses: RateWindow;
+  lastPokeAt: number;
 };
 
 /** Timers are kept as an end time on the server's clock and sent out as time left. */
@@ -41,6 +42,8 @@ const NO_STUDY: StoredStudy = { activity: null, timer: null, dnd: false };
 const MOVES_PER_SECOND = 10;
 const STATUSES_PER_SECOND = 4;
 const CLOSE_REPLACED = 4000;
+/** One nudge per person every few seconds is plenty. */
+const POKE_COOLDOWN_MS = 10_000;
 
 export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-area' } as const;
 
@@ -71,6 +74,7 @@ export class AreaRoom extends DurableObject<Env> {
       lastSayAt: 0,
       study: NO_STUDY,
       statuses: { start: 0, count: 0 },
+      lastPokeAt: 0,
     });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -161,7 +165,59 @@ export class AreaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'said', id: me.id, text: result.text });
         return;
       }
+      case 'poke': {
+        if (!me.joined) return;
+        // No retry time: that one belongs to the chat cooldown on the client.
+        if (now - me.lastPokeAt < POKE_COOLDOWN_MS)
+          return this.send(ws, { t: 'error', code: 'rate_limited' });
+        const target = this.reach(ws, me, message.to);
+        if (!target) return;
+        this.save(ws, { ...me, lastPokeAt: now });
+        this.send(target, { t: 'poked', from: me.id });
+        return;
+      }
+      case 'whisper': {
+        if (!me.joined) return;
+        const rules = AREA_RULES[me.area];
+        if (!rules.dmAllowed) return this.send(ws, { t: 'error', code: 'not_allowed' });
+        // Whispers share the area's chat cooldown, so they are no way around it.
+        const wait = me.lastSayAt + rules.cooldownMs - now;
+        if (wait > 0) return this.send(ws, { t: 'error', code: 'rate_limited', retryInMs: wait });
+        const result = applyAreaRules(message.text, rules);
+        if (!result.ok) {
+          if (result.reason === 'link') this.send(ws, { t: 'error', code: 'link_blocked' });
+          return;
+        }
+        const target = this.reach(ws, me, message.to);
+        if (!target) return;
+        this.save(ws, { ...me, lastSayAt: now });
+        const whisper: ServerMessage = {
+          t: 'whispered',
+          from: me.id,
+          to: message.to,
+          text: result.text,
+        };
+        this.send(target, whisper);
+        this.send(ws, whisper);
+        return;
+      }
     }
+  }
+
+  /** The socket of someone else in this area who may be disturbed, or null after telling the sender why not. */
+  private reach(ws: WebSocket, me: Connection, id: string): WebSocket | null {
+    const target =
+      id === me.id ? undefined : this.ctx.getWebSockets(id).find((s) => this.load(s)?.joined);
+    const them = target && this.load(target);
+    if (!target || !them) {
+      this.send(ws, { t: 'error', code: 'unavailable' });
+      return null;
+    }
+    if (them.study.dnd) {
+      this.send(ws, { t: 'error', code: 'dnd' });
+      return null;
+    }
+    return target;
   }
 
   /** A second tab or a reconnect takes over; the old socket is told why and closed. */
@@ -238,7 +294,12 @@ export class AreaRoom extends DurableObject<Env> {
     // Sockets saved by an older deploy lack the newer fields.
     const stored = ws.deserializeAttachment() as Partial<Connection> | null;
     return stored
-      ? ({ study: NO_STUDY, statuses: { start: 0, count: 0 }, ...stored } as Connection)
+      ? ({
+          study: NO_STUDY,
+          statuses: { start: 0, count: 0 },
+          lastPokeAt: 0,
+          ...stored,
+        } as Connection)
       : null;
   }
 
