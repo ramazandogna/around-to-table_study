@@ -1,6 +1,8 @@
 import {
   AREA_RULES,
   applyAreaRules,
+  cleanStatusLines,
+  EMPTY_LINES,
   createAreaGrid,
   findPath,
   isValidAppearance,
@@ -12,6 +14,7 @@ import {
   type PlayerSnapshot,
   type Point,
   type ServerMessage,
+  type StatusLines,
   type StudyStatus,
 } from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -31,6 +34,8 @@ type Connection = {
   study: StoredStudy;
   statuses: RateWindow;
   lastPokeAt: number;
+  lines: StatusLines;
+  lastEmoteAt: number;
 };
 
 /** Timers are kept as an end time on the server's clock and sent out as time left. */
@@ -44,6 +49,7 @@ const STATUSES_PER_SECOND = 4;
 const CLOSE_REPLACED = 4000;
 /** One nudge per person every few seconds is plenty. */
 const POKE_COOLDOWN_MS = 10_000;
+const EMOTE_COOLDOWN_MS = 1_500;
 
 export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-area' } as const;
 
@@ -75,6 +81,8 @@ export class AreaRoom extends DurableObject<Env> {
       study: NO_STUDY,
       statuses: { start: 0, count: 0 },
       lastPokeAt: 0,
+      lines: EMPTY_LINES,
+      lastEmoteAt: 0,
     });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -105,7 +113,9 @@ export class AreaRoom extends DurableObject<Env> {
         const grid = this.grid(me.area);
         const tile = message.from ? grid.arrivalPoint(message.from) : { ...grid.area.spawn };
         const study = message.status ? this.storeStudy(grid, tile, message.status, now) : NO_STUDY;
-        const joined: Connection = { ...me, joined: true, look: message.look, tile, study };
+        // Lines with a link are dropped rather than refusing the whole hello.
+        const lines = (message.lines && cleanStatusLines(message.lines)) ?? EMPTY_LINES;
+        const joined: Connection = { ...me, joined: true, look: message.look, tile, study, lines };
         this.save(ws, joined);
         this.send(ws, {
           t: 'welcome',
@@ -163,6 +173,22 @@ export class AreaRoom extends DurableObject<Env> {
         this.save(ws, { ...me, lastSayAt: now });
         void this.ctx.storage.put(saidKey(me.id), now);
         this.broadcast({ t: 'said', id: me.id, text: result.text });
+        return;
+      }
+      case 'lines': {
+        if (!me.joined) return;
+        const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
+        if (!statuses) return this.send(ws, { t: 'error', code: 'rate_limited' });
+        const lines = cleanStatusLines(message.lines);
+        if (!lines) return this.send(ws, { t: 'error', code: 'link_blocked' });
+        this.save(ws, { ...me, statuses, lines });
+        this.broadcast({ t: 'lined', id: me.id, lines });
+        return;
+      }
+      case 'emote': {
+        if (!me.joined || now - me.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
+        this.save(ws, { ...me, lastEmoteAt: now });
+        this.broadcast({ t: 'emoted', id: me.id, emote: message.emote });
         return;
       }
       case 'poke': {
@@ -298,6 +324,8 @@ export class AreaRoom extends DurableObject<Env> {
           study: NO_STUDY,
           statuses: { start: 0, count: 0 },
           lastPokeAt: 0,
+          lines: EMPTY_LINES,
+          lastEmoteAt: 0,
           ...stored,
         } as Connection)
       : null;
@@ -317,6 +345,7 @@ function snapshot(c: Connection, now: number): PlayerSnapshot {
     look: c.look as Appearance,
     tile: c.tile ?? { x: 0, y: 0 },
     status: publicStudy(c.study, now),
+    lines: c.lines,
   };
 }
 
