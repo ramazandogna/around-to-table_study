@@ -96,7 +96,7 @@ describe('findPath', () => {
   });
 
   it('walks around the reception desk', () => {
-    const path = findPath(grid, { x: 6, y: 2 }, { x: 6, y: 4 });
+    const path = findPath(grid, { x: 11, y: 8 }, { x: 13, y: 8 });
     expect(path?.length).toBeGreaterThan(2);
     expect(path?.every((p) => grid.isWalkable(p))).toBe(true);
   });
@@ -117,7 +117,7 @@ describe('findPath', () => {
 describe('resolveWalkTarget', () => {
   it('picks a walkable neighbor next to a blocked tile', () => {
     const grid = createAreaGrid('hall');
-    const target = resolveWalkTarget(grid, { x: 6, y: 6 }, { x: 6, y: 3 });
-    expect(target).toEqual({ x: 6, y: 4 });
+    const target = resolveWalkTarget(grid, { x: 8, y: 8 }, { x: 12, y: 8 });
+    expect(target).toEqual({ x: 11, y: 8 });
   });
 });

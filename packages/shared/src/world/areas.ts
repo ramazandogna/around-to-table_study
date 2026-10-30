@@ -24,22 +24,24 @@ export type AreaDefinition = {
 export const AREAS: Record<AreaId, AreaDefinition> = {
   hall: {
     id: 'hall',
-    // A compact lobby: the wide glass doors to the library face you as you arrive.
+    // People come in from the street (bottom) and walk the rug straight to the library's
+    // glass doors, so arriving and leaving never cross. Reception sits front right, facing
+    // the people coming in, on the way to the elevator; the smoking room and sofas are left.
     layout: [
       '#######LLLL#######',
       '#P..............P#',
       '#................#',
-      '#.CCCCC..........#',
+      '#................#',
       '#................#',
       'K................E',
       '#................E',
-      '#................#',
-      '#..........bbbb..#',
-      '#P..............P#',
-      '##################',
+      '#...........C....#',
+      '#..bbbb.....C....#',
+      '#P..........C...P#',
+      '#######OOOO#######',
     ],
     doors: { [TILE.doorToLibrary]: 'library', [TILE.doorToSmoking]: 'smoking' },
-    spawn: { x: 8, y: 6 },
+    spawn: { x: 8, y: 8 },
     renovation: [],
     rugs: [{ x: 7, y: 1, w: 4, h: 9 }],
   },
