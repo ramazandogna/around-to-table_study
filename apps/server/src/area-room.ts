@@ -11,6 +11,7 @@ import {
   type PlayerSnapshot,
   type Point,
   type ServerMessage,
+  type StudyStatus,
 } from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -26,9 +27,18 @@ type Connection = {
   tile?: Point;
   moves: RateWindow;
   lastSayAt: number;
+  study: StoredStudy;
+  statuses: RateWindow;
 };
 
+/** Timers are kept as an end time on the server's clock and sent out as time left. */
+type StoredStudy = Omit<StudyStatus, 'timer'> & {
+  timer: { endsAt: number; totalMs: number } | null;
+};
+
+const NO_STUDY: StoredStudy = { activity: null, timer: null, dnd: false };
 const MOVES_PER_SECOND = 10;
+const STATUSES_PER_SECOND = 4;
 const SAY_COOLDOWN_MS = 1000;
 /** Area rules (limits per area) arrive in Phase 3; until then every area uses this. */
 const CHAT_MAX_LENGTH = 200;
@@ -61,6 +71,8 @@ export class AreaRoom extends DurableObject<Env> {
       joined: false,
       moves: { start: 0, count: 0 },
       lastSayAt: 0,
+      study: NO_STUDY,
+      statuses: { start: 0, count: 0 },
     });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -88,16 +100,17 @@ export class AreaRoom extends DurableObject<Env> {
         this.replaceOlderConnections(ws, me.id);
         const grid = this.grid(me.area);
         const tile = message.from ? grid.arrivalPoint(message.from) : { ...grid.area.spawn };
-        const joined: Connection = { ...me, joined: true, look: message.look, tile };
+        const study = message.status ? this.storeStudy(grid, tile, message.status, now) : NO_STUDY;
+        const joined: Connection = { ...me, joined: true, look: message.look, tile, study };
         this.save(ws, joined);
         this.send(ws, {
           t: 'welcome',
           self: me.id,
           tile,
           area: me.area,
-          players: this.players().filter((p) => p.id !== me.id),
+          players: this.players(now).filter((p) => p.id !== me.id),
         });
-        this.broadcast({ t: 'joined', player: snapshot(joined) }, ws);
+        this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
         return;
       }
       case 'move': {
@@ -109,8 +122,19 @@ export class AreaRoom extends DurableObject<Env> {
           this.save(ws, { ...me, moves });
           return this.send(ws, { t: 'placed', id: me.id, tile: me.tile });
         }
-        this.save(ws, { ...me, moves, tile: message.to });
+        // Standing up clears what was on the table; everyone else does the same on "moved".
+        const study = { ...me.study, activity: null };
+        this.save(ws, { ...me, moves, tile: message.to, study });
         this.broadcast({ t: 'moved', id: me.id, to: message.to }, ws);
+        return;
+      }
+      case 'status': {
+        if (!me.joined || !me.tile) return;
+        const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
+        if (!statuses) return this.send(ws, { t: 'error', code: 'rate_limited' });
+        const study = this.storeStudy(this.grid(me.area), me.tile, message.status, now);
+        this.save(ws, { ...me, statuses, study });
+        this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
         return;
       }
       case 'say': {
@@ -149,12 +173,23 @@ export class AreaRoom extends DurableObject<Env> {
     }
   }
 
-  private players(): PlayerSnapshot[] {
+  /** An activity only counts while sitting at a table. */
+  private storeStudy(grid: AreaGrid, tile: Point, status: StudyStatus, now: number): StoredStudy {
+    return {
+      activity: grid.seatFacing(tile) ? status.activity : null,
+      timer: status.timer
+        ? { endsAt: now + status.timer.remainingMs, totalMs: status.timer.totalMs }
+        : null,
+      dnd: status.dnd,
+    };
+  }
+
+  private players(now: number): PlayerSnapshot[] {
     return this.ctx
       .getWebSockets()
       .map((ws) => this.load(ws))
       .filter((c): c is Connection => !!c?.joined)
-      .map(snapshot);
+      .map((c) => snapshot(c, now));
   }
 
   private broadcast(message: ServerMessage, except?: WebSocket): void {
@@ -186,7 +221,11 @@ export class AreaRoom extends DurableObject<Env> {
   }
 
   private load(ws: WebSocket): Connection | null {
-    return (ws.deserializeAttachment() as Connection | null) ?? null;
+    // Sockets saved by an older deploy lack the newer fields.
+    const stored = ws.deserializeAttachment() as Partial<Connection> | null;
+    return stored
+      ? ({ study: NO_STUDY, statuses: { start: 0, count: 0 }, ...stored } as Connection)
+      : null;
   }
 
   private save(ws: WebSocket, connection: Connection): void {
@@ -194,11 +233,20 @@ export class AreaRoom extends DurableObject<Env> {
   }
 }
 
-function snapshot(c: Connection): PlayerSnapshot {
+function snapshot(c: Connection, now: number): PlayerSnapshot {
   return {
     id: c.id,
     name: c.name,
     look: c.look as Appearance,
     tile: c.tile ?? { x: 0, y: 0 },
+    status: publicStudy(c.study, now),
+  };
+}
+
+function publicStudy(study: StoredStudy, now: number): StudyStatus {
+  const { timer } = study;
+  return {
+    ...study,
+    timer: timer ? { remainingMs: Math.max(0, timer.endsAt - now), totalMs: timer.totalMs } : null,
   };
 }
