@@ -1,4 +1,4 @@
-import type { AreaGrid, AreaId } from '@att/shared';
+import { TILE, type AreaGrid, type AreaId } from '@att/shared';
 import {
   BoxGeometry,
   Group,
@@ -62,7 +62,9 @@ export function buildDoors(
   },
 ): BuiltDoors {
   const isGlass = (char: string) =>
-    grid.area.id === 'library' || grid.doorTarget(firstTile(grid, char)) === 'library';
+    char === TILE.entrance ||
+    grid.area.id === 'library' ||
+    grid.doorTarget(firstTile(grid, char)) === 'library';
   const frameWood = new MeshStandardMaterial({ color: 0x4a2f1f, roughness: 0.6 });
   const brass = new MeshStandardMaterial({ color: 0xd4a64a, roughness: 0.35, metalness: 0.6 });
   const glass = new MeshStandardMaterial({
@@ -114,8 +116,10 @@ export function buildDoors(
     header.position.set(0, height - FRAME * 0.6, 0);
     door.add(header);
     if (back) {
-      const lintel = box(width, WALL_HEIGHT - height, wallThickness, plaster);
-      lintel.position.set(0, height + (WALL_HEIGHT - height) / 2, 0);
+      // The door stands on the floor tiles but walls start at y = 0, so the lintel stops at their top.
+      const lintelHeight = WALL_HEIGHT - floorY - height;
+      const lintel = box(width, lintelHeight, wallThickness, plaster);
+      lintel.position.set(0, height + lintelHeight / 2, 0);
       door.add(lintel);
     }
 
@@ -129,8 +133,10 @@ export function buildDoors(
       // A strip of the next room's floor, so an open door shows somewhere to go.
       const outside = new MeshStandardMaterial({ color: beyond(to), roughness: 0.9 });
       materials.push(outside);
+      // It starts past the door's own floor tile; overlapping that tile made the two floors flicker.
       const floor = box(width, 0.05, 1.2, outside, false);
-      floor.position.set(0, -0.025, -wallThickness / 2 - 0.6);
+      floor.receiveShadow = false;
+      floor.position.set(0, -0.026, -(1 - wallThickness / 2) - 0.6);
       door.add(floor);
     }
     const clear = width - FRAME * 2;
@@ -247,10 +253,10 @@ function firstTile(grid: AreaGrid, char: string): { x: number; y: number } {
   return { x: 0, y: 0 };
 }
 
-/** Each door character forms one straight run of tiles in an outer wall. */
+/** Each door character (and the street entrance) forms one straight run of tiles in an outer wall. */
 function doorRuns(grid: AreaGrid): DoorRun[] {
   const runs: DoorRun[] = [];
-  for (const char of Object.keys(grid.area.doors)) {
+  for (const char of [...Object.keys(grid.area.doors), TILE.entrance]) {
     const tiles: { x: number; y: number }[] = [];
     grid.area.layout.forEach((row, y) =>
       [...row].forEach((c, x) => c === char && tiles.push({ x, y })),

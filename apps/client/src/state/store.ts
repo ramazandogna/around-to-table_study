@@ -40,6 +40,8 @@ type GameState = {
   startTimer: (minutes: number, dnd: boolean) => void;
   stopTimer: () => void;
   setDnd: (dnd: boolean) => void;
+  /** Back to the name screen with nothing carried over. */
+  startOver: () => void;
 };
 
 export const useGameStore = create<GameState>((set) => ({
@@ -72,6 +74,8 @@ export const useGameStore = create<GameState>((set) => ({
   // Do not disturb belongs to the timer, so it ends with it.
   stopTimer: () => set({ timer: null, dnd: false }),
   setDnd: (dnd) => set({ dnd }),
+  startOver: () =>
+    set({ session: null, seated: false, sitStep: null, activity: null, timer: null, dnd: false }),
 }));
 
 /** The player's study status as the server expects it. */

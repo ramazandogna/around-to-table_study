@@ -26,6 +26,8 @@ const BLOCK_MESSAGES: Partial<Record<BlockReason, MessageKey>> = {
 };
 const BLOCK_MESSAGE_COOLDOWN_MS = 2500;
 const CAMERA_LERP = 0.12;
+/** Heights checked when a tap misses the floor, up to the top of the tallest door. */
+const DOOR_PICK_HEIGHTS = [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1];
 const FADE_MS = 220;
 
 const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
@@ -246,13 +248,26 @@ export class AreaWorld {
 
   private readonly onPointerDown = (event: PointerEvent) => {
     if (this.view.isPinching) return;
-    const tile = this.view.pickTile(event.clientX, event.clientY);
+    const tile = this.pickTile(event.clientX, event.clientY);
     if (!tile) return;
     // Tapping someone shows what they are up to instead of walking onto them.
     const someone = [...this.others.values()].find((o) => sameTile(o.tile, tile));
     if (someone) someone.toggleDetails();
     else this.walkTo(tile);
   };
+
+  /** The tapped tile, or the door or elevator drawn there when the tap misses the floor. */
+  private pickTile(clientX: number, clientY: number): Point | null {
+    const floor = this.view.pickTile(clientX, clientY);
+    if (!floor || this.grid.isWalkable(floor)) return floor;
+    for (const height of DOOR_PICK_HEIGHTS) {
+      const tile = this.view.pickTileAt(clientX, clientY, height);
+      if (tile && (this.grid.doorTarget(tile) || this.grid.blockReason(tile) === 'elevator')) {
+        return tile;
+      }
+    }
+    return floor;
+  }
 
   /** Keys move one tile at a time. The camera looks from the south-east, so screen-up is north-west. */
   private handleKeyboard(player: Avatar): void {

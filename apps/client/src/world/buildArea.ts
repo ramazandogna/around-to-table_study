@@ -34,6 +34,7 @@ const DOORS: ReadonlySet<string> = new Set([
   TILE.doorToHall,
   TILE.doorToLibrary,
   TILE.doorToSmoking,
+  TILE.entrance,
 ]);
 
 /** Chairs are pushed this far from the tile center, so their front edge meets the table. */
@@ -151,15 +152,19 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
         case TILE.plant:
           plants.push({ x: cx, z: cz, y: FLOOR_Y, rotation: noise(x, y) * Math.PI * 2 });
           break;
-        case TILE.receptionDesk:
+        case TILE.receptionDesk: {
+          // The desk faces the middle of the room, across its run of tiles.
+          const upright = at(x, y - 1) === c || at(x, y + 1) === c;
+          const toRoom = (v: number, size: number) => (v < size / 2 ? 1 : -1);
           desks.push({
             x: cx,
             z: cz,
             y: FLOOR_Y,
-            rotation: facing(0, 1),
+            rotation: upright ? facing(toRoom(x, W), 0) : facing(0, toRoom(y, H)),
             scale: [1 / furniture.desk.size.x, 1, 1],
           });
           break;
+        }
         case TILE.bench: {
           // A sofa covers two bench tiles; it faces the middle of the room and opens towards -z.
           let runStart = x;
@@ -393,14 +398,27 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
   const middle = desks[Math.floor(desks.length / 2)];
   if (middle) {
     const top = FLOOR_Y + furniture.desk.size.y;
+    const rotation = middle.rotation ?? 0;
+    // The laptop faces the receptionist behind the desk; the lamp sits one tile along it.
     root.add(
       instance(furniture.laptop, [
-        { x: middle.x, z: middle.z, y: top, rotation: facing(0, -1), scale: [0.75, 0.75, 0.75] },
+        {
+          x: middle.x,
+          z: middle.z,
+          y: top,
+          rotation: rotation + Math.PI,
+          scale: [0.75, 0.75, 0.75],
+        },
       ]),
     );
     root.add(
       instance(furniture.lampRoundTable, [
-        { x: middle.x - 1.5, z: middle.z, y: top, scale: [0.7, 0.7, 0.7] },
+        {
+          x: middle.x - Math.cos(rotation),
+          z: middle.z + Math.sin(rotation),
+          y: top,
+          scale: [0.7, 0.7, 0.7],
+        },
       ]),
     );
   }
@@ -416,7 +434,7 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
   );
   root.add(instance(furniture.lampSquareFloor, lamps));
   if (grid.area.id === 'hall') {
-    root.add(instance(furniture.coatRackStanding, [{ x: 2.5, z: 8.5, y: FLOOR_Y }]));
+    root.add(instance(furniture.coatRackStanding, [{ x: 1.5, z: 7.5, y: FLOOR_Y }]));
   }
 }
 
@@ -497,18 +515,23 @@ function buildRenovation(
   return [shade, tapeMaterial, post];
 }
 
-/** One sign over the middle of each door run and the elevator. */
+/** One sign over the middle of each door run, the street entrance and the elevator. */
 function addDoorSigns(grid: AreaGrid, root: Group): void {
   const runs = new Map<string, Point[]>();
   grid.area.layout.forEach((row, y) =>
     [...row].forEach((c, x) => {
-      if (!grid.doorTarget({ x, y }) && c !== TILE.elevator) return;
+      if (!grid.doorTarget({ x, y }) && c !== TILE.elevator && c !== TILE.entrance) return;
       runs.set(c, [...(runs.get(c) ?? []), { x, y }]);
     }),
   );
   for (const [c, tiles] of runs) {
     const to = grid.doorTarget(tiles[0] ?? { x: 0, y: 0 });
-    const label = c === TILE.elevator ? t('sign.elevator') : t(`area.${to ?? 'hall'}`);
+    const label =
+      c === TILE.elevator
+        ? t('sign.elevator')
+        : c === TILE.entrance
+          ? t('sign.entrance')
+          : t(`area.${to ?? 'hall'}`);
     const x = tiles.reduce((sum, p) => sum + p.x, 0) / tiles.length + 0.5;
     const y = tiles.reduce((sum, p) => sum + p.y, 0) / tiles.length + 0.5;
     root.add(

@@ -137,12 +137,22 @@ export class IsoView {
 
   /** The floor tile under a screen position, if any. */
   pickTile(clientX: number, clientY: number): Point | null {
+    return this.pickTileAt(clientX, clientY, 0);
+  }
+
+  /**
+   * The tile under a screen position at a height above the floor. Tapping
+   * something tall, like a door, lands on the floor behind it; looking at
+   * the door's height finds the tile it stands on.
+   */
+  pickTileAt(clientX: number, clientY: number, height: number): Point | null {
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(ndc, this.camera);
+    this.floor.constant = -height;
     const hit = this.raycaster.ray.intersectPlane(this.floor, new Vector3());
     return hit ? { x: Math.floor(hit.x), y: Math.floor(hit.z) } : null;
   }

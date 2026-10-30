@@ -59,5 +59,11 @@
   "details.done": "timer done",
   "details.dnd": "do not disturb",
   "details.sitting": "just sitting",
-  "details.around": "walking around"
+  "details.around": "walking around",
+  "sign.entrance": "Entrance",
+  "startOver.button": "Start over (beta)",
+  "startOver.title": "Start over?",
+  "startOver.text": "This forgets your name and look on this device, so you can come in as someone new.",
+  "startOver.cancel": "Cancel",
+  "startOver.confirm": "Start over"
 }

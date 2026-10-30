@@ -210,6 +210,20 @@ button {
   text-shadow: 0 1px 0 #000;
 }
 
+.hud-link {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font-size: 13px;
+  text-decoration: underline;
+  opacity: 0.7;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
 .hud-area {
   font-size: 13px;
   opacity: 0.8;
@@ -365,13 +379,14 @@ button:disabled {
 }
 
 .dialog {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 5;
   display: grid;
   place-items: center;
   padding: 16px;
   background: rgb(20 12 6 / 0.35);
+  pointer-events: auto;
 }
 
 .choice-grid {

@@ -15,6 +15,12 @@ export function forgetSession(): void {
   remove(SESSION_KEY);
 }
 
+/** Forgets the name and look on this device, so the next visit starts as someone new. */
+export function forgetCharacter(): void {
+  forgetSession();
+  remove(LOOK_KEY);
+}
+
 export type GuestError = 'invalid_name' | 'server_misconfigured' | 'network';
 
 export async function createGuest(name: string): Promise<GuestSession | GuestError> {

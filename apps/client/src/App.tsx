@@ -7,6 +7,7 @@ import { NameGate } from './ui/NameGate';
 import { Notice } from './ui/Notice';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
+import { StartOver } from './ui/StartOver';
 import { TimerHud } from './ui/TimerHud';
 import { WorldCanvas } from './world/WorldCanvas';
 
@@ -26,6 +27,7 @@ export function App() {
         <span className="hud-area">
           {t(`area.${area}`)} · {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
         </span>
+        <StartOver />
       </header>
       <TimerHud />
       <footer className="hud-bottom">
