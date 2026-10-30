@@ -69,7 +69,7 @@ export class Avatar {
   private props: Group | null = null;
 
   constructor(
-    kit: CharacterKit,
+    private readonly kit: CharacterKit,
     look: Appearance,
     start: Point,
     name: string,
@@ -120,6 +120,10 @@ export class Avatar {
 
   get position(): { x: number; z: number } {
     return { x: this.root.position.x, z: this.root.position.z };
+  }
+
+  setLook(look: Appearance): void {
+    this.kit.dress(this.model, look);
   }
 
   get isSeated(): boolean {

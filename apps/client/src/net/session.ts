@@ -1,4 +1,4 @@
-import { isValidAppearance, randomAppearance, type Appearance } from '@att/shared';
+import { isValidAppearance, type Appearance } from '@att/shared';
 import { readJson, remove, writeJson } from './storage';
 
 export type GuestSession = { token: string; id: string; name: string };
@@ -40,11 +40,15 @@ export async function createGuest(name: string): Promise<GuestSession | GuestErr
   }
 }
 
-/** The look is kept per device until accounts and the character creator arrive. */
-export function loadLook(): Appearance {
-  const stored = readJson<Appearance>(LOOK_KEY);
-  if (stored && isValidAppearance(stored)) return stored;
-  const look = randomAppearance();
+/**
+ * The look is kept per device until accounts arrive. Looks from before the
+ * character creator are not valid, so those players are asked to make one.
+ */
+export function loadLook(): Appearance | null {
+  const stored = readJson<unknown>(LOOK_KEY);
+  return isValidAppearance(stored) ? stored : null;
+}
+
+export function saveLook(look: Appearance): void {
   writeJson(LOOK_KEY, look);
-  return look;
 }

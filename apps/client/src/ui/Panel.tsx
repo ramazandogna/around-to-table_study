@@ -92,3 +92,65 @@ export function Check({
     </label>
   );
 }
+
+/** A labeled choice stepped through with arrows, like Stardew Valley's creator. */
+export function Stepper({
+  label,
+  value,
+  previous,
+  next,
+  onStep,
+}: {
+  label: string;
+  value: string;
+  previous: string;
+  next: string;
+  onStep: (direction: -1 | 1) => void;
+}) {
+  return (
+    <div className="option-row">
+      <span className="option-label">{label}</span>
+      <div className="stepper">
+        <button type="button" className="arrow" aria-label={previous} onClick={() => onStep(-1)}>
+          ◀
+        </button>
+        <span className="stepper-value">{value}</span>
+        <button type="button" className="arrow" aria-label={next} onClick={() => onStep(1)}>
+          ▶
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function Swatches({
+  label,
+  colors,
+  value,
+  onChange,
+}: {
+  label: string;
+  colors: readonly string[];
+  value: number;
+  onChange: (index: number) => void;
+}) {
+  return (
+    <div className="option-row">
+      <span className="option-label">{label}</span>
+      <div className="swatches" role="radiogroup" aria-label={label}>
+        {colors.map((color, i) => (
+          <button
+            key={color}
+            type="button"
+            role="radio"
+            className="swatch"
+            aria-checked={i === value}
+            aria-label={`${label} ${i + 1}`}
+            style={{ background: color }}
+            onClick={() => onChange(i)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}

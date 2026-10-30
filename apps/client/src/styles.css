@@ -210,16 +210,21 @@ button {
   text-shadow: 0 1px 0 #000;
 }
 
-.hud-link {
-  align-self: flex-start;
+.hud-links {
+  display: flex;
+  gap: 12px;
   margin-top: 4px;
+}
+
+.hud-link {
   padding: 2px 0;
   border: 0;
   background: none;
   color: var(--color-text);
   font-size: 13px;
   text-decoration: underline;
-  opacity: 0.7;
+  text-shadow: 0 1px 0 #000;
+  opacity: 0.9;
   cursor: pointer;
   pointer-events: auto;
 }
@@ -257,11 +262,32 @@ button {
   pointer-events: auto;
 }
 
+.chat-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-input--quiet {
+  text-transform: lowercase;
+}
+
+.chat-count {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--panel-ink-soft);
+  font-size: 13px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .chat-bar input {
   flex: 1;
   min-width: 0;
   min-height: 44px;
-  padding: 0 12px;
+  padding: 0 40px 0 12px;
   border: 3px solid var(--panel-edge);
   border-radius: 6px;
   background: var(--panel-well);
@@ -270,6 +296,7 @@ button {
 }
 
 .chat-bar button {
+  min-width: 72px;
   min-height: 44px;
   padding: 0 16px;
   border: 3px solid var(--panel-edge);
@@ -278,6 +305,17 @@ button {
   box-shadow: inset 0 0 0 2px var(--panel-edge-light);
   color: var(--panel-ink);
   cursor: pointer;
+}
+
+/* While waiting in the library, the button's background empties like a clock as time runs out. */
+.chat-send--waiting:disabled {
+  opacity: 1;
+  background: conic-gradient(
+      var(--panel-edge-mid) calc(var(--wait) * 360deg),
+      var(--panel-well) calc(var(--wait) * 360deg)
+    )
+    border-box;
+  color: var(--panel-ink);
 }
 
 button:disabled {
@@ -531,6 +569,124 @@ button:disabled {
   gap: 16px;
 }
 
+/* ---------- Character creator ---------- */
+
+.panel--creator {
+  max-width: 760px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.creator {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.creator-body {
+  display: flex;
+  gap: 20px;
+}
+
+.creator-preview {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.preview-frame {
+  width: 220px;
+  height: 300px;
+  border: 4px solid var(--panel-edge);
+  border-radius: 6px;
+  background: linear-gradient(#cfe6ef, #f6e7c4 70%, #d8b27a 70%);
+  box-shadow: inset 0 0 0 3px var(--panel-edge-light);
+  overflow: hidden;
+}
+
+.preview-stage {
+  width: 100%;
+  height: 100%;
+}
+
+.preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.creator-options {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.option-label {
+  flex: none;
+  width: 104px;
+  font-size: 16px;
+}
+
+.stepper {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper-value {
+  flex: 1;
+  font-size: 17px;
+  text-align: center;
+}
+
+.arrow {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 40px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel-edge-mid);
+  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.2);
+  color: var(--panel-edge-light);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.arrow:active {
+  transform: translateY(2px);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.swatch {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.swatch[aria-checked='true'] {
+  border-color: var(--panel-select);
+  box-shadow: 0 0 0 2px var(--panel-select);
+}
+
 /* ---------- Seated HUD ---------- */
 
 .timer-hud {
@@ -630,5 +786,20 @@ button:disabled {
 
   .choice-grid {
     grid-template-columns: 1fr;
+  }
+
+  .creator-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .preview-frame {
+    width: 160px;
+    height: 210px;
+  }
+
+  .option-label {
+    width: 84px;
+    font-size: 14px;
   }
 }

@@ -11,7 +11,6 @@ import {
 } from '@att/shared';
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
-import { loadLook } from '../net/session';
 import { studyStatus, useGameStore } from '../state/store';
 import { Avatar, type AvatarContext } from './Avatar';
 import { buildArea, type BuiltArea } from './buildArea';
@@ -68,8 +67,12 @@ export class AreaWorld {
       seats: (tile) => this.grid.seatFacing(tile),
       props: createTableProps(assets.furniture),
     };
-    // The player's own status lives in the store; the world shows it and the server shares it.
+    // The player's own look and status live in the store; the world shows them and the server shares them.
     this.unsubscribe = useGameStore.subscribe((state, before) => {
+      if (state.look && state.look !== before.look) {
+        this.player?.setLook(state.look);
+        this.connection?.changeLook(state.look);
+      }
       if (
         state.activity === before.activity &&
         state.timer === before.timer &&
@@ -98,7 +101,8 @@ export class AreaWorld {
     this.view.add(this.built.root);
     this.view.setBounds(this.grid.width, this.grid.height);
 
-    const look = loadLook();
+    const look = useGameStore.getState().look;
+    if (!look) throw new Error('AreaWorld needs a character look');
     const start = from ? this.grid.arrivalPoint(from) : this.grid.area.spawn;
     this.player = new Avatar(this.assets.characters, look, start, session.name, true, this.context);
     this.player.setStatus(studyStatus());
@@ -112,7 +116,7 @@ export class AreaWorld {
       area,
       from,
       token: session.token,
-      look,
+      look: () => useGameStore.getState().look ?? look,
       status: () => studyStatus(),
       onMessage: (message) => this.onServerMessage(message),
       onStatus: (connected) => useGameStore.getState().setConnected(connected),
@@ -200,6 +204,9 @@ export class AreaWorld {
       case 'status':
         if (message.id !== selfId) this.others.get(message.id)?.setStatus(message.status);
         break;
+      case 'looked':
+        this.others.get(message.id)?.setLook(message.look);
+        break;
       case 'placed':
         if (message.id === selfId && this.player && !sameTile(this.player.tile, message.tile)) {
           this.player.teleport(message.tile);
@@ -210,11 +217,20 @@ export class AreaWorld {
         // "Do not disturb" hides everyone else's chatter.
         else if (!useGameStore.getState().dnd) this.others.get(message.id)?.say(message.text);
         break;
-      case 'error':
-        if (message.code === 'rate_limited' || message.code === 'replaced') {
-          useGameStore.getState().setNotice(message.code);
+      case 'error': {
+        const store = useGameStore.getState();
+        // A known wait shows on the send button; anything else gets a short notice.
+        if (message.code === 'rate_limited' && message.retryInMs) {
+          store.setCooldown(this.areaId, Date.now() + message.retryInMs);
+        } else if (
+          message.code === 'rate_limited' ||
+          message.code === 'replaced' ||
+          message.code === 'link_blocked'
+        ) {
+          store.setNotice(message.code);
         }
         break;
+      }
     }
     useGameStore.getState().setPlayersHere(this.others.size + 1);
   }
@@ -235,7 +251,8 @@ export class AreaWorld {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
-    if (useGameStore.getState().typing || !(event.code in KEY_DIRECTIONS)) return;
+    const { typing, wardrobeOpen } = useGameStore.getState();
+    if (typing || wardrobeOpen || !(event.code in KEY_DIRECTIONS)) return;
     event.preventDefault();
     this.heldKeys.add(event.code);
   };

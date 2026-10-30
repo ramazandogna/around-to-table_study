@@ -1,18 +1,17 @@
-import { CHARACTER_SKINS, type Appearance } from '@att/shared';
+import type { Appearance } from '@att/shared';
 import {
   Box3,
   MeshStandardMaterial,
-  SRGBColorSpace,
-  TextureLoader,
   Vector3,
   type AnimationClip,
   type Group,
   type Mesh,
-  type Texture,
+  type Object3D,
 } from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { createSitPose, measureStrideSpeed, walkFromRun } from './poses';
+import { skinTexture } from './skin';
 
 const PATH = 'models/characters/';
 /** Character height in tiles (a tile is about a meter); doors are 2 tiles tall. */
@@ -26,6 +25,8 @@ const LEG_BONE = /(UpLeg|Leg|Foot|Toe)/;
 
 export type CharacterKit = {
   create: (look: Appearance) => Group;
+  /** Repaints a model made by `create` with another look. */
+  dress: (model: Object3D, look: Appearance) => void;
   clips: { idle: AnimationClip; walk: AnimationClip; sit: AnimationClip };
   /** Height of the hip joint above the soles while seated. */
   seatedHipHeight: number;
@@ -40,16 +41,21 @@ function clipNamed(animations: AnimationClip[], name: string): AnimationClip {
   return clip;
 }
 
-/** Loads the Kenney "Animated Characters" model, its animations and skins once. */
-export async function loadCharacterKit(): Promise<CharacterKit> {
+let kit: Promise<CharacterKit> | null = null;
+
+/** Loads the Kenney "Animated Characters" model and animations once; the world and the creator share it. */
+export function loadCharacterKit(): Promise<CharacterKit> {
+  kit ??= loadKit();
+  return kit;
+}
+
+async function loadKit(): Promise<CharacterKit> {
   const fbx = new FBXLoader().setPath(PATH);
-  const [base, idleFile, runFile, ...skins] = await Promise.all([
+  const [base, idleFile, runFile] = await Promise.all([
     fbx.loadAsync('characterMedium.fbx'),
     fbx.loadAsync('idle.fbx'),
     fbx.loadAsync('run.fbx'),
-    ...CHARACTER_SKINS.map((skin) => new TextureLoader().loadAsync(`${PATH}skins/${skin}.png`)),
   ]);
-  skins.forEach((texture: Texture) => (texture.colorSpace = SRGBColorSpace));
 
   const height = new Box3().setFromObject(base).getSize(new Vector3()).y;
   base.scale.setScalar(CHARACTER_HEIGHT / height);
@@ -67,15 +73,19 @@ export async function loadCharacterKit(): Promise<CharacterKit> {
     walkSpeed: measureStrideSpeed(clone(base), walk),
     create: (look) => {
       const model = clone(base) as Group;
-      const skin = skins[look.skin] ?? skins[0];
       model.traverse((child) => {
         const mesh = child as Mesh;
         if (!mesh.isMesh) return;
         mesh.castShadow = true;
-        // The FBX material is dark and untextured; the skin texture carries all the color.
-        mesh.material = new MeshStandardMaterial({ map: skin ?? null, roughness: 0.8 });
+        // The FBX material is dark and untextured; the painted skin carries all the color.
+        mesh.material = new MeshStandardMaterial({ map: skinTexture(look), roughness: 0.8 });
       });
       return model;
     },
+    dress: (model, look) =>
+      model.traverse((child) => {
+        const mesh = child as Mesh;
+        if (mesh.isMesh) (mesh.material as MeshStandardMaterial).map = skinTexture(look);
+      }),
   };
 }

@@ -12,7 +12,8 @@ type Options = {
   area: AreaId;
   from: AreaId | undefined;
   token: string;
-  look: Appearance;
+  /** Read on every (re)connect, like the status. */
+  look: () => Appearance;
   /** Read on every (re)connect, so the server always has the current status. */
   status: () => StudyStatus;
   onMessage: (message: ServerMessage) => void;
@@ -34,7 +35,7 @@ export class AreaConnection {
       options.onStatus(true);
       this.send({
         t: 'hello',
-        look: options.look,
+        look: options.look(),
         status: options.status(),
         ...(options.from ? { from: options.from } : {}),
       });
@@ -56,6 +57,10 @@ export class AreaConnection {
 
   say(text: string): void {
     this.send({ t: 'say', text });
+  }
+
+  changeLook(look: Appearance): void {
+    this.send({ t: 'look', look });
   }
 
   status(status: StudyStatus): void {
