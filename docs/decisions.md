@@ -2,6 +2,14 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-30: The hall is laid out by how people move
+- **Decision:** the hall has a street entrance (`O` tiles, drawn as a door, never walkable) at the bottom, in line with the library's glass doors; new arrivals start just inside it. The rug runs straight from one to the other. Reception stands front right, facing the people coming in, on the way to the elevator; the smoking room and sofas are on the left.
+- **Why:** reception should face the entrance and arriving and leaving should not cross (feedback from an interior designer). Before, people appeared in the middle of the room and the desk faced nothing in particular.
+
+## 2026-10-30: Taps on doors look above the floor
+- **Decision:** a tap is turned into a floor tile as before; when that tile is not walkable, the same ray is checked at heights up to 2.1 m for a door or elevator tile.
+- **Why:** doors are tall, so tapping the glass landed on the floor behind the wall, outside the map, and nothing happened. It felt like an invisible wall in front of the library.
+
 ## 2026-10-30: Study status travels with the player
 - **Decision:** a `status` message carries `{ activity, timer, dnd }` and replaces the whole status; it is also sent in `hello`. The server keeps the timer as an end time on its own clock and sends it out as `remainingMs`, so clients with wrong clocks agree. An activity only counts while the server sees the player on a seat, and any move clears it.
 - **Why:** others must see what is on your table and whether you have a timer or do not want to be disturbed. Sending time left instead of a clock time avoids clock skew without a time sync.
@@ -12,7 +20,7 @@ Non-obvious technical decisions, newest first.
 - **Why:** one look from the name screen to the table makes the app feel like one place. Pixelify Sans was tried first, but its 2 and 5 look like Z and S, which breaks a timer. Tiny5 has clear digits and Turkish letters; it has a single weight, so hierarchy comes from size.
 
 ## 2026-10-30: Doors are built in code
-- **Decision:** `world/doors.ts` builds each door run from the layout: a 4-tile sliding glass double door for the library, a 1-tile swinging wooden door elsewhere, each with a frame, doormat and sign. Doors open when anyone is near. Back-wall doors are complete, with a strip of the next room's floor behind them; front-wall doors keep only the frame and mat so they do not hide the room.
+- **Decision:** `world/doors.ts` builds each door run from the layout: a 4-tile sliding glass double door for the library, a 1-tile swinging wooden door elsewhere, each with a frame, doormat and sign. Doors open when anyone is near. Back-wall doors are complete, with a strip of the next room's floor behind them (starting past the door's own floor tile; overlapping it made the two floors flicker); front-wall doors keep only the frame and mat so they do not hide the room.
 - **Why:** Kenney's open doorway frame did not read as a door. Wide doors also needed custom geometry, since Kenney's pieces are one tile wide.
 
 ## 2026-10-30: Walk speed comes from the clip
