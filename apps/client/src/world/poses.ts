@@ -17,10 +17,15 @@ import {
  */
 
 /**
- * A walk made from the run cycle: every key is pulled towards the idle pose,
- * which shortens the stride, lowers the arms and removes most of the bounce.
+ * A walk made from the run cycle: every key is pulled towards the idle pose by
+ * `calm(track)` (0 = run, 1 = idle), which lowers the arms and removes most of
+ * the bounce. Legs are pulled less than the body so the stride stays long.
  */
-export function walkFromRun(run: AnimationClip, idle: AnimationClip, calm: number): AnimationClip {
+export function walkFromRun(
+  run: AnimationClip,
+  idle: AnimationClip,
+  calm: (track: string) => number,
+): AnimationClip {
   const walk = run.clone();
   walk.name = 'Walk';
   const key = new Quaternion();
@@ -30,18 +35,60 @@ export function walkFromRun(run: AnimationClip, idle: AnimationClip, calm: numbe
     if (!rest) continue;
     const size = track.getValueSize();
     const values = track.values;
+    const amount = calm(track.name);
     for (let i = 0; i < values.length; i += size) {
       if (track instanceof QuaternionKeyframeTrack) {
         restKey.fromArray(rest.values);
-        key.fromArray(values, i).slerp(restKey, calm).toArray(values, i);
+        key.fromArray(values, i).slerp(restKey, amount).toArray(values, i);
       } else {
         for (let j = 0; j < size; j++) {
-          values[i + j] = MathUtils.lerp(values[i + j] ?? 0, rest.values[j] ?? 0, calm);
+          values[i + j] = MathUtils.lerp(values[i + j] ?? 0, rest.values[j] ?? 0, amount);
         }
       }
     }
   }
   return walk;
+}
+
+const STRIDE_SAMPLES = 120;
+/** A foot counts as planted while it is this close to its lowest point (fraction of its lift). */
+const PLANTED = 0.2;
+
+/**
+ * How fast the ground passes under a planted foot when `walk` plays at normal
+ * speed, in world units per second. Matching the avatar's speed to this stops
+ * the feet from sliding. `model` must be a scaled, unrotated copy of the character.
+ */
+export function measureStrideSpeed(model: Object3D, walk: AnimationClip): number {
+  const mixer = new AnimationMixer(model);
+  mixer.clipAction(walk).play();
+  const dt = walk.duration / STRIDE_SAMPLES;
+  let total = 0;
+  let count = 0;
+  for (const side of ['Left', 'Right']) {
+    const foot = model.getObjectByName(`${side}Foot`);
+    if (!foot) throw new Error(`Character bone ${side}Foot is missing`);
+    const samples: Vector3[] = [];
+    mixer.setTime(0);
+    for (let i = 0; i <= STRIDE_SAMPLES; i++) {
+      mixer.setTime(i * dt);
+      model.updateMatrixWorld(true);
+      samples.push(foot.getWorldPosition(new Vector3()));
+    }
+    const ys = samples.map((p) => p.y);
+    const low = Math.min(...ys);
+    const planted = low + (Math.max(...ys) - low) * PLANTED;
+    for (let i = 1; i < samples.length; i++) {
+      const [a, b] = [samples[i - 1], samples[i]];
+      if (!a || !b || a.y > planted || b.y > planted) continue;
+      // The character faces +z, so a planted foot slides towards -z.
+      total += (a.z - b.z) / dt;
+      count++;
+    }
+  }
+  mixer.stopAllAction();
+  if (count === 0 || total <= 0) throw new Error('Walk clip has no planted feet');
+  return total / count;
 }
 
 export type SitPose = {

@@ -12,12 +12,13 @@ import {
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
 import { loadLook } from '../net/session';
-import { useGameStore } from '../state/store';
-import { Avatar, type SeatLookup } from './Avatar';
+import { studyStatus, useGameStore } from '../state/store';
+import { Avatar, type AvatarContext } from './Avatar';
 import { buildArea, type BuiltArea } from './buildArea';
 import type { CharacterKit } from './characters';
 import type { IsoView } from './IsoView';
 import type { Furniture } from './models';
+import { createTableProps } from './tableProps';
 
 const BLOCK_MESSAGES: Partial<Record<BlockReason, MessageKey>> = {
   renovation: 'blocked.renovation',
@@ -53,12 +54,30 @@ export class AreaWorld {
   private readonly heldKeys = new Set<string>();
   private leaving = false;
   private lastBlockMessageAt = -Infinity;
+  private readonly context: AvatarContext;
+  private readonly unsubscribe: () => void;
 
   constructor(
     private readonly view: IsoView,
     private readonly assets: Assets,
     private readonly fader: HTMLElement,
   ) {
+    this.context = {
+      seats: (tile) => this.grid.seatFacing(tile),
+      props: createTableProps(assets.furniture),
+    };
+    // The player's own status lives in the store; the world shows it and the server shares it.
+    this.unsubscribe = useGameStore.subscribe((state, before) => {
+      if (
+        state.activity === before.activity &&
+        state.timer === before.timer &&
+        state.dnd === before.dnd
+      )
+        return;
+      const status = studyStatus(state);
+      this.player?.setStatus(status);
+      this.connection?.status(status);
+    });
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
@@ -79,7 +98,8 @@ export class AreaWorld {
 
     const look = loadLook();
     const start = from ? this.grid.arrivalPoint(from) : this.grid.area.spawn;
-    this.player = new Avatar(this.assets.characters, look, start, session.name, true, this.seats);
+    this.player = new Avatar(this.assets.characters, look, start, session.name, true, this.context);
+    this.player.setStatus(studyStatus());
     this.view.add(this.player.root);
     this.view.follow(start.x + 0.5, start.y + 0.5, 1);
 
@@ -91,6 +111,7 @@ export class AreaWorld {
       from,
       token: session.token,
       look,
+      status: () => studyStatus(),
       onMessage: (message) => this.onServerMessage(message),
       onStatus: (connected) => useGameStore.getState().setConnected(connected),
     });
@@ -101,6 +122,7 @@ export class AreaWorld {
 
   dispose(): void {
     this.teardown();
+    this.unsubscribe();
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
@@ -116,6 +138,7 @@ export class AreaWorld {
     this.others.clear();
     this.player?.dispose();
     this.player = null;
+    useGameStore.getState().setSeated(false);
     if (this.built) {
       this.view.remove(this.built.root);
       this.built.dispose();
@@ -130,7 +153,12 @@ export class AreaWorld {
 
     const arrived = player.update(delta);
     if (arrived) this.checkDoor(arrived);
+    if (player.isSeated !== useGameStore.getState().seated) {
+      useGameStore.getState().setSeated(player.isSeated);
+    }
     for (const other of this.others.values()) other.update(delta);
+    const people = [player.position, ...[...this.others.values()].map((o) => o.position)];
+    this.built?.update(delta, people);
 
     const { x, z } = player.position;
     this.view.follow(x, z, CAMERA_LERP);
@@ -143,9 +171,11 @@ export class AreaWorld {
         for (const other of this.others.values()) other.dispose();
         this.others.clear();
         message.players.forEach((p) => this.addOther(p));
-        // After a reconnect the server puts us at the door; walk back to where we are.
+        // After a reconnect the server puts us at the door; walk back to where we are,
+        // then repeat the status, since an activity only counts once seated.
         if (this.player && !sameTile(message.tile, this.player.tile)) {
           this.connection?.move(this.player.tile);
+          this.connection?.status(studyStatus());
         }
         break;
       case 'joined':
@@ -161,15 +191,22 @@ export class AreaWorld {
         const path = findPath(this.grid, other.tile, message.to);
         if (path) other.walk(path);
         else other.teleport(message.to);
+        // Standing up clears the table, as on the server.
+        other.clearActivity();
         break;
       }
+      case 'status':
+        if (message.id !== selfId) this.others.get(message.id)?.setStatus(message.status);
+        break;
       case 'placed':
         if (message.id === selfId && this.player && !sameTile(this.player.tile, message.tile)) {
           this.player.teleport(message.tile);
         }
         break;
       case 'said':
-        (message.id === selfId ? this.player : this.others.get(message.id))?.say(message.text);
+        if (message.id === selfId) this.player?.say(message.text);
+        // "Do not disturb" hides everyone else's chatter.
+        else if (!useGameStore.getState().dnd) this.others.get(message.id)?.say(message.text);
         break;
       case 'error':
         if (message.code === 'rate_limited' || message.code === 'replaced') {
@@ -188,13 +225,12 @@ export class AreaWorld {
       player.tile,
       player.name,
       false,
-      this.seats,
+      this.context,
     );
+    avatar.setStatus(player.status);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
   }
-
-  private readonly seats: SeatLookup = (tile) => this.grid.seatFacing(tile);
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
     if (useGameStore.getState().typing || !(event.code in KEY_DIRECTIONS)) return;
@@ -211,7 +247,11 @@ export class AreaWorld {
   private readonly onPointerDown = (event: PointerEvent) => {
     if (this.view.isPinching) return;
     const tile = this.view.pickTile(event.clientX, event.clientY);
-    if (tile) this.walkTo(tile);
+    if (!tile) return;
+    // Tapping someone shows what they are up to instead of walking onto them.
+    const someone = [...this.others.values()].find((o) => sameTile(o.tile, tile));
+    if (someone) someone.toggleDetails();
+    else this.walkTo(tile);
   };
 
   /** Keys move one tile at a time. The camera looks from the south-east, so screen-up is north-west. */

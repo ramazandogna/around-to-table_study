@@ -13,6 +13,7 @@ import {
 } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { t } from '../i18n/t';
+import { buildDoors, WALL_HEIGHT, type Person } from './doors';
 import { facing, instance, type Placement } from './instancing';
 import type { Furniture, ModelTemplate } from './models';
 
@@ -42,7 +43,7 @@ const CHAIR_SQUASH = 0.75;
 /** Top of the chair seat cushion above the floor (the model's seat is at 0.48). */
 export const SEAT_HEIGHT = 0.48 * CHAIR_SQUASH;
 /** Table top surface; seated forearms rest on it. */
-const TABLE_HEIGHT = 0.62;
+export const TABLE_HEIGHT = 0.62;
 const TABLE_DEPTH = 1.2;
 
 const tileCenter = (x: number, y: number) => ({ x: x + 0.5, z: y + 0.5 });
@@ -53,7 +54,12 @@ const noise = (x: number, y: number, salt = 0) => {
   return n - Math.floor(n);
 };
 
-export type BuiltArea = { root: Group; dispose: () => void };
+export type BuiltArea = {
+  root: Group;
+  /** Animates the room, e.g. doors opening for the people near them. */
+  update: (delta: number, people: readonly Person[]) => void;
+  dispose: () => void;
+};
 
 /** Builds the 3D room for an area from its ASCII layout and the Kenney furniture. */
 export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
@@ -109,6 +115,13 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   );
 
   buildWalls(grid, furniture, root, wallMaterial);
+  const doors = buildDoors(grid, root, {
+    floorY: FLOOR_Y,
+    wallThickness: furniture.wall.size.z,
+    plaster: wallMaterial,
+    beyond: (area) => AREA_STYLE[area].floor,
+  });
+  materials.push(...doors.materials);
 
   const seats: Placement[] = [];
   const plants: Placement[] = [];
@@ -208,6 +221,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
 
   return {
     root,
+    update: doors.update,
     dispose: () => {
       root.traverse((child) => {
         if (child instanceof CSS2DObject) child.element.remove();
@@ -230,20 +244,25 @@ function buildWalls(
   const thickness = furniture.wall.size.z;
   const plain: Placement[] = [];
   const windows: Placement[] = [];
-  const doorways: Placement[] = [];
+  // Sliding doors disappear into the wall next to them, so no windows there.
+  const nearDoor = (x: number, y: number) =>
+    [-2, -1, 1, 2].some((d) => DOORS.has(at(x + d, y)) || DOORS.has(at(x, y + d)));
+  const wantsWindow = (i: number, x: number, y: number) =>
+    i % 3 === 2 &&
+    at(x + (y === 0 ? 0 : 1), y + (y === 0 ? 1 : 0)) !== TILE.bookcase &&
+    !nearDoor(x, y);
 
+  // Door tiles get no wall piece; buildDoors fills the opening.
   for (let x = 1; x < W - 1; x++) {
     // Kenney walls show their plaster side towards +z when rotated half a turn.
     const placement = { x: x + 0.5, z: 1 - thickness / 2, rotation: Math.PI };
-    if (DOORS.has(at(x, 0))) doorways.push(placement);
-    else if (x % 3 === 2 && at(x, 1) !== TILE.bookcase) windows.push(placement);
-    else plain.push(placement);
+    if (DOORS.has(at(x, 0))) continue;
+    (wantsWindow(x, x, 0) ? windows : plain).push(placement);
   }
   for (let y = 1; y < H - 1; y++) {
     const placement = { x: 1 - thickness / 2, z: y + 0.5, rotation: -Math.PI / 2 };
-    if (DOORS.has(at(0, y))) doorways.push(placement);
-    else if (y % 3 === 2 && at(1, y) !== TILE.bookcase) windows.push(placement);
-    else plain.push(placement);
+    if (DOORS.has(at(0, y))) continue;
+    (wantsWindow(y, 0, y) ? windows : plain).push(placement);
   }
   const plaster = { materialsByName: { _defaultMat: material } };
   // Wall pieces are two tiles wide; each tile gets a half-width piece.
@@ -255,20 +274,13 @@ function buildWalls(
     );
   root.add(perTile(furniture.wall, plain));
   root.add(perTile(furniture.wallWindow, windows));
-  root.add(perTile(furniture.wallDoorway, doorways));
 
-  // Doors in the (hidden) front walls get a free-standing frame so people can see them.
-  const frames: Placement[] = [];
   const elevator: Placement[] = [];
-  for (let x = 1; x < W - 1; x++) {
-    if (DOORS.has(at(x, H - 1))) frames.push({ x: x + 0.5, z: H - 1, rotation: 0 });
-  }
   for (let y = 1; y < H - 1; y++) {
-    const c = at(W - 1, y);
-    if (DOORS.has(c)) frames.push({ x: W - 1, z: y + 0.5, rotation: Math.PI / 2 });
-    if (c === TILE.elevator) elevator.push({ x: W - 1 - 0.05, z: y + 0.5, rotation: -Math.PI / 2 });
+    if (at(W - 1, y) === TILE.elevator) {
+      elevator.push({ x: W - 1 - 0.05, z: y + 0.5, rotation: -Math.PI / 2 });
+    }
   }
-  root.add(instance(furniture.doorwayOpen, frames));
   root.add(instance(furniture.doorway, elevator));
 }
 
@@ -317,8 +329,6 @@ function buildTables(grid: AreaGrid, furniture: Furniture, root: Group): MeshSta
   const wood = new MeshStandardMaterial({ color: WOOD, roughness: 0.7 });
   const runner = new MeshStandardMaterial({ color: RUNNER, roughness: 0.95 });
   const lamps: Placement[] = [];
-  const laptops: Placement[] = [];
-  const books: Placement[] = [];
 
   grid.area.layout.forEach((row, y) => {
     for (const match of row.matchAll(/T+/g)) {
@@ -349,26 +359,13 @@ function buildTables(grid: AreaGrid, furniture: Furniture, root: Group): MeshSta
         root.add(leg);
       }
 
-      const surface = FLOOR_Y + TABLE_HEIGHT;
-      for (let i = 0; i < length; i++) {
-        const x = start + i + 0.5;
-        if (i % 4 === 2) lamps.push({ x, z, y: surface, scale: [0.7, 0.7, 0.7] });
-        // Laptops and books in front of some seats, facing whoever sits there.
-        for (const side of [-1, 1]) {
-          const seat = grid.tileAt({ x: start + i, y: y + side });
-          if (seat !== TILE.seat) continue;
-          const roll = noise(start + i, y, side);
-          const spot = { x, z: z + side * 0.32, y: surface };
-          if (roll < 0.35) {
-            laptops.push({ ...spot, rotation: facing(0, -side), scale: [0.75, 0.75, 0.75] });
-          } else if (roll < 0.6) books.push({ ...spot, rotation: roll * 10 });
-        }
+      // Only lamps belong to the table; people bring their own things when they sit.
+      for (let i = 2; i < length; i += 4) {
+        lamps.push({ x: start + i + 0.5, z, y: FLOOR_Y + TABLE_HEIGHT, scale: [0.7, 0.7, 0.7] });
       }
     }
   });
   root.add(instance(furniture.lampRoundTable, lamps));
-  root.add(instance(furniture.laptop, laptops));
-  root.add(instance(furniture.books, books));
   return [wood, runner];
 }
 
@@ -419,7 +416,7 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
   );
   root.add(instance(furniture.lampSquareFloor, lamps));
   if (grid.area.id === 'hall') {
-    root.add(instance(furniture.coatRackStanding, [{ x: 2.5, z: 9.5, y: FLOOR_Y }]));
+    root.add(instance(furniture.coatRackStanding, [{ x: 2.5, z: 8.5, y: FLOOR_Y }]));
   }
 }
 
@@ -500,26 +497,30 @@ function buildRenovation(
   return [shade, tapeMaterial, post];
 }
 
+/** One sign over the middle of each door run and the elevator. */
 function addDoorSigns(grid: AreaGrid, root: Group): void {
-  const seen = new Set<string>();
+  const runs = new Map<string, Point[]>();
   grid.area.layout.forEach((row, y) =>
     [...row].forEach((c, x) => {
-      const to = grid.doorTarget({ x, y });
-      const isElevator = c === TILE.elevator;
-      if ((!to && !isElevator) || seen.has(c)) return;
-      seen.add(c);
-      const label = isElevator ? t('sign.elevator') : t(`area.${to ?? 'hall'}`);
-      root.add(
-        sign(
-          label,
-          'world-sign',
-          x + 0.5 + (x === 0 ? 0.6 : 0),
-          2.45,
-          y + 0.5 + (y === 0 ? 0.6 : 0),
-        ),
-      );
+      if (!grid.doorTarget({ x, y }) && c !== TILE.elevator) return;
+      runs.set(c, [...(runs.get(c) ?? []), { x, y }]);
     }),
   );
+  for (const [c, tiles] of runs) {
+    const to = grid.doorTarget(tiles[0] ?? { x: 0, y: 0 });
+    const label = c === TILE.elevator ? t('sign.elevator') : t(`area.${to ?? 'hall'}`);
+    const x = tiles.reduce((sum, p) => sum + p.x, 0) / tiles.length + 0.5;
+    const y = tiles.reduce((sum, p) => sum + p.y, 0) / tiles.length + 0.5;
+    root.add(
+      sign(
+        label,
+        'world-sign world-sign--door',
+        x + (x < 1 ? 0.5 : 0),
+        WALL_HEIGHT - 0.1,
+        y + (y < 1 ? 0.5 : 0),
+      ),
+    );
+  }
 }
 
 function sign(text: string, className: string, x: number, y: number, z: number): CSS2DObject {

@@ -12,19 +12,25 @@ import {
 } from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { createSitPose, walkFromRun } from './poses';
+import { createSitPose, measureStrideSpeed, walkFromRun } from './poses';
 
 const PATH = 'models/characters/';
 /** Character height in tiles (a tile is about a meter); doors are 2 tiles tall. */
 const CHARACTER_HEIGHT = 1.7;
-/** How far the walk is pulled from the run towards standing still (0 = run, 1 = idle). */
-const WALK_CALM = 0.55;
+/**
+ * How far the walk is pulled from the run towards standing still (0 = run, 1 = idle).
+ * The run's stride is short for its body, so the legs keep most of it.
+ */
+const WALK_CALM = { legs: 0.15, body: 0.6 };
+const LEG_BONE = /(UpLeg|Leg|Foot|Toe)/;
 
 export type CharacterKit = {
   create: (look: Appearance) => Group;
   clips: { idle: AnimationClip; walk: AnimationClip; sit: AnimationClip };
   /** Height of the hip joint above the soles while seated. */
   seatedHipHeight: number;
+  /** Ground speed of the walk clip at normal speed, in tiles per second. */
+  walkSpeed: number;
 };
 
 /** Each FBX holds a one-frame "Targeting Pose" next to the real clip, so clips are picked by name. */
@@ -50,11 +56,15 @@ export async function loadCharacterKit(): Promise<CharacterKit> {
 
   const idle = clipNamed(idleFile.animations, 'Idle');
   const run = clipNamed(runFile.animations, 'Run');
+  const walk = walkFromRun(run, idle, (track) =>
+    LEG_BONE.test(track) ? WALK_CALM.legs : WALK_CALM.body,
+  );
   const sit = createSitPose(clone(base), idle);
 
   return {
-    clips: { idle, walk: walkFromRun(run, idle, WALK_CALM), sit: sit.clip },
+    clips: { idle, walk, sit: sit.clip },
     seatedHipHeight: sit.hipHeight,
+    walkSpeed: measureStrideSpeed(clone(base), walk),
     create: (look) => {
       const model = clone(base) as Group;
       const skin = skins[look.skin] ?? skins[0];

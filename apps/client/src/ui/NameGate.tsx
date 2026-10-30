@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { t } from '../i18n/t';
 import { createGuest, type GuestError } from '../net/session';
 import { useGameStore } from '../state/store';
+import { Panel } from './Panel';
 
 /** First screen: pick a nickname to get a guest session. */
 export function NameGate() {
@@ -23,25 +24,30 @@ export function NameGate() {
 
   return (
     <main className="gate">
-      <form className="gate-card" onSubmit={submit}>
-        <h1>{t('gate.title')}</h1>
-        <p>{t('gate.subtitle')}</p>
-        <input
-          autoFocus
-          value={name}
-          maxLength={20}
-          placeholder={t('gate.placeholder')}
-          aria-label={t('gate.placeholder')}
-          onChange={(e) => {
-            setName(e.target.value);
-            setError(null);
-          }}
-        />
-        <button type="submit" disabled={busy}>
-          {t('gate.enter')}
-        </button>
-        {error && <p className="gate-error">{t(`gate.error.${error}`)}</p>}
-      </form>
+      <Panel title={t('gate.title')} className="panel--dialog">
+        <form className="gate-form" onSubmit={submit}>
+          <p className="panel-text">{t('gate.subtitle')}</p>
+          <label className="field">
+            <span className="field-label">{t('gate.name')}</span>
+            <input
+              autoFocus
+              value={name}
+              maxLength={20}
+              placeholder={t('gate.placeholder')}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError(null);
+              }}
+            />
+          </label>
+          {error && <p className="panel-error">{t(`gate.error.${error}`)}</p>}
+          <div className="panel-actions">
+            <button type="submit" className="panel-ok" disabled={busy}>
+              {t('gate.enter')}
+            </button>
+          </div>
+        </form>
+      </Panel>
     </main>
   );
 }

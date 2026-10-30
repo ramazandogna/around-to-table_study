@@ -5,6 +5,9 @@ import { useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { NameGate } from './ui/NameGate';
 import { Notice } from './ui/Notice';
+import { SeatBar } from './ui/SeatBar';
+import { SitDialog } from './ui/SitDialog';
+import { TimerHud } from './ui/TimerHud';
 import { WorldCanvas } from './world/WorldCanvas';
 
 export function App() {
@@ -24,11 +27,14 @@ export function App() {
           {t(`area.${area}`)} · {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
         </span>
       </header>
+      <TimerHud />
       <footer className="hud-bottom">
         <Notice />
+        <SeatBar />
         <ChatBar />
         <p className="hud-hint">{t('hint.controls')}</p>
       </footer>
+      <SitDialog />
     </main>
   );
 }

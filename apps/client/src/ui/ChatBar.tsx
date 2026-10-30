@@ -12,6 +12,8 @@ export function ChatBar() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Dialogs use Enter to confirm.
+      if (useGameStore.getState().sitStep) return;
       if (event.key === 'Enter' && document.activeElement !== input.current) {
         event.preventDefault();
         input.current?.focus();

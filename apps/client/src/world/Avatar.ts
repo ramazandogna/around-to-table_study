@@ -1,12 +1,14 @@
-import type { Appearance, Point } from '@att/shared';
+import { IDLE_STATUS, type Appearance, type Point, type StudyStatus } from '@att/shared';
 import { AnimationMixer, Group, MathUtils, Vector3, type AnimationAction } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { CHAIR_INSET, FLOOR_Y, SEAT_HEIGHT } from './buildArea';
+import { t } from '../i18n/t';
+import { ACTIVITY_ICON, formatClock } from '../state/study';
+import { CHAIR_INSET, FLOOR_Y, SEAT_HEIGHT, TABLE_HEIGHT } from './buildArea';
 import type { CharacterKit } from './characters';
+import { facing } from './instancing';
+import type { TableProps } from './tableProps';
 
-const TILES_PER_SECOND = 2.4;
-/** Roughly matches the derived walk's stride to the ground speed. */
-const WALK_ANIMATION_SPEED = 0.6;
+const TILES_PER_SECOND = 1.9;
 const TURN_SPEED = 12;
 const FADE_SECONDS = 0.25;
 /** Keyboard walking stops for a frame between tiles; poses only change after a real stop. */
@@ -21,11 +23,24 @@ const LABEL_HEIGHT = 1.95;
 const SEATED_LABEL_HEIGHT = 1.55;
 const BUBBLE_MIN_MS = 3000;
 const BUBBLE_MAX_MS = 9000;
+/** Props lie this far from the seat's center, towards the table. */
+const PROP_REACH = 0.68;
+/** Props appear once the person has settled into the chair. */
+const PROPS_AFTER_SECONDS = 0.6;
+const DETAILS_MS = 8000;
 
 const tileCenter = (t: Point) => ({ x: t.x + 0.5, z: t.y + 0.5 });
 
 /** Direction from a seat tile towards its table, or null if the tile is not a seat. */
 export type SeatLookup = (tile: Point) => Point | null;
+
+/** What every avatar in an area shares. */
+export type AvatarContext = { seats: SeatLookup; props: TableProps };
+
+/** A study status with the timer on this device's clock. */
+type LocalStatus = Omit<StudyStatus, 'timer'> & {
+  timer: { endsAt: number; totalMs: number } | null;
+};
 
 type Pose = 'idle' | 'walk' | 'sit';
 
@@ -45,8 +60,13 @@ export class Avatar {
   private readonly seatedY: number;
   private readonly settleTarget = new Vector3();
   private readonly bubble: HTMLDivElement;
+  private readonly details: HTMLDivElement;
+  private readonly badges: HTMLSpanElement;
   private readonly label: CSS2DObject;
   private bubbleTimer = 0;
+  private detailsTimer = 0;
+  private status: LocalStatus = { ...IDLE_STATUS, timer: null };
+  private props: Group | null = null;
 
   constructor(
     kit: CharacterKit,
@@ -54,7 +74,7 @@ export class Avatar {
     start: Point,
     name: string,
     isSelf: boolean,
-    private readonly seats: SeatLookup,
+    private readonly context: AvatarContext,
   ) {
     this.tile = { ...start };
     const { x, z } = tileCenter(start);
@@ -68,7 +88,8 @@ export class Avatar {
       walk: this.mixer.clipAction(kit.clips.walk),
       sit: this.mixer.clipAction(kit.clips.sit),
     };
-    this.actions.walk.timeScale = WALK_ANIMATION_SPEED;
+    // Plays the walk exactly as fast as the body moves, so planted feet do not slide.
+    this.actions.walk.timeScale = TILES_PER_SECOND / kit.walkSpeed;
     this.actions.idle.play();
     this.seatedY = FLOOR_Y + SEAT_HEIGHT + HIP_ABOVE_SEAT - kit.seatedHipHeight;
 
@@ -76,10 +97,18 @@ export class Avatar {
     element.className = `avatar-label${isSelf ? ' avatar-label--self' : ''}`;
     this.bubble = document.createElement('div');
     this.bubble.className = 'avatar-bubble';
-    const nameTag = document.createElement('div');
+    this.details = document.createElement('div');
+    this.details.className = 'avatar-details';
+    // The name tag is a button: tapping it shows what this person is up to.
+    const nameTag = document.createElement('button');
+    nameTag.type = 'button';
     nameTag.className = 'avatar-name';
     nameTag.textContent = name;
-    element.append(this.bubble, nameTag);
+    this.badges = document.createElement('span');
+    this.badges.className = 'avatar-badges';
+    nameTag.append(this.badges);
+    nameTag.addEventListener('click', () => this.toggleDetails());
+    element.append(this.bubble, this.details, nameTag);
     this.label = new CSS2DObject(element);
     this.label.position.set(0, LABEL_HEIGHT, 0);
     this.root.add(this.label);
@@ -91,6 +120,47 @@ export class Avatar {
 
   get position(): { x: number; z: number } {
     return { x: this.root.position.x, z: this.root.position.z };
+  }
+
+  get isSeated(): boolean {
+    return this.pose === 'sit';
+  }
+
+  /** Shows the person's activity on the table and their timer and "do not disturb" on the name tag. */
+  setStatus({ activity, timer, dnd }: StudyStatus): void {
+    if (activity !== this.status.activity) {
+      this.props?.removeFromParent();
+      this.props = activity ? this.context.props(activity) : null;
+      if (this.props) {
+        this.props.visible = false;
+        this.root.add(this.props);
+      }
+    }
+    this.status = {
+      activity,
+      dnd,
+      timer: timer ? { endsAt: Date.now() + timer.remainingMs, totalMs: timer.totalMs } : null,
+    };
+    this.badges.textContent = `${timer ? ' ⏱' : ''}${dnd ? ' 🔕' : ''}`;
+    if (this.details.classList.contains('avatar-details--visible')) this.renderDetails();
+  }
+
+  clearActivity(): void {
+    this.props?.removeFromParent();
+    this.props = null;
+    this.status = { ...this.status, activity: null };
+  }
+
+  /** Opens the small card above the name with activity, timer and "do not disturb". */
+  toggleDetails(): void {
+    window.clearTimeout(this.detailsTimer);
+    if (this.details.classList.toggle('avatar-details--visible')) {
+      this.renderDetails();
+      this.detailsTimer = window.setTimeout(
+        () => this.details.classList.remove('avatar-details--visible'),
+        DETAILS_MS,
+      );
+    }
   }
 
   /** Replaces the current route; an in-progress step finishes first. */
@@ -152,7 +222,7 @@ export class Avatar {
     }
 
     this.stillFor = this.isMoving ? 0 : this.stillFor + delta;
-    const toTable = this.isMoving ? null : this.seats(this.tile);
+    const toTable = this.isMoving ? null : this.context.seats(this.tile);
     if (this.isMoving || this.stillFor < SETTLE_SECONDS) {
       if (this.isMoving) this.play('walk');
     } else if (toTable) {
@@ -162,6 +232,10 @@ export class Avatar {
       this.play('idle');
     }
     this.settle(delta, toTable);
+    this.placeProps(toTable);
+    if (this.status.timer && this.details.classList.contains('avatar-details--visible')) {
+      this.renderDetails();
+    }
 
     const turn =
       MathUtils.euclideanModulo(this.heading - this.model.rotation.y + Math.PI, Math.PI * 2) -
@@ -195,8 +269,42 @@ export class Avatar {
     this.label.position.y = MathUtils.lerp(this.label.position.y, labelHeight, ease);
   }
 
+  /** Keeps the props still on the table while the body eases into the chair. */
+  private placeProps(toTable: Point | null): void {
+    if (!this.props) return;
+    const show = this.pose === 'sit' && toTable !== null && this.stillFor > PROPS_AFTER_SECONDS;
+    this.props.visible = show;
+    if (!show) return;
+    const { x, z } = tileCenter(this.tile);
+    const root = this.root.position;
+    this.props.position.set(
+      x + toTable.x * PROP_REACH - root.x,
+      FLOOR_Y + TABLE_HEIGHT - root.y,
+      z + toTable.y * PROP_REACH - root.z,
+    );
+    this.props.rotation.y = facing(toTable.x, toTable.y);
+  }
+
+  private renderDetails(): void {
+    const { activity, timer, dnd } = this.status;
+    const lines: string[] = [];
+    if (activity && this.isSeated)
+      lines.push(`${ACTIVITY_ICON[activity]} ${t(`activity.${activity}`)}`);
+    if (timer) {
+      const left = timer.endsAt - Date.now();
+      lines.push(
+        left > 0 ? `⏱ ${formatClock(left)} ${t('details.left')}` : `⏱ ${t('details.done')}`,
+      );
+    }
+    if (dnd) lines.push(`🔕 ${t('details.dnd')}`);
+    if (lines.length === 0) lines.push(t(this.isSeated ? 'details.sitting' : 'details.around'));
+    const text = lines.join('\n');
+    if (this.details.textContent !== text) this.details.textContent = text;
+  }
+
   dispose(): void {
     window.clearTimeout(this.bubbleTimer);
+    window.clearTimeout(this.detailsTimer);
     this.mixer.stopAllAction();
     this.label.element.remove();
     this.root.removeFromParent();

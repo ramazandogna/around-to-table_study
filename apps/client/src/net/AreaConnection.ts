@@ -1,4 +1,11 @@
-import type { AreaId, Appearance, ClientMessage, Point, ServerMessage } from '@att/shared';
+import type {
+  AreaId,
+  Appearance,
+  ClientMessage,
+  Point,
+  ServerMessage,
+  StudyStatus,
+} from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
 
 type Options = {
@@ -6,6 +13,8 @@ type Options = {
   from: AreaId | undefined;
   token: string;
   look: Appearance;
+  /** Read on every (re)connect, so the server always has the current status. */
+  status: () => StudyStatus;
   onMessage: (message: ServerMessage) => void;
   onStatus: (connected: boolean) => void;
 };
@@ -26,6 +35,7 @@ export class AreaConnection {
       this.send({
         t: 'hello',
         look: options.look,
+        status: options.status(),
         ...(options.from ? { from: options.from } : {}),
       });
     });
@@ -46,6 +56,10 @@ export class AreaConnection {
 
   say(text: string): void {
     this.send({ t: 'say', text });
+  }
+
+  status(status: StudyStatus): void {
+    this.send({ t: 'status', status });
   }
 
   close(): void {
