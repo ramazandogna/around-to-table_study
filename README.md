@@ -94,7 +94,7 @@ Yes, in pieces. No app combines "study together quietly in a library and slowly 
 - [ ] Elevator: create/join password-protected rooms, get a key from reception
 - [ ] Block, report, profanity filter
 
-**Later:** shared focus timer (pomodoro), unlocking new table sections, mini games in game rooms, paid pets, more languages, a Steam version.
+**Later:** stopwatch, pomodoro breaks and a shared table timer, unlocking new table sections, mini games in game rooms, paid pets, more languages, a Steam version.
 
 ## How hard is it?
 

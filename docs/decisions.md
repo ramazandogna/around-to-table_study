@@ -2,15 +2,32 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-30: Study status travels with the player
+- **Decision:** a `status` message carries `{ activity, timer, dnd }` and replaces the whole status; it is also sent in `hello`. The server keeps the timer as an end time on its own clock and sends it out as `remainingMs`, so clients with wrong clocks agree. An activity only counts while the server sees the player on a seat, and any move clears it.
+- **Why:** others must see what is on your table and whether you have a timer or do not want to be disturbed. Sending time left instead of a clock time avoids clock skew without a time sync.
+- **Client:** the player's own status lives in the Zustand store; `AreaWorld` pushes changes to the avatar and the server. Remote avatars show props only once seated, and drop them when they move.
+
+## 2026-10-30: One panel style and the Tiny5 font
+- **Decision:** every dialog is built from `ui/Panel.tsx` (wooden frame, parchment face, choice cards, checkbox, green OK), inspired by Stardew Valley's character creator. The UI font is Tiny5, self-hosted with `@fontsource/tiny5`, with `font-synthesis: none`.
+- **Why:** one look from the name screen to the table makes the app feel like one place. Pixelify Sans was tried first, but its 2 and 5 look like Z and S, which breaks a timer. Tiny5 has clear digits and Turkish letters; it has a single weight, so hierarchy comes from size.
+
+## 2026-10-30: Doors are built in code
+- **Decision:** `world/doors.ts` builds each door run from the layout: a 4-tile sliding glass double door for the library, a 1-tile swinging wooden door elsewhere, each with a frame, doormat and sign. Doors open when anyone is near. Back-wall doors are complete, with a strip of the next room's floor behind them; front-wall doors keep only the frame and mat so they do not hide the room.
+- **Why:** Kenney's open doorway frame did not read as a door. Wide doors also needed custom geometry, since Kenney's pieces are one tile wide.
+
+## 2026-10-30: Walk speed comes from the clip
+- **Decision:** `measureStrideSpeed` samples the walk clip and measures how fast a planted foot moves backwards; the walk's `timeScale` is the avatar speed divided by that. The walk keeps most of the run's leg motion (15% towards idle) but calms the arms and body (60%). Avatars move at 1.9 tiles per second.
+- **Why:** a hand-picked time scale left the feet moving at a third of the ground speed, so characters slid.
+
 ## 2026-10-29: One tile is about a meter
 - **Decision:** Kenney furniture is loaded at 5 units per tile (twice its own grid) and characters are 1.7 tiles tall. Doors are 2 tiles tall, chairs 0.4 wide, the library table 1.2 deep.
 - **Why:** At Kenney's own scale a tile is about 2 m, so one seat per tile left four chairs of empty space between neighbors and the table looked huge. At 1 m per tile people sit shoulder to shoulder, like Habbo and Sanalika.
 - **Note:** chairs are squashed to 75% height so the short-legged characters can reach the floor when seated.
 
 ## 2026-10-29: Walk and sit are derived in code
-- **Decision:** `world/poses.ts` builds the walk from the run clip (each key pulled 55% towards the idle pose) and a seated "studying" pose by aiming the leg and arm bones in model space.
+- **Decision:** `world/poses.ts` builds the walk from the run clip (each key pulled towards the idle pose; see "Walk speed comes from the clip") and a seated "studying" pose by aiming the leg and arm bones in model space.
 - **Why:** Kenney's Animated Characters only ship idle, run and jump. Each FBX also contains a one-frame "Targeting Pose", which was played by mistake as the walk; clips are now picked by name.
-- **Seating is client-side:** a player whose tile is a seat (`AreaGrid.seatFacing`) sits after standing still for a moment. Every client knows the layout, so no protocol change was needed.
+- **Seating is client-side:** a player whose tile is a seat (`AreaGrid.seatFacing`) sits after standing still for a moment. Every client knows the layout, so sitting itself needs no message (what is on the table does; see "Study status travels with the player").
 
 ## 2026-10-29: Isometric 3D with three.js instead of 2D pixel art
 - **Decision:** The world is rendered with three.js: a fixed isometric orthographic camera looking from the south-east, Kenney's CC0 Furniture Kit for rooms and Kenney's Animated Characters for players. Phaser and the Roguelike tilesets are removed.
