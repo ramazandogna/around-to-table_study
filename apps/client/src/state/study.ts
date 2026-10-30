@@ -1,10 +1,42 @@
-import type { Activity } from '@att/shared';
+import type { Activity, Doing, Emote, Mood } from '@att/shared';
 
 export const ACTIVITY_ICON: Record<Activity, string> = {
   focus: '☕',
   reading: '📖',
   online: '💻',
   quiet: '🌙',
+};
+
+export const DOING_ICON: Record<Doing, string> = {
+  studying: '📚',
+  reading: '📖',
+  working: '💼',
+  writing: '✍️',
+  coding: '💻',
+  drawing: '🎨',
+  resting: '🛋️',
+  team: '🤝',
+};
+
+export const MOOD_ICON: Record<Mood, string> = {
+  happy: '😊',
+  calm: '🍃',
+  focused: '🎯',
+  tired: '😴',
+  sad: '🌧️',
+  excited: '✨',
+  anxious: '😬',
+};
+
+export const EMOTE_ICON: Record<Emote, string> = {
+  wave: '👋',
+  laugh: '😂',
+  heart: '❤️',
+  sleepy: '💤',
+  thinking: '🤔',
+  cheer: '🎉',
+  sad: '😢',
+  coffee: '☕',
 };
 
 /** "24:05", or "1:02:09" from an hour up. */

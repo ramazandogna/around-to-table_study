@@ -1,17 +1,18 @@
 import { AREA_RULES } from '@att/shared';
 import { useState, type FormEvent } from 'react';
 import { t } from '../i18n/t';
-import { useGameStore } from '../state/store';
+import { useGameStore, type Selected } from '../state/store';
+import { DOING_ICON, MOOD_ICON } from '../state/study';
 import { Choice, Panel } from './Panel';
 
 /** What you can do with someone after tapping them: poke, whisper and, later, friends and groups. */
 export function PlayerCard() {
   const selected = useGameStore((s) => s.selected);
   // A fresh card (and empty whisper) for each person.
-  return selected ? <Card key={selected.id} id={selected.id} name={selected.name} /> : null;
+  return selected ? <Card key={selected.id} {...selected} /> : null;
 }
 
-function Card({ id, name }: { id: string; name: string }) {
+function Card({ id, name, lines }: Selected) {
   const area = useGameStore((s) => s.area);
   const connection = useGameStore((s) => s.connection);
   const cooldownUntil = useGameStore((s) => s.cooldownUntil[s.area] ?? 0);
@@ -50,6 +51,21 @@ function Card({ id, name }: { id: string; name: string }) {
       >
         ✕
       </button>
+      <ul className="card-lines">
+        {lines.announcement && <li>📣 {lines.announcement}</li>}
+        {lines.doing && (
+          <li>
+            {DOING_ICON[lines.doing]} {t(`doing.${lines.doing}`)}
+            {lines.doingNote && ` · ${lines.doingNote}`}
+          </li>
+        )}
+        {lines.mood && (
+          <li>
+            {MOOD_ICON[lines.mood]} {t(`mood.${lines.mood}`)}
+            {lines.moodNote && ` · ${lines.moodNote}`}
+          </li>
+        )}
+      </ul>
       {whispering ? (
         <form className="whisper" onSubmit={whisper}>
           <input

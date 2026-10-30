@@ -3,7 +3,9 @@ import type {
   Appearance,
   ClientMessage,
   Point,
+  Emote,
   ServerMessage,
+  StatusLines,
   StudyStatus,
 } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
@@ -16,6 +18,7 @@ type Options = {
   look: () => Appearance;
   /** Read on every (re)connect, so the server always has the current status. */
   status: () => StudyStatus;
+  lines: () => StatusLines;
   onMessage: (message: ServerMessage) => void;
   onStatus: (connected: boolean) => void;
 };
@@ -37,6 +40,7 @@ export class AreaConnection {
         t: 'hello',
         look: options.look(),
         status: options.status(),
+        lines: options.lines(),
         ...(options.from ? { from: options.from } : {}),
       });
     });
@@ -65,6 +69,14 @@ export class AreaConnection {
 
   status(status: StudyStatus): void {
     this.send({ t: 'status', status });
+  }
+
+  setLines(lines: StatusLines): void {
+    this.send({ t: 'lines', lines });
+  }
+
+  emote(emote: Emote): void {
+    this.send({ t: 'emote', emote });
   }
 
   poke(to: string): void {

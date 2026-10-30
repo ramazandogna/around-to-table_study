@@ -1,8 +1,16 @@
-import { IDLE_STATUS, type Appearance, type Point, type StudyStatus } from '@att/shared';
+import {
+  EMPTY_LINES,
+  IDLE_STATUS,
+  type Appearance,
+  type Emote,
+  type Point,
+  type StatusLines,
+  type StudyStatus,
+} from '@att/shared';
 import { AnimationMixer, Group, MathUtils, Vector3, type AnimationAction } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { t } from '../i18n/t';
-import { ACTIVITY_ICON, formatClock } from '../state/study';
+import { ACTIVITY_ICON, DOING_ICON, EMOTE_ICON, formatClock, MOOD_ICON } from '../state/study';
 import { CHAIR_INSET, FLOOR_Y, SEAT_HEIGHT, TABLE_HEIGHT } from './buildArea';
 import type { CharacterKit } from './characters';
 import { facing } from './instancing';
@@ -19,8 +27,9 @@ const SEAT_EASE = 9;
 const SIT_INSET = CHAIR_INSET - 0.05;
 /** The hip joint sits this far above the cushion (half a thigh). */
 const HIP_ABOVE_SEAT = 0.07;
-const LABEL_HEIGHT = 1.95;
-const SEATED_LABEL_HEIGHT = 1.55;
+/** Where the bottom of the name tag sits; lines and bubbles grow upwards from it. */
+const LABEL_HEIGHT = 1.85;
+const SEATED_LABEL_HEIGHT = 1.45;
 const BUBBLE_MIN_MS = 3000;
 const BUBBLE_MAX_MS = 9000;
 /** Props lie this far from the seat's center, towards the table. */
@@ -28,6 +37,13 @@ const PROP_REACH = 0.68;
 /** Props appear once the person has settled into the chair. */
 const PROPS_AFTER_SECONDS = 0.6;
 const DETAILS_MS = 8000;
+const EMOTE_MS = 2400;
+/** Lively emotes make the body hop for a moment, where effects are allowed. */
+const HOPPING: ReadonlySet<Emote> = new Set(['wave', 'cheer', 'laugh']);
+const HOP_SECONDS = 0.9;
+const HOP_HEIGHT = 0.12;
+/** A tapped icon row stays open this long. */
+const LINES_OPEN_MS = 6000;
 
 const tileCenter = (t: Point) => ({ x: t.x + 0.5, z: t.y + 0.5 });
 
@@ -62,6 +78,16 @@ export class Avatar {
   private readonly bubble: HTMLDivElement;
   private readonly details: HTMLDivElement;
   private readonly badges: HTMLSpanElement;
+  private readonly emoteIcon: HTMLDivElement;
+  private readonly linesBox: HTMLDivElement;
+  private readonly nameTag: HTMLButtonElement;
+  private emoteTimer = 0;
+  private hopFor = 0;
+  private linesOpenTimer = 0;
+  private linesPinned = false;
+  private crowded = false;
+  private lines: StatusLines = EMPTY_LINES;
+  private bubbleShift = 0;
   private readonly label: CSS2DObject;
   private bubbleTimer = 0;
   private detailsTimer = 0;
@@ -75,7 +101,7 @@ export class Avatar {
     look: Appearance,
     start: Point,
     readonly name: string,
-    isSelf: boolean,
+    private readonly isSelf: boolean,
     private readonly context: AvatarContext,
   ) {
     this.tile = { ...start };
@@ -102,7 +128,14 @@ export class Avatar {
     this.details = document.createElement('div');
     this.details.className = 'avatar-details';
     // The name tag is a button: tapping it shows what this person is up to.
+    this.emoteIcon = document.createElement('div');
+    this.emoteIcon.className = 'avatar-emote';
+    this.linesBox = document.createElement('div');
+    this.linesBox.className = 'avatar-lines';
+    // In a crowd the lines fold into icons; tapping them opens the full lines for a while.
+    this.linesBox.addEventListener('click', () => this.pinLines());
     const nameTag = document.createElement('button');
+    this.nameTag = nameTag;
     nameTag.type = 'button';
     nameTag.className = 'avatar-name';
     nameTag.textContent = name;
@@ -110,8 +143,10 @@ export class Avatar {
     this.badges.className = 'avatar-badges';
     nameTag.append(this.badges);
     nameTag.addEventListener('click', () => (this.onTap ? this.onTap() : this.toggleDetails()));
-    element.append(this.bubble, this.details, nameTag);
+    element.append(this.emoteIcon, this.bubble, this.details, this.linesBox, nameTag);
     this.label = new CSS2DObject(element);
+    // Anchored at the bottom, so a bubble or lines appearing never push the name around.
+    this.label.center.set(0.5, 1);
     this.label.position.set(0, LABEL_HEIGHT, 0);
     this.root.add(this.label);
   }
@@ -151,6 +186,100 @@ export class Avatar {
     if (this.details.classList.contains('avatar-details--visible')) this.renderDetails();
   }
 
+  /** The announcement, activity and mood lines between the bubble and the name. */
+  setLines(lines: StatusLines): void {
+    this.lines = lines;
+    const rows: [string, string][] = [];
+    if (lines.announcement) rows.push(['📣', lines.announcement]);
+    if (lines.doing)
+      rows.push([
+        DOING_ICON[lines.doing],
+        [t(`doing.${lines.doing}`), lines.doingNote].filter(Boolean).join(' · '),
+      ]);
+    if (lines.mood)
+      rows.push([
+        MOOD_ICON[lines.mood],
+        [t(`mood.${lines.mood}`), lines.moodNote].filter(Boolean).join(' · '),
+      ]);
+    this.linesBox.replaceChildren(
+      ...rows.map(([icon, text]) => {
+        const row = document.createElement('span');
+        row.className = 'avatar-line';
+        const i = document.createElement('i');
+        i.textContent = icon;
+        const span = document.createElement('span');
+        span.className = 'avatar-line-text';
+        span.textContent = text;
+        row.append(i, span);
+        return row;
+      }),
+    );
+    this.updateLinesFold();
+  }
+
+  get statusLines(): StatusLines {
+    return this.lines;
+  }
+
+  /** Folds the lines into one icon row when people crowd together; your own always stay open. */
+  setCrowded(crowded: boolean): void {
+    if (crowded === this.crowded) return;
+    this.crowded = crowded;
+    this.updateLinesFold();
+  }
+
+  private pinLines(): void {
+    window.clearTimeout(this.linesOpenTimer);
+    this.linesPinned = true;
+    this.updateLinesFold();
+    this.linesOpenTimer = window.setTimeout(() => {
+      this.linesPinned = false;
+      this.updateLinesFold();
+    }, LINES_OPEN_MS);
+  }
+
+  private updateLinesFold(): void {
+    const folded = this.crowded && !this.isSelf && !this.linesPinned;
+    this.linesBox.classList.toggle('avatar-lines--folded', folded);
+  }
+
+  /** A feeling over the head. Where effects are off (the library) it is small and still. */
+  emote(emote: Emote, subtle: boolean): void {
+    this.emoteIcon.textContent = EMOTE_ICON[emote];
+    this.emoteIcon.className = `avatar-emote avatar-emote--${subtle ? 'subtle' : 'big'}`;
+    window.clearTimeout(this.emoteTimer);
+    this.emoteTimer = window.setTimeout(() => {
+      this.emoteIcon.className = 'avatar-emote';
+      this.emoteIcon.textContent = '';
+    }, EMOTE_MS);
+    if (!subtle && HOPPING.has(emote) && !this.isSeated) this.hopFor = HOP_SECONDS;
+  }
+
+  /** The name tag on screen, to tell when people crowd together. */
+  nameRect(): DOMRect {
+    return this.nameTag.getBoundingClientRect();
+  }
+
+  /** The speech bubble's screen box as if it were not moved aside, or null when hidden. */
+  bubbleRect(): DOMRect | null {
+    if (!this.bubble.classList.contains('avatar-bubble--visible')) return null;
+    const rect = this.bubble.getBoundingClientRect();
+    return new DOMRect(rect.x, rect.y + this.bubbleShift, rect.width, rect.height);
+  }
+
+  get bubbleFolded(): boolean {
+    return this.bubble.classList.contains('avatar-bubble--folded');
+  }
+
+  /** Moves the bubble up out of a neighbor's way, or folds it to 💬 when there is no room left. */
+  placeBubble(shift: number, folded: boolean): void {
+    if (shift !== this.bubbleShift) {
+      this.bubbleShift = shift;
+      this.bubble.style.translate = shift ? `0 ${-shift}px` : '';
+    }
+    this.bubble.classList.toggle('avatar-bubble--folded', folded);
+  }
+
   clearActivity(): void {
     this.props?.removeFromParent();
     this.props = null;
@@ -188,6 +317,9 @@ export class Avatar {
 
   say(text: string): void {
     this.bubble.textContent = text;
+    this.bubble.title = text;
+    // A new message gets a fresh chance at a spot of its own.
+    this.placeBubble(0, false);
     this.bubble.classList.add('avatar-bubble--visible');
     window.clearTimeout(this.bubbleTimer);
     const visibleMs = MathUtils.clamp(text.length * 80, BUBBLE_MIN_MS, BUBBLE_MAX_MS);
@@ -247,6 +379,11 @@ export class Avatar {
       MathUtils.euclideanModulo(this.heading - this.model.rotation.y + Math.PI, Math.PI * 2) -
       Math.PI;
     this.model.rotation.y += turn * Math.min(1, TURN_SPEED * delta);
+    this.hopFor = Math.max(0, this.hopFor - delta);
+    this.model.position.y =
+      this.hopFor > 0
+        ? HOP_HEIGHT * Math.abs(Math.sin((this.hopFor / HOP_SECONDS) * Math.PI * 3))
+        : 0;
     this.mixer.update(delta);
     return arrived;
   }
@@ -311,6 +448,8 @@ export class Avatar {
   dispose(): void {
     window.clearTimeout(this.bubbleTimer);
     window.clearTimeout(this.detailsTimer);
+    window.clearTimeout(this.emoteTimer);
+    window.clearTimeout(this.linesOpenTimer);
     this.mixer.stopAllAction();
     this.label.element.remove();
     this.root.removeFromParent();

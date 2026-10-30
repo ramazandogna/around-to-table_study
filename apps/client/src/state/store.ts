@@ -1,7 +1,21 @@
-import type { Activity, Appearance, AreaId, StudyStatus } from '@att/shared';
+import {
+  EMPTY_LINES,
+  type Activity,
+  type Appearance,
+  type AreaId,
+  type StatusLines,
+  type StudyStatus,
+} from '@att/shared';
 import { create } from 'zustand';
 import type { AreaConnection } from '../net/AreaConnection';
-import { loadLook, loadSession, saveLook, type GuestSession } from '../net/session';
+import {
+  loadLines,
+  loadLook,
+  loadSession,
+  saveLines,
+  saveLook,
+  type GuestSession,
+} from '../net/session';
 
 export type Notice =
   | 'rate_limited'
@@ -28,6 +42,8 @@ export type ChatLine = {
 const CHAT_LOG_LINES = 100;
 let chatLineKey = 0;
 
+export type Selected = { id: string; name: string; lines: StatusLines };
+
 /** What the player chose when asked before the world goes on. */
 export type ConfirmChoice = 'break' | 'end' | 'stay';
 
@@ -48,6 +64,8 @@ type GameState = {
   session: GuestSession | null;
   /** Null until the player has made a character on this device. */
   look: Appearance | null;
+  /** The player's own status lines, shown over their head. */
+  lines: StatusLines;
   area: AreaId;
   connection: AreaConnection | null;
   connected: boolean;
@@ -62,8 +80,10 @@ type GameState = {
   chatOpen: boolean;
   /** Lines that arrived while the chat panel was closed. */
   unread: number;
-  /** The person whose card is open. */
-  selected: { id: string; name: string } | null;
+  /** The person whose card is open, with their status lines as they were when tapped. */
+  selected: Selected | null;
+  statusOpen: boolean;
+  emoteOpen: boolean;
   confirm: Confirm | null;
   /** True while standing next to the notice board. */
   boardOpen: boolean;
@@ -88,7 +108,11 @@ type GameState = {
   setNotice: (notice: Notice | null, name?: string) => void;
   addChatLine: (line: Omit<ChatLine, 'key'>) => void;
   setChatOpen: (open: boolean) => void;
-  setSelected: (selected: { id: string; name: string } | null) => void;
+  setSelected: (selected: Selected | null) => void;
+  /** Saves the lines on this device and shows them in the world. */
+  setLines: (lines: StatusLines) => void;
+  setStatusOpen: (open: boolean) => void;
+  setEmoteOpen: (open: boolean) => void;
   ask: (confirm: Confirm | null) => void;
   setBoardOpen: (open: boolean) => void;
   setSeated: (seated: boolean) => void;
@@ -106,6 +130,7 @@ type GameState = {
 export const useGameStore = create<GameState>((set) => ({
   session: loadSession(),
   look: loadLook(),
+  lines: loadLines(),
   area: 'hall',
   connection: null,
   connected: false,
@@ -117,6 +142,8 @@ export const useGameStore = create<GameState>((set) => ({
   chatOpen: typeof window !== 'undefined' && window.innerWidth >= 900,
   unread: 0,
   selected: null,
+  statusOpen: false,
+  emoteOpen: false,
   confirm: null,
   boardOpen: false,
   seated: false,
@@ -148,6 +175,12 @@ export const useGameStore = create<GameState>((set) => ({
     })),
   setChatOpen: (chatOpen) => set({ chatOpen, unread: 0 }),
   setSelected: (selected) => set({ selected }),
+  setLines: (lines) => {
+    saveLines(lines);
+    set({ lines });
+  },
+  setStatusOpen: (statusOpen) => set({ statusOpen }),
+  setEmoteOpen: (emoteOpen) => set({ emoteOpen }),
   ask: (confirm) => set({ confirm }),
   setBoardOpen: (boardOpen) => set({ boardOpen }),
   // Sitting down asks what you will work on; standing up clears the table.
@@ -167,6 +200,7 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       session: null,
       look: null,
+      lines: EMPTY_LINES,
       selected: null,
       confirm: null,
       seated: false,

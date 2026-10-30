@@ -1,4 +1,5 @@
 import {
+  AREA_RULES,
   TILE,
   createAreaGrid,
   findPath,
@@ -30,6 +31,16 @@ const CAMERA_LERP = 0.12;
 /** Heights checked when a tap misses the floor, up to the top of the tallest door. */
 const DOOR_PICK_HEIGHTS = [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1];
 const FADE_MS = 220;
+/** How often name tags and bubbles are checked for crowding. */
+const CROWD_CHECK_SECONDS = 0.2;
+/** More people than this on screen fold everyone's status lines into icons. */
+const CROWD_SIZE = 6;
+/** Name tags closer than this (in pixels) count as overlapping. */
+const NEAR_X = 80;
+const NEAR_Y = 34;
+/** A bubble moved up further than this folds to 💬 instead. */
+const MAX_BUBBLE_SHIFT = 110;
+const BUBBLE_GAP = 4;
 
 const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
   ArrowUp: [0, -1],
@@ -64,6 +75,7 @@ export class AreaWorld {
   /** Where a mouse rests over the canvas; touch screens have no hover. */
   private pointer: { x: number; y: number } | null = null;
   private readonly hover = createHoverMarker();
+  private crowdTimer = 0;
   private readonly context: AvatarContext;
   private readonly unsubscribe: () => void;
 
@@ -81,6 +93,10 @@ export class AreaWorld {
       if (state.look && state.look !== before.look) {
         this.player?.setLook(state.look);
         this.connection?.changeLook(state.look);
+      }
+      if (state.lines !== before.lines) {
+        this.player?.setLines(state.lines);
+        this.connection?.setLines(state.lines);
       }
       if (
         state.activity === before.activity &&
@@ -123,6 +139,7 @@ export class AreaWorld {
     const start = from ? this.grid.arrivalPoint(from) : this.grid.area.spawn;
     this.player = new Avatar(this.assets.characters, look, start, session.name, true, this.context);
     this.player.setStatus(studyStatus());
+    this.player.setLines(useGameStore.getState().lines);
     this.player.onTap = () => this.player?.toggleDetails();
     this.view.add(this.player.root);
     this.view.follow(start.x + 0.5, start.y + 0.5, 1);
@@ -136,6 +153,7 @@ export class AreaWorld {
       token: session.token,
       look: () => useGameStore.getState().look ?? look,
       status: () => studyStatus(),
+      lines: () => useGameStore.getState().lines,
       onMessage: (message) => this.onServerMessage(message),
       onStatus: (connected) => useGameStore.getState().setConnected(connected),
     });
@@ -190,6 +208,7 @@ export class AreaWorld {
     this.updateBoard(player);
     this.updateHover();
     for (const other of this.others.values()) other.update(delta);
+    this.arrangeCrowd(delta);
     const people = [player.position, ...[...this.others.values()].map((o) => o.position)];
     this.built?.update(delta, people);
 
@@ -240,6 +259,15 @@ export class AreaWorld {
       }
       case 'status':
         if (message.id !== selfId) this.others.get(message.id)?.setStatus(message.status);
+        break;
+      case 'lined':
+        if (message.id !== selfId) this.others.get(message.id)?.setLines(message.lines);
+        break;
+      case 'emoted':
+        (message.id === selfId ? this.player : this.others.get(message.id))?.emote(
+          message.emote,
+          !AREA_RULES[this.areaId].effectsVisible,
+        );
         break;
       case 'looked':
         this.others.get(message.id)?.setLook(message.look);
@@ -300,14 +328,15 @@ export class AreaWorld {
       this.context,
     );
     avatar.setStatus(player.status);
+    avatar.setLines(player.lines);
     avatar.onTap = () => this.select(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
-    const { typing, wardrobeOpen, confirm } = useGameStore.getState();
-    if (typing || wardrobeOpen || confirm || !(event.code in KEY_DIRECTIONS)) return;
+    const { typing, wardrobeOpen, statusOpen, confirm } = useGameStore.getState();
+    if (typing || wardrobeOpen || statusOpen || confirm || !(event.code in KEY_DIRECTIONS)) return;
     event.preventDefault();
     this.heldKeys.add(event.code);
   };
@@ -346,7 +375,64 @@ export class AreaWorld {
     const other = this.others.get(id);
     if (!other) return;
     other.toggleDetails();
-    useGameStore.getState().setSelected({ id, name: other.name });
+    useGameStore.getState().setSelected({ id, name: other.name, lines: other.statusLines });
+  }
+
+  /**
+   * Keeps a crowd readable: status lines fold into icons when name tags overlap or
+   * many people are on screen, and speech bubbles step up out of each other's way.
+   */
+  private arrangeCrowd(delta: number): void {
+    this.crowdTimer -= delta;
+    if (this.crowdTimer > 0 || !this.player) return;
+    this.crowdTimer = CROWD_CHECK_SECONDS;
+    // The player first, so their own bubble keeps its place.
+    const avatars = [this.player, ...this.others.values()];
+    const screen = this.view.canvas.getBoundingClientRect();
+    const names = avatars.map((avatar) => ({ avatar, rect: avatar.nameRect() }));
+    const onScreen = names.filter(
+      ({ rect: r }) =>
+        r.right > screen.left &&
+        r.left < screen.right &&
+        r.bottom > screen.top &&
+        r.top < screen.bottom,
+    ).length;
+    const centerX = (r: DOMRect) => r.left + r.width / 2;
+    for (const { avatar, rect } of names) {
+      const near = names.some(
+        (other) =>
+          other.avatar !== avatar &&
+          Math.abs(centerX(other.rect) - centerX(rect)) < NEAR_X &&
+          Math.abs(other.rect.top - rect.top) < NEAR_Y,
+      );
+      avatar.setCrowded(near || onScreen > CROWD_SIZE);
+    }
+
+    const placed: DOMRect[] = [];
+    for (const avatar of avatars) {
+      const rect = avatar.bubbleFolded ? null : avatar.bubbleRect();
+      if (!rect) continue;
+      let shift = 0;
+      for (let moved = true; moved && shift <= MAX_BUBBLE_SHIFT;) {
+        moved = false;
+        for (const other of placed) {
+          const top = rect.top - shift;
+          const bottom = rect.bottom - shift;
+          const overlaps =
+            rect.left < other.right &&
+            rect.right > other.left &&
+            top < other.bottom + BUBBLE_GAP &&
+            bottom > other.top - BUBBLE_GAP;
+          if (overlaps) {
+            shift = rect.bottom - other.top + BUBBLE_GAP;
+            moved = true;
+          }
+        }
+      }
+      const folded = shift > MAX_BUBBLE_SHIFT;
+      avatar.placeBubble(folded ? 0 : shift, folded);
+      if (!folded) placed.push(new DOMRect(rect.x, rect.y - shift, rect.width, rect.height));
+    }
   }
 
   /** Lights up the tile under the mouse when tapping it would do something. */

@@ -11,7 +11,9 @@ import { CharacterCreator } from './ui/CharacterCreator';
 import { Notice } from './ui/Notice';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
+import { EmoteMenu } from './ui/EmoteMenu';
 import { StartOver } from './ui/StartOver';
+import { StatusDialog } from './ui/StatusDialog';
 import { TimerHud } from './ui/TimerHud';
 import { Wardrobe } from './ui/Wardrobe';
 import { WorldCanvas } from './world/WorldCanvas';
@@ -41,6 +43,7 @@ export function App() {
           {t(`area.${area}`)} · {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
         </span>
         <div className="hud-links">
+          <StatusDialog />
           <Wardrobe />
           <StartOver />
         </div>
@@ -54,7 +57,10 @@ export function App() {
       <footer className="hud-bottom">
         <Notice />
         <SeatBar />
-        <ChatBar />
+        <div className="chat-row">
+          <EmoteMenu />
+          <ChatBar />
+        </div>
         <p className="hud-hint">{t('hint.controls')}</p>
       </footer>
       <SitDialog />
