@@ -31,4 +31,5 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **One cycle = one roadmap step + the top 3–5 issues**, then commit, deploy and try it on a phone.
 - **Fix what breaks the core loop immediately** (entering, walking, sitting, seeing others); everything else goes on the list and is polished in the phase that touches that room anyway.
 - **Feedback works best one topic per message**, with a screenshot, "expected vs. saw" and a priority (must / nice).
+- **Prefer what deploys without manual setup.** A Durable Object's own SQLite needed no new resource, while D1 would have blocked the deploy until someone created a database by hand.
 - **Restart the dev server cleanly.** A leftover `workerd` process locks the local SQLite file; stop every `wrangler`/`workerd` process before starting again.

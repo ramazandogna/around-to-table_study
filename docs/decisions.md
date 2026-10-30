@@ -2,6 +2,13 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-31: Friends live in one SocialHub Durable Object
+- **Decision:** friendships are rows in the SQLite storage of a single `SocialHub` Durable Object (tables `users`, `friends`), not in D1 yet. Every player keeps one socket to it (`/api/social/ws`) next to the area socket; it carries friend requests, the friends list and presence (online + which room) across rooms.
+- **Why:** it deploys with no manual setup (no `wrangler d1 create`), stays on the free plan with hibernation, and one object comfortably serves the 200 users we design for. The same socket is where whispers to friends in other rooms and the phone (DMs) will go. If it ever outgrows one object, the two tables move to D1 unchanged.
+- **Ids:** guest ids are permanent, so friendships survive the upgrade to a real account. A request needs the other person to have connected once (they are in `users`).
+- **Quiet rooms:** in the library a request only raises a badge on "Friends"; elsewhere it also shows a notice. Accepting always shows one.
+- **Asking back accepts:** a request to someone who already asked you makes you friends.
+
 ## 2026-10-31: Status lines, emotes and crowds
 - **Status lines** (`shared/status.ts`) are chosen by hand and stay until changed: an announcement (40), what you are doing (preset + 20) and a mood (preset + 20). They are separate from the table activity, which comes from sitting down. Links are refused in every line; they are kept on the device like the look.
 - **Emotes** are broadcast once (1.5 s apart per person) and never stored. Where `effectsVisible` is off (the library) they show small and still; elsewhere they pop and lively ones make the body hop. Real gestures wait for a character pack with emote animations.
