@@ -2,6 +2,12 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-31: Status lines, emotes and crowds
+- **Status lines** (`shared/status.ts`) are chosen by hand and stay until changed: an announcement (40), what you are doing (preset + 20) and a mood (preset + 20). They are separate from the table activity, which comes from sitting down. Links are refused in every line; they are kept on the device like the look.
+- **Emotes** are broadcast once (1.5 s apart per person) and never stored. Where `effectsVisible` is off (the library) they show small and still; elsewhere they pop and lively ones make the body hop. Real gestures wait for a character pack with emote animations.
+- **Crowds:** every 0.2 s the client measures the name tags on screen. When tags overlap, or more than 6 people are on screen, other people's lines fold into one icon row (tap to open for 6 s); your own stay open. Speech bubbles step up out of each other's way, and one that would have to move more than 110 px folds to 💬 (the chat panel still has the text).
+- **Labels are anchored at the name tag's bottom**, so bubbles and lines grow upwards without moving the name.
+
 ## 2026-10-31: Social layer: room chat, player card, notice boards
 - **Room chat:** every room except the library has a chat panel (`AreaRules.chatLog`). It is per room and starts empty on entering; there is no global chat across rooms, so a room stays a place. "Do not disturb" hides other people's lines too.
 - **Player card:** tapping a person or their name opens a card. Poke (one per 10 s, only the target sees it) and whisper (same room only, not in the library, shares the room's chat cooldown) work now. Friends and groups are shown as "coming soon" because they need accounts (Phase 5).

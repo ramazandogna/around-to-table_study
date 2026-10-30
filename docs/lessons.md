@@ -7,6 +7,7 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Check every screen on a phone and a desktop size** before calling it done, with screenshots.
 - **Measure, don't guess.** The walk looked like sliding until its speed was measured from the clip. Fonts are checked for clear digits and Turkish letters before they are adopted (Pixelify Sans turned 2 and 5 into Z and S).
 - **Check HUD panels against the world labels.** Three's label renderer gives every label its own z-index, so names and signs drew over panels on phones until the label layer got a stacking context of its own.
+- **Test crowds, not just pairs.** Four players on one spot showed what two never did: bubbles stacking and folding, and lines folding into icons.
 - **Locale-aware text from day one.** Lowercasing "IŞIK" letter by letter gave "işık"; the whole message has to be handled at once.
 
 ## 3D and art
@@ -16,6 +17,7 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Things behind a wall still show above it** in an isometric view; height plus depth decides what is hidden.
 - **Get a reference image before art work.** The Stardew Valley screenshot turned into a panel style in one pass; vague wishes take many rounds.
 - **Make art decisions before polishing.** Furniture size, chair height and poses are tuned to the character, so a room is polished after its characters are chosen, not before.
+- **Avoid import cycles in `shared`.** Protocol schemas need the status lists and the status code needs text cleanup, so cleanup lives in its own `text.ts`; a cycle would break at load time, not at compile time.
 - **Keep systems apart from art.** Appearance, status and rules are data in `shared`; how they are drawn lives in one client module, so swapping models does not touch the rest.
 
 ## Layout and design
