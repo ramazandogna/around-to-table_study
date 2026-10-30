@@ -9,6 +9,26 @@ describe('parseClientMessage', () => {
     });
   });
 
+  it('accepts a study status', () => {
+    const status = {
+      activity: 'reading',
+      timer: { remainingMs: 1000, totalMs: 1500000 },
+      dnd: true,
+    };
+    expect(parseClientMessage(JSON.stringify({ t: 'status', status }))).toEqual({
+      t: 'status',
+      status,
+    });
+  });
+
+  it.each([
+    { activity: 'sleeping', timer: null, dnd: false },
+    { activity: null, timer: { remainingMs: 1, totalMs: 24 * 60 * 60 * 1000 }, dnd: false },
+    { activity: null, timer: null },
+  ])('rejects the study status %j', (status) => {
+    expect(parseClientMessage(JSON.stringify({ t: 'status', status }))).toBeNull();
+  });
+
   it.each(['not json', '{"t":"teleport"}', '{"t":"move","to":{"x":1.5,"y":2}}', '[]'])(
     'rejects %s',
     (raw) => {

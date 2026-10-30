@@ -110,7 +110,7 @@ describe('findPath', () => {
   });
 
   it('reports the elevator as blocked', () => {
-    expect(grid.blockReason({ x: 29, y: 5 })).toBe('elevator');
+    expect(grid.blockReason({ x: 17, y: 5 })).toBe('elevator');
   });
 });
 

@@ -1,19 +1,37 @@
 import { z } from 'zod';
 import type { Appearance } from './character';
+import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
 const appearance = z.object({ skin: z.number().int() });
+const studyStatus = z.object({
+  activity: z.enum(ACTIVITIES).nullable(),
+  timer: z
+    .object({
+      remainingMs: z.number().int().min(0).max(MAX_TIMER_MS),
+      totalMs: z.number().int().min(1).max(MAX_TIMER_MS),
+    })
+    .nullable(),
+  dnd: z.boolean(),
+});
 
 /** Longest text a client may send in one message, before area rules apply. */
 export const MAX_CHAT_LENGTH = 300;
 
 export const clientMessageSchema = z.discriminatedUnion('t', [
   /** First message on every (re)connect. */
-  z.object({ t: z.literal('hello'), look: appearance, from: areaId.optional() }),
+  z.object({
+    t: z.literal('hello'),
+    look: appearance,
+    from: areaId.optional(),
+    status: studyStatus.optional(),
+  }),
   z.object({ t: z.literal('move'), to: point }),
   z.object({ t: z.literal('say'), text: z.string().max(MAX_CHAT_LENGTH) }),
+  /** Replaces the sender's whole study status. */
+  z.object({ t: z.literal('status'), status: studyStatus }),
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -23,6 +41,7 @@ export type PlayerSnapshot = {
   name: string;
   look: Appearance;
   tile: Point;
+  status: StudyStatus;
 };
 
 export type ErrorCode = 'bad_message' | 'rate_limited' | 'blocked' | 'replaced';
@@ -35,6 +54,7 @@ export type ServerMessage =
   /** Puts a player back where the server knows they are (after a rejected move). */
   | { t: 'placed'; id: string; tile: Point }
   | { t: 'said'; id: string; text: string }
+  | { t: 'status'; id: string; status: StudyStatus }
   | { t: 'error'; code: ErrorCode; retryInMs?: number };
 
 export function parseClientMessage(raw: string): ClientMessage | null {
