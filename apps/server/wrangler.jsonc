@@ -10,9 +10,16 @@
     "run_worker_first": ["/api/*"],
   },
   "durable_objects": {
-    "bindings": [{ "name": "AREAS", "class_name": "AreaRoom" }],
+    "bindings": [
+      { "name": "AREAS", "class_name": "AreaRoom" },
+      // One object for everyone's friends and presence; friendships live in its SQLite.
+      { "name": "SOCIAL", "class_name": "SocialHub" },
+    ],
   },
   // The free plan only supports SQLite-backed Durable Objects.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AreaRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AreaRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["SocialHub"] },
+  ],
   "observability": { "enabled": true },
 }
