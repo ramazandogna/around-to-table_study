@@ -1,11 +1,25 @@
 import { z } from 'zod';
-import type { Appearance } from './character';
+import { LOOK_OPTIONS, type Appearance } from './character';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
-const appearance = z.object({ skin: z.number().int() });
+const choice = (options: readonly unknown[]) =>
+  z
+    .number()
+    .int()
+    .min(0)
+    .max(options.length - 1);
+const appearance = z.object({
+  skin: choice(LOOK_OPTIONS.skin),
+  hair: choice(LOOK_OPTIONS.hair),
+  hairColor: choice(LOOK_OPTIONS.hairColor),
+  top: choice(LOOK_OPTIONS.top),
+  topColor: choice(LOOK_OPTIONS.topColor),
+  bottom: choice(LOOK_OPTIONS.bottom),
+  bottomColor: choice(LOOK_OPTIONS.bottomColor),
+});
 const studyStatus = z.object({
   activity: z.enum(ACTIVITIES).nullable(),
   timer: z
@@ -30,6 +44,8 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   }),
   z.object({ t: z.literal('move'), to: point }),
   z.object({ t: z.literal('say'), text: z.string().max(MAX_CHAT_LENGTH) }),
+  /** Changes the sender's look, e.g. after the wardrobe. */
+  z.object({ t: z.literal('look'), look: appearance }),
   /** Replaces the sender's whole study status. */
   z.object({ t: z.literal('status'), status: studyStatus }),
 ]);
@@ -44,7 +60,7 @@ export type PlayerSnapshot = {
   status: StudyStatus;
 };
 
-export type ErrorCode = 'bad_message' | 'rate_limited' | 'blocked' | 'replaced';
+export type ErrorCode = 'bad_message' | 'rate_limited' | 'blocked' | 'replaced' | 'link_blocked';
 
 export type ServerMessage =
   | { t: 'welcome'; self: string; tile: Point; area: AreaId; players: PlayerSnapshot[] }
@@ -55,6 +71,7 @@ export type ServerMessage =
   | { t: 'placed'; id: string; tile: Point }
   | { t: 'said'; id: string; text: string }
   | { t: 'status'; id: string; status: StudyStatus }
+  | { t: 'looked'; id: string; look: Appearance }
   | { t: 'error'; code: ErrorCode; retryInMs?: number };
 
 export function parseClientMessage(raw: string): ClientMessage | null {
