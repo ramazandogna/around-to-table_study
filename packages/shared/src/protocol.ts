@@ -48,6 +48,14 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('look'), look: appearance }),
   /** Replaces the sender's whole study status. */
   z.object({ t: z.literal('status'), status: studyStatus }),
+  /** A friendly nudge to someone in the same area. */
+  z.object({ t: z.literal('poke'), to: z.string().min(1).max(64) }),
+  /** A private message to someone in the same area; only where the area allows it. */
+  z.object({
+    t: z.literal('whisper'),
+    to: z.string().min(1).max(64),
+    text: z.string().max(MAX_CHAT_LENGTH),
+  }),
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -60,7 +68,18 @@ export type PlayerSnapshot = {
   status: StudyStatus;
 };
 
-export type ErrorCode = 'bad_message' | 'rate_limited' | 'blocked' | 'replaced' | 'link_blocked';
+export type ErrorCode =
+  | 'bad_message'
+  | 'rate_limited'
+  | 'blocked'
+  | 'replaced'
+  | 'link_blocked'
+  /** The person asked not to be disturbed. */
+  | 'dnd'
+  /** The person left the area. */
+  | 'unavailable'
+  /** This area does not allow that, e.g. whispers in the library. */
+  | 'not_allowed';
 
 export type ServerMessage =
   | { t: 'welcome'; self: string; tile: Point; area: AreaId; players: PlayerSnapshot[] }
@@ -72,6 +91,9 @@ export type ServerMessage =
   | { t: 'said'; id: string; text: string }
   | { t: 'status'; id: string; status: StudyStatus }
   | { t: 'looked'; id: string; look: Appearance }
+  | { t: 'poked'; from: string }
+  /** Sent to both the sender and the receiver. */
+  | { t: 'whispered'; from: string; to: string; text: string }
   | { t: 'error'; code: ErrorCode; retryInMs?: number };
 
 export function parseClientMessage(raw: string): ClientMessage | null {

@@ -14,9 +14,9 @@ export type AreaRules = {
   effectsVisible: boolean;
   /** Friend requests and mentions may play a sound. */
   notifySound: boolean;
-  /** The in-game phone can be opened. */
+  /** Whispers (private messages) can be sent. */
   dmAllowed: boolean;
-  /** A scrollable chat log next to the bubbles. */
+  /** A room chat panel next to the bubbles; everywhere but the library. */
   chatLog: boolean;
 };
 
@@ -40,7 +40,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     effectsVisible: true,
     notifySound: true,
     dmAllowed: true,
-    chatLog: false,
+    chatLog: true,
   },
   smoking: {
     maxChars: 300,

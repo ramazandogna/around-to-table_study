@@ -37,6 +37,24 @@ describe('parseClientMessage', () => {
   );
 });
 
+describe('poke and whisper', () => {
+  it('accepts a poke and a whisper to someone', () => {
+    expect(parseClientMessage(JSON.stringify({ t: 'poke', to: 'abc' }))).toEqual({
+      t: 'poke',
+      to: 'abc',
+    });
+    expect(parseClientMessage(JSON.stringify({ t: 'whisper', to: 'abc', text: 'hi' }))).toEqual({
+      t: 'whisper',
+      to: 'abc',
+      text: 'hi',
+    });
+  });
+
+  it('rejects a poke without anyone to poke', () => {
+    expect(parseClientMessage(JSON.stringify({ t: 'poke', to: '' }))).toBeNull();
+  });
+});
+
 describe('normalizeName', () => {
   it.each([
     ['  ramazan  ', 'ramazan'],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AREAS, createAreaGrid, findPath, resolveWalkTarget, type AreaId } from '../src';
+import { AREAS, TILE, createAreaGrid, findPath, resolveWalkTarget, type AreaId } from '../src';
 
 const areaIds = Object.keys(AREAS) as AreaId[];
 
@@ -119,5 +119,22 @@ describe('resolveWalkTarget', () => {
     const grid = createAreaGrid('hall');
     const target = resolveWalkTarget(grid, { x: 8, y: 8 }, { x: 12, y: 8 });
     expect(target).toEqual({ x: 11, y: 8 });
+  });
+});
+
+describe('notice boards', () => {
+  it('stands in the hall and the library, beside the way in', () => {
+    for (const id of ['hall', 'library'] as const) {
+      const grid = createAreaGrid(id);
+      const boards: { x: number; y: number }[] = [];
+      grid.area.layout.forEach((row, y) =>
+        [...row].forEach((c, x) => c === TILE.noticeBoard && boards.push({ x, y })),
+      );
+      expect(boards).toHaveLength(1);
+      const board = boards[0] ?? { x: 0, y: 0 };
+      expect(grid.isWalkable(board)).toBe(false);
+      // Someone can stand next to it to read it.
+      expect(resolveWalkTarget(grid, grid.area.spawn, board)).not.toBeNull();
+    }
   });
 });

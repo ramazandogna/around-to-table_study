@@ -18,6 +18,8 @@ export const TILE = {
   doorToSmoking: 'K',
   /** The street entrance: where new arrivals come in. Drawn as a door, never walked through. */
   entrance: 'O',
+  /** A notice board with the rules and this week's events; opens when someone stands next to it. */
+  noticeBoard: 'N',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];

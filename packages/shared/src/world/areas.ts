@@ -27,6 +27,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     // People come in from the street (bottom) and walk the rug straight to the library's
     // glass doors, so arriving and leaving never cross. Reception sits front right, facing
     // the people coming in, on the way to the elevator; the smoking room and sofas are left.
+    // The notice board stands left of the rug, passed on the way in; the door frame would hide it lower down.
     layout: [
       '#######LLLL#######',
       '#P..............P#',
@@ -34,7 +35,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
       '#................#',
       '#................#',
       'K................E',
-      '#................E',
+      '#.....N..........E',
       '#...........C....#',
       '#..bbbb.....C....#',
       '#P..........C...P#',
@@ -60,7 +61,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
       '#.......SSSSSSSSSSSSSS.......#',
       '#............................#',
       '#............................#',
-      '#B..........................B#',
+      '#B..N.......................B#',
       '#B..........................B#',
       '#B..........................B#',
       '#............................#',
