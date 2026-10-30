@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LOOK_OPTIONS, type Appearance } from './character';
+import { DOINGS, EMOTES, MOODS, STATUS_LIMITS, type Emote, type StatusLines } from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import type { AreaId, Point } from './world';
 
@@ -31,8 +32,19 @@ const studyStatus = z.object({
   dnd: z.boolean(),
 });
 
+export { normalizeChat } from './text';
+
 /** Longest text a client may send in one message, before area rules apply. */
 export const MAX_CHAT_LENGTH = 300;
+
+// Lines are cut to length by cleanStatusLines; this only stops oversized messages.
+const statusLines = z.object({
+  announcement: z.string().max(STATUS_LIMITS.announcement * 2),
+  doing: z.enum(DOINGS).nullable(),
+  doingNote: z.string().max(STATUS_LIMITS.note * 2),
+  mood: z.enum(MOODS).nullable(),
+  moodNote: z.string().max(STATUS_LIMITS.note * 2),
+});
 
 export const clientMessageSchema = z.discriminatedUnion('t', [
   /** First message on every (re)connect. */
@@ -41,6 +53,7 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
     look: appearance,
     from: areaId.optional(),
     status: studyStatus.optional(),
+    lines: statusLines.optional(),
   }),
   z.object({ t: z.literal('move'), to: point }),
   z.object({ t: z.literal('say'), text: z.string().max(MAX_CHAT_LENGTH) }),
@@ -48,6 +61,9 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('look'), look: appearance }),
   /** Replaces the sender's whole study status. */
   z.object({ t: z.literal('status'), status: studyStatus }),
+  /** Replaces the sender's status lines. */
+  z.object({ t: z.literal('lines'), lines: statusLines }),
+  z.object({ t: z.literal('emote'), emote: z.enum(EMOTES) }),
   /** A friendly nudge to someone in the same area. */
   z.object({ t: z.literal('poke'), to: z.string().min(1).max(64) }),
   /** A private message to someone in the same area; only where the area allows it. */
@@ -66,6 +82,7 @@ export type PlayerSnapshot = {
   look: Appearance;
   tile: Point;
   status: StudyStatus;
+  lines: StatusLines;
 };
 
 export type ErrorCode =
@@ -91,6 +108,8 @@ export type ServerMessage =
   | { t: 'said'; id: string; text: string }
   | { t: 'status'; id: string; status: StudyStatus }
   | { t: 'looked'; id: string; look: Appearance }
+  | { t: 'lined'; id: string; lines: StatusLines }
+  | { t: 'emoted'; id: string; emote: Emote }
   | { t: 'poked'; from: string }
   /** Sent to both the sender and the receiver. */
   | { t: 'whispered'; from: string; to: string; text: string }
@@ -111,13 +130,4 @@ export const NAME_PATTERN = /^[\p{L}\p{N} _.-]{2,20}$/u;
 export function normalizeName(raw: string): string | null {
   const name = raw.normalize('NFC').trim().replace(/\s+/g, ' ');
   return NAME_PATTERN.test(name) ? name : null;
-}
-
-// eslint-disable-next-line no-control-regex -- stripping control characters is the point
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
-
-/** Collapses whitespace and strips control characters; returns null when nothing is left. */
-export function normalizeChat(raw: string, maxLength: number): string | null {
-  const text = raw.normalize('NFC').replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
-  return text ? text.slice(0, maxLength) : null;
 }

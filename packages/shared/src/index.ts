@@ -3,5 +3,6 @@ export * from './constants';
 export * from './health';
 export * from './protocol';
 export * from './rules';
+export * from './status';
 export * from './study';
 export * from './world';

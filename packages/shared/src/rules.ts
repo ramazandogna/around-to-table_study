@@ -1,4 +1,4 @@
-import { normalizeChat } from './protocol';
+import { normalizeChat } from './text';
 import type { AreaId } from './world';
 
 /** What each area allows. The server enforces these; clients only give early feedback. */
