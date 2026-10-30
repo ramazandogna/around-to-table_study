@@ -1,7 +1,7 @@
 # Around the Table 📚🪑
 
 > **Don't study alone. Take a seat.**
-> A cozy, browser-based, top-down pixel library where people study "together" in silence, take breaks in a chatty smoking room, and slowly become friends.
+> A cozy, browser-based isometric library where people study "together" in silence, take breaks in a chatty smoking room, and slowly become friends.
 
 **Status:** 🟡 Idea / planning · No playable build yet · No code written
 

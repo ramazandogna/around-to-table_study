@@ -2,11 +2,21 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-29: One tile is about a meter
+- **Decision:** Kenney furniture is loaded at 5 units per tile (twice its own grid) and characters are 1.7 tiles tall. Doors are 2 tiles tall, chairs 0.4 wide, the library table 1.2 deep.
+- **Why:** At Kenney's own scale a tile is about 2 m, so one seat per tile left four chairs of empty space between neighbors and the table looked huge. At 1 m per tile people sit shoulder to shoulder, like Habbo and Sanalika.
+- **Note:** chairs are squashed to 75% height so the short-legged characters can reach the floor when seated.
+
+## 2026-10-29: Walk and sit are derived in code
+- **Decision:** `world/poses.ts` builds the walk from the run clip (each key pulled 55% towards the idle pose) and a seated "studying" pose by aiming the leg and arm bones in model space.
+- **Why:** Kenney's Animated Characters only ship idle, run and jump. Each FBX also contains a one-frame "Targeting Pose", which was played by mistake as the walk; clips are now picked by name.
+- **Seating is client-side:** a player whose tile is a seat (`AreaGrid.seatFacing`) sits after standing still for a moment. Every client knows the layout, so no protocol change was needed.
+
 ## 2026-10-29: Isometric 3D with three.js instead of 2D pixel art
 - **Decision:** The world is rendered with three.js: a fixed isometric orthographic camera looking from the south-east, Kenney's CC0 Furniture Kit for rooms and Kenney's Animated Characters for players. Phaser and the Roguelike tilesets are removed.
 - **Why:** The 16×16 top-down look could not carry the warmth we want (Sanalika/Habbo). The isometric library pack the maintainer first chose is a set of renders of these same 3D models, so using the models gives that look plus characters that turn, walk and can later sit and wave.
 - **How:** ASCII layouts in `shared` stay the single source of truth for collision; `buildArea.ts` turns them into instanced Kenney models. Only the north and west walls are built so the camera can see in. Names and speech bubbles are DOM elements (CSS2DRenderer), so text stays crisp and is easy to style.
-- **Model facing:** in our loaded space chairs face +z, while bookcases, sofas and laptops open towards -z; `buildArea.ts` adds half a turn for those.
+- **Model facing:** in our loaded space chairs, bookcases and sofas open towards -z (the chair's backrest is on +z); `buildArea.ts` adds half a turn for them.
 - **Characters are temporary:** Animated Characters only has idle, jump and run. Kenney's "Mini Characters" (cuter, with walk/sit/emote animations) replaces them once downloaded from kenney.nl; only `world/characters.ts` and `CHARACTER_SKINS` change.
 
 
