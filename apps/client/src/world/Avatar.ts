@@ -67,12 +67,14 @@ export class Avatar {
   private detailsTimer = 0;
   private status: LocalStatus = { ...IDLE_STATUS, timer: null };
   private props: Group | null = null;
+  /** Called when the name tag is tapped; by default it shows what this person is up to. */
+  onTap: (() => void) | null = null;
 
   constructor(
     private readonly kit: CharacterKit,
     look: Appearance,
     start: Point,
-    name: string,
+    readonly name: string,
     isSelf: boolean,
     private readonly context: AvatarContext,
   ) {
@@ -107,7 +109,7 @@ export class Avatar {
     this.badges = document.createElement('span');
     this.badges.className = 'avatar-badges';
     nameTag.append(this.badges);
-    nameTag.addEventListener('click', () => this.toggleDetails());
+    nameTag.addEventListener('click', () => (this.onTap ? this.onTap() : this.toggleDetails()));
     element.append(this.bubble, this.details, nameTag);
     this.label = new CSS2DObject(element);
     this.label.position.set(0, LABEL_HEIGHT, 0);

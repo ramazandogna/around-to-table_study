@@ -1,4 +1,5 @@
 import {
+  TILE,
   createAreaGrid,
   findPath,
   resolveWalkTarget,
@@ -11,13 +12,14 @@ import {
 } from '@att/shared';
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
-import { studyStatus, useGameStore } from '../state/store';
+import { studyStatus, useGameStore, type ConfirmChoice } from '../state/store';
 import { Avatar, type AvatarContext } from './Avatar';
-import { buildArea, type BuiltArea } from './buildArea';
+import { buildArea, FLOOR_Y, type BuiltArea } from './buildArea';
 import type { CharacterKit } from './characters';
 import type { IsoView } from './IsoView';
 import type { Furniture } from './models';
 import { createTableProps } from './tableProps';
+import { createHoverMarker, type HoverKind } from './hoverMarker';
 
 const BLOCK_MESSAGES: Partial<Record<BlockReason, MessageKey>> = {
   renovation: 'blocked.renovation',
@@ -41,6 +43,8 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
 };
 
 const sameTile = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
+/** Tiles apart, counting diagonal steps as one. */
+const reach = (a: Point, b: Point) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
 type Assets = { furniture: Furniture; characters: CharacterKit };
 
@@ -55,6 +59,11 @@ export class AreaWorld {
   private readonly heldKeys = new Set<string>();
   private leaving = false;
   private lastBlockMessageAt = -Infinity;
+  private boards: Point[] = [];
+  private nearBoard = false;
+  /** Where a mouse rests over the canvas; touch screens have no hover. */
+  private pointer: { x: number; y: number } | null = null;
+  private readonly hover = createHoverMarker();
   private readonly context: AvatarContext;
   private readonly unsubscribe: () => void;
 
@@ -87,6 +96,9 @@ export class AreaWorld {
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
     view.canvas.addEventListener('pointerdown', this.onPointerDown);
+    view.canvas.addEventListener('pointermove', this.onPointerMove);
+    view.canvas.addEventListener('pointerleave', this.onPointerLeave);
+    view.add(this.hover.mesh);
     view.setLoop((delta) => this.update(delta));
   }
 
@@ -100,12 +112,18 @@ export class AreaWorld {
     this.built = buildArea(this.grid, this.assets.furniture);
     this.view.add(this.built.root);
     this.view.setBounds(this.grid.width, this.grid.height);
+    this.boards = [];
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((c, x) => c === TILE.noticeBoard && this.boards.push({ x, y })),
+    );
+    this.nearBoard = false;
 
     const look = useGameStore.getState().look;
     if (!look) throw new Error('AreaWorld needs a character look');
     const start = from ? this.grid.arrivalPoint(from) : this.grid.area.spawn;
     this.player = new Avatar(this.assets.characters, look, start, session.name, true, this.context);
     this.player.setStatus(studyStatus());
+    this.player.onTap = () => this.player?.toggleDetails();
     this.view.add(this.player.root);
     this.view.follow(start.x + 0.5, start.y + 0.5, 1);
 
@@ -133,6 +151,11 @@ export class AreaWorld {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
     this.view.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.view.canvas.removeEventListener('pointermove', this.onPointerMove);
+    this.view.canvas.removeEventListener('pointerleave', this.onPointerLeave);
+    this.view.remove(this.hover.mesh);
+    this.hover.dispose();
+    this.view.canvas.style.cursor = '';
     this.view.setLoop(null);
   }
 
@@ -144,7 +167,9 @@ export class AreaWorld {
     this.others.clear();
     this.player?.dispose();
     this.player = null;
-    useGameStore.getState().setSeated(false);
+    const store = useGameStore.getState();
+    store.setSeated(false);
+    store.ask(null);
     if (this.built) {
       this.view.remove(this.built.root);
       this.built.dispose();
@@ -162,6 +187,8 @@ export class AreaWorld {
     if (player.isSeated !== useGameStore.getState().seated) {
       useGameStore.getState().setSeated(player.isSeated);
     }
+    this.updateBoard(player);
+    this.updateHover();
     for (const other of this.others.values()) other.update(delta);
     const people = [player.position, ...[...this.others.values()].map((o) => o.position)];
     this.built?.update(delta, people);
@@ -171,7 +198,10 @@ export class AreaWorld {
   }
 
   private onServerMessage(message: ServerMessage): void {
-    const selfId = useGameStore.getState().session?.id;
+    const store = useGameStore.getState();
+    const self = store.session;
+    const selfId = self?.id;
+    const nameOf = (id: string) => (id === selfId ? self?.name : this.others.get(id)?.name) ?? '?';
     switch (message.t) {
       case 'welcome':
         for (const other of this.others.values()) other.dispose();
@@ -185,12 +215,19 @@ export class AreaWorld {
         }
         break;
       case 'joined':
-        if (message.player.id !== selfId) this.addOther(message.player);
+        if (message.player.id === selfId) break;
+        this.addOther(message.player);
+        store.addChatLine({ kind: 'joined', name: message.player.name, self: false });
         break;
-      case 'left':
-        this.others.get(message.id)?.dispose();
+      case 'left': {
+        const other = this.others.get(message.id);
+        if (!other) break;
+        store.addChatLine({ kind: 'left', name: other.name, self: false });
+        other.dispose();
         this.others.delete(message.id);
+        if (store.selected?.id === message.id) store.setSelected(null);
         break;
+      }
       case 'moved': {
         const other = this.others.get(message.id);
         if (!other) break;
@@ -212,25 +249,42 @@ export class AreaWorld {
           this.player.teleport(message.tile);
         }
         break;
-      case 'said':
-        if (message.id === selfId) this.player?.say(message.text);
-        // "Do not disturb" hides everyone else's chatter.
-        else if (!useGameStore.getState().dnd) this.others.get(message.id)?.say(message.text);
+      case 'said': {
+        const mine = message.id === selfId;
+        // "Do not disturb" hides everyone else's chatter, in the room and in the chat panel.
+        if (!mine && store.dnd) break;
+        (mine ? this.player : this.others.get(message.id))?.say(message.text);
+        store.addChatLine({
+          kind: 'say',
+          name: nameOf(message.id),
+          text: message.text,
+          self: mine,
+        });
         break;
-      case 'error': {
-        const store = useGameStore.getState();
+      }
+      case 'whispered':
+        store.addChatLine({
+          kind: 'whisper',
+          name: nameOf(message.from),
+          to: nameOf(message.to),
+          text: message.text,
+          self: message.from === selfId,
+        });
+        if (message.from !== selfId) store.setChatOpen(true);
+        break;
+      case 'poked':
+        // Only the poked person sees the nudge, over whoever sent it.
+        this.others.get(message.from)?.say('👉');
+        store.setNotice('poked', nameOf(message.from));
+        break;
+      case 'error':
         // A known wait shows on the send button; anything else gets a short notice.
         if (message.code === 'rate_limited' && message.retryInMs) {
           store.setCooldown(this.areaId, Date.now() + message.retryInMs);
-        } else if (
-          message.code === 'rate_limited' ||
-          message.code === 'replaced' ||
-          message.code === 'link_blocked'
-        ) {
+        } else if (message.code !== 'bad_message' && message.code !== 'blocked') {
           store.setNotice(message.code);
         }
         break;
-      }
     }
     useGameStore.getState().setPlayersHere(this.others.size + 1);
   }
@@ -246,13 +300,14 @@ export class AreaWorld {
       this.context,
     );
     avatar.setStatus(player.status);
+    avatar.onTap = () => this.select(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
-    const { typing, wardrobeOpen } = useGameStore.getState();
-    if (typing || wardrobeOpen || !(event.code in KEY_DIRECTIONS)) return;
+    const { typing, wardrobeOpen, confirm } = useGameStore.getState();
+    if (typing || wardrobeOpen || confirm || !(event.code in KEY_DIRECTIONS)) return;
     event.preventDefault();
     this.heldKeys.add(event.code);
   };
@@ -264,14 +319,90 @@ export class AreaWorld {
   private readonly onBlur = () => this.heldKeys.clear();
 
   private readonly onPointerDown = (event: PointerEvent) => {
-    if (this.view.isPinching) return;
+    if (this.view.isPinching || useGameStore.getState().confirm) return;
     const tile = this.pickTile(event.clientX, event.clientY);
     if (!tile) return;
-    // Tapping someone shows what they are up to instead of walking onto them.
-    const someone = [...this.others.values()].find((o) => sameTile(o.tile, tile));
-    if (someone) someone.toggleDetails();
+    // Tapping someone opens their card instead of walking onto them.
+    const someone = this.personAt(tile);
+    if (someone) this.select(someone);
     else this.walkTo(tile);
   };
+
+  private readonly onPointerMove = (event: PointerEvent) => {
+    this.pointer = event.pointerType === 'mouse' ? { x: event.clientX, y: event.clientY } : null;
+  };
+
+  private readonly onPointerLeave = () => {
+    this.pointer = null;
+  };
+
+  private personAt(tile: Point): string | null {
+    for (const [id, other] of this.others) if (sameTile(other.tile, tile)) return id;
+    return null;
+  }
+
+  /** Opens someone's card, with what they are up to shown over their head. */
+  private select(id: string): void {
+    const other = this.others.get(id);
+    if (!other) return;
+    other.toggleDetails();
+    useGameStore.getState().setSelected({ id, name: other.name });
+  }
+
+  /** Lights up the tile under the mouse when tapping it would do something. */
+  private updateHover(): void {
+    const at = this.pointer;
+    const tile = at && !useGameStore.getState().confirm ? this.pickTile(at.x, at.y) : null;
+    const kind = tile ? this.hoverKind(tile) : null;
+    this.hover.show(tile && kind ? { x: tile.x + 0.5, y: FLOOR_Y, z: tile.y + 0.5 } : null, kind);
+    this.view.canvas.style.cursor = kind ? 'pointer' : '';
+  }
+
+  private hoverKind(tile: Point): HoverKind | null {
+    if (
+      this.personAt(tile) ||
+      this.grid.doorTarget(tile) ||
+      this.grid.seatFacing(tile) ||
+      this.grid.tileAt(tile) === TILE.noticeBoard
+    )
+      return 'special';
+    return this.grid.isWalkable(tile) ? 'floor' : null;
+  }
+
+  /** The notice board opens when the player stops next to it and closes when they walk on. */
+  private updateBoard(player: Avatar): void {
+    const near = !player.isMoving && this.boards.some((b) => reach(b, player.tile) <= 1);
+    if (near === this.nearBoard) return;
+    this.nearBoard = near;
+    useGameStore.getState().setBoardOpen(near);
+  }
+
+  /**
+   * Runs `go` now, or first asks when it would leave the table with a timer running:
+   * a short break keeps the timer, finishing ends it, and staying does nothing.
+   */
+  private leaveSeat(player: Avatar, go: () => void): void {
+    const store = useGameStore.getState();
+    if (!player.isSeated || !this.timerRunning()) return go();
+    this.heldKeys.clear();
+    store.ask({
+      kind: 'stand',
+      answer: (choice) => this.answer(choice, go),
+    });
+  }
+
+  private answer(choice: ConfirmChoice, go: () => void, stay?: () => void): void {
+    const store = useGameStore.getState();
+    store.ask(null);
+    if (choice === 'stay') return stay?.();
+    if (choice === 'end') store.stopTimer();
+    go();
+  }
+
+  private timerRunning(): boolean {
+    const timer = useGameStore.getState().timer;
+    return timer !== null && timer.endsAt > Date.now();
+  }
 
   /** The tapped tile, or the door or elevator drawn there when the tap misses the floor. */
   private pickTile(clientX: number, clientY: number): Point | null {
@@ -297,12 +428,14 @@ export class AreaWorld {
     const next = { x: player.tile.x + dx, y: player.tile.y + dy };
     const reason = this.grid.blockReason(next);
     if (reason) {
-      player.face(dx, dy);
+      if (!player.isSeated) player.face(dx, dy);
       this.explainBlock(reason);
       return;
     }
-    player.walk([next]);
-    this.connection?.move(next);
+    this.leaveSeat(player, () => {
+      player.walk([next]);
+      this.connection?.move(next);
+    });
   }
 
   private walkTo(tile: Point): void {
@@ -315,9 +448,11 @@ export class AreaWorld {
     }
     const goal = resolveWalkTarget(this.grid, player.tile, tile);
     const path = goal && findPath(this.grid, player.tile, goal);
-    if (!goal || !path) return;
-    player.walk(path);
-    this.connection?.move(goal);
+    if (!goal || !path || sameTile(goal, player.tile)) return;
+    this.leaveSeat(player, () => {
+      player.walk(path);
+      this.connection?.move(goal);
+    });
   }
 
   private explainBlock(reason: BlockReason): void {
@@ -331,6 +466,32 @@ export class AreaWorld {
   private checkDoor(tile: Point): void {
     const to = this.grid.doorTarget(tile);
     if (!to) return;
+    // A study timer belongs to the library, so leaving it asks first.
+    if (this.areaId === 'library' && this.timerRunning()) {
+      this.heldKeys.clear();
+      this.player?.walk([]);
+      useGameStore.getState().ask({
+        kind: 'leave',
+        answer: (choice) =>
+          this.answer(
+            choice,
+            () => this.goThrough(to),
+            () => this.stepBackFrom(tile),
+          ),
+      });
+      return;
+    }
+    this.goThrough(to);
+  }
+
+  private stepBackFrom(door: Point): void {
+    const back = this.grid.neighbors(door).find((n) => !this.grid.doorTarget(n));
+    if (!back || !this.player) return;
+    this.player.walk([back]);
+    this.connection?.move(back);
+  }
+
+  private goThrough(to: AreaId): void {
     this.leaving = true;
     this.fader.classList.add('world-fader--dark');
     const from = this.areaId;

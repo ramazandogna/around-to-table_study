@@ -131,6 +131,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   const sideTables: Placement[] = [];
   const bookcases: Placement[] = [];
   const books: Placement[] = [];
+  const boards: Point[] = [];
 
   for (let y = 1; y < H - 1; y++) {
     for (let x = 1; x < W - 1; x++) {
@@ -181,6 +182,9 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
           });
           break;
         }
+        case TILE.noticeBoard:
+          boards.push({ x, y });
+          break;
         case TILE.ashtray:
           sideTables.push({ x: cx, z: cz, y: FLOOR_Y, scale: [0.45, 1, 0.45] });
           break;
@@ -218,6 +222,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   const tables = buildTables(grid, furniture, root);
   materials.push(...tables);
   decorate(grid, furniture, root, desks);
+  materials.push(...buildNoticeBoards(boards, root));
   for (const zone of grid.area.renovation) {
     if (grid.userCount < zone.unlockAtUsers)
       materials.push(...buildRenovation(zone, furniture, root));
@@ -513,6 +518,68 @@ function buildRenovation(
     ),
   );
   return [shade, tapeMaterial, post];
+}
+
+const CORK_TEXTURE = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const g = canvas.getContext('2d');
+  if (g) {
+    g.fillStyle = '#B98A55';
+    g.fillRect(0, 0, 128, 128);
+    // Pinned notes: the rules sheet is the big one, events are the small colored cards.
+    const notes: [number, number, number, number, string][] = [
+      [10, 10, 52, 66, '#F6F0E2'],
+      [70, 12, 46, 30, '#F2D27A'],
+      [72, 50, 44, 28, '#A9CBE3'],
+      [14, 84, 42, 32, '#F3B5A4'],
+      [66, 88, 50, 28, '#F6F0E2'],
+    ];
+    for (const [x, y, w, h, color] of notes) {
+      g.fillStyle = 'rgba(0,0,0,0.18)';
+      g.fillRect(x + 2, y + 2, w, h);
+      g.fillStyle = color;
+      g.fillRect(x, y, w, h);
+      g.fillStyle = 'rgba(60,45,35,0.45)';
+      for (let line = y + 9; line < y + h - 4; line += 7) g.fillRect(x + 5, line, w - 10, 2);
+      g.fillStyle = '#C8403A';
+      g.beginPath();
+      g.arc(x + w / 2, y + 4, 3, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
+})();
+
+/** A standing cork board on two legs, facing +x towards the path people walk in on. */
+function buildNoticeBoards(boards: Point[], root: Group): MeshStandardMaterial[] {
+  if (boards.length === 0) return [];
+  const wood = new MeshStandardMaterial({ color: 0x6e4a2f, roughness: 0.8 });
+  const cork = new MeshStandardMaterial({ map: CORK_TEXTURE, roughness: 0.95 });
+  for (const { x, y } of boards) {
+    const { x: cx, z: cz } = tileCenter(x, y);
+    const board = new Group();
+    board.position.set(cx, FLOOR_Y, cz);
+    for (const side of [-0.42, 0.42]) {
+      const leg = new Mesh(new BoxGeometry(0.07, 1.5, 0.07), wood);
+      leg.position.set(0, 0.75, side);
+      leg.castShadow = true;
+      board.add(leg);
+    }
+    const frame = new Mesh(new BoxGeometry(0.07, 0.82, 0.96), wood);
+    frame.position.set(0, 1.05, 0);
+    frame.castShadow = true;
+    // Only the front face (+x) shows the cork and its notes.
+    const face = new Mesh(new BoxGeometry(0.02, 0.72, 0.86), [cork, wood, wood, wood, wood, wood]);
+    face.position.set(0.04, 1.05, 0);
+    board.add(frame, face);
+    board.add(sign(t('sign.board'), 'world-sign world-sign--board', 0, 1.75, 0));
+    root.add(board);
+  }
+  return [wood, cork];
 }
 
 /** One sign over the middle of each door run, the street entrance and the elevator. */

@@ -37,6 +37,7 @@ export function Choice({
   hint,
   shortcut,
   selected,
+  disabled,
   onSelect,
 }: {
   icon: string;
@@ -44,10 +45,17 @@ export function Choice({
   hint?: string;
   shortcut?: number;
   selected?: boolean;
+  disabled?: boolean;
   onSelect: () => void;
 }) {
   return (
-    <button type="button" className="choice" aria-pressed={selected ?? false} onClick={onSelect}>
+    <button
+      type="button"
+      className="choice"
+      aria-pressed={selected ?? false}
+      disabled={disabled}
+      onClick={onSelect}
+    >
       <span className="choice-icon" aria-hidden>
         {icon}
       </span>

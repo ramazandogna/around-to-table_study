@@ -3,6 +3,10 @@ import { APP_NAME } from '@att/shared';
 import { t } from './i18n/t';
 import { useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
+import { ChatPanel } from './ui/ChatPanel';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { NoticeBoard } from './ui/NoticeBoard';
+import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
 import { Notice } from './ui/Notice';
 import { SeatBar } from './ui/SeatBar';
@@ -42,6 +46,11 @@ export function App() {
         </div>
       </header>
       <TimerHud />
+      <aside className="hud-side">
+        <NoticeBoard />
+        <PlayerCard />
+      </aside>
+      <ChatPanel />
       <footer className="hud-bottom">
         <Notice />
         <SeatBar />
@@ -49,6 +58,7 @@ export function App() {
         <p className="hud-hint">{t('hint.controls')}</p>
       </footer>
       <SitDialog />
+      <ConfirmDialog />
     </main>
   );
 }

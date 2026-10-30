@@ -68,6 +68,8 @@ button {
 .world-labels {
   position: absolute;
   inset: 0;
+  /* Labels get depth-sorted z-indexes; this keeps them all under the HUD panels. */
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -190,6 +192,14 @@ button {
   border: 2px solid #c9a227;
   background: rgb(43 33 24 / 0.92);
   font-size: 12px;
+}
+
+.world-sign--board {
+  padding: 2px 8px;
+  border: 2px solid #8a6a3f;
+  background: rgb(246 240 226 / 0.94);
+  color: #3b2a1e;
+  font-size: 11px;
 }
 
 .world-sign--warning {
@@ -774,10 +784,191 @@ button:disabled {
   color: var(--panel-ink-soft);
 }
 
+/* ---------- Side panels: notice board, player card and room chat ---------- */
+
+.hud-side {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 96px);
+  left: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(300px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.hud-side > .panel {
+  pointer-events: auto;
+}
+
+.hud-side .panel-title {
+  padding-right: 40px;
+  font-size: 22px;
+  text-align: left;
+}
+
+.player-card-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.choice:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.choice:disabled:active {
+  transform: none;
+}
+
+.whisper {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.whisper input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 15px;
+}
+
+.board-heading {
+  margin: 12px 0 4px;
+  font-size: 16px;
+}
+
+.board-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.board-list li + li {
+  margin-top: 4px;
+}
+
+.board-event-text,
+.board-empty {
+  display: block;
+  margin: 0;
+  font-size: 13px;
+  color: var(--panel-ink-soft);
+}
+
+.chat-panel {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 32px));
+  max-height: 42vh;
+}
+
+.chat-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-panel-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.chat-panel-head .icon-button {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
+.chat-lines {
+  flex: 1;
+  min-height: 60px;
+  margin: 8px 0 0;
+  padding: 0 4px 0 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-line + .chat-line {
+  margin-top: 4px;
+}
+
+.chat-line--event {
+  font-size: 12px;
+  color: var(--panel-ink-soft);
+}
+
+.chat-line--whisper {
+  color: #6a4c93;
+}
+
+.chat-line--self .chat-name {
+  color: var(--panel-ok);
+}
+
+.chat-toggle {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.chat-unread {
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--panel-select);
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
 /* On phones the title takes the top-left corner, so the timer sits below it. */
 @media (max-width: 520px) {
   .timer-hud {
     top: calc(max(12px, env(safe-area-inset-top)) + 44px);
+  }
+
+  /* The chat folds into a button on phones; open, it covers the top of the room. */
+  .chat-panel {
+    left: 16px;
+    width: auto;
+    max-height: 36vh;
   }
 
   .panel-title {

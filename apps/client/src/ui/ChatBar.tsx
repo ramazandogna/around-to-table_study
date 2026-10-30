@@ -21,10 +21,11 @@ export function ChatBar() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Dialogs use Enter to confirm.
-      const { sitStep, wardrobeOpen } = useGameStore.getState();
-      if (sitStep || wardrobeOpen) return;
-      if (event.key === 'Enter' && document.activeElement !== input.current) {
+      // Dialogs use Enter to confirm, and other fields (like a whisper) send with it.
+      const { sitStep, wardrobeOpen, confirm } = useGameStore.getState();
+      if (sitStep || wardrobeOpen || confirm || document.activeElement instanceof HTMLInputElement)
+        return;
+      if (event.key === 'Enter') {
         event.preventDefault();
         input.current?.focus();
       }

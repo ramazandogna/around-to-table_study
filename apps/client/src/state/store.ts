@@ -3,7 +3,39 @@ import { create } from 'zustand';
 import type { AreaConnection } from '../net/AreaConnection';
 import { loadLook, loadSession, saveLook, type GuestSession } from '../net/session';
 
-export type Notice = 'rate_limited' | 'replaced' | 'offline' | 'quiet_caps' | 'link_blocked';
+export type Notice =
+  | 'rate_limited'
+  | 'replaced'
+  | 'offline'
+  | 'quiet_caps'
+  | 'link_blocked'
+  | 'poked'
+  | 'dnd'
+  | 'unavailable'
+  | 'not_allowed';
+
+/** One line in the room chat panel. */
+export type ChatLine = {
+  key: number;
+  kind: 'say' | 'whisper' | 'joined' | 'left';
+  name: string;
+  /** For whispers: who it went to. */
+  to?: string;
+  text?: string;
+  self: boolean;
+};
+
+const CHAT_LOG_LINES = 100;
+let chatLineKey = 0;
+
+/** What the player chose when asked before the world goes on. */
+export type ConfirmChoice = 'break' | 'end' | 'stay';
+
+/**
+ * A question the world waits on: standing up from a running timer, or leaving
+ * the library with one.
+ */
+export type Confirm = { kind: 'stand' | 'leave'; answer: (choice: ConfirmChoice) => void };
 
 /** A running timer on this device's clock. */
 export type LocalTimer = { endsAt: number; totalMs: number };
@@ -23,6 +55,18 @@ type GameState = {
   /** True while the chat input has focus, so the keyboard does not walk the character. */
   typing: boolean;
   notice: Notice | null;
+  /** The person a notice is about, e.g. who poked you. */
+  noticeName: string | null;
+  /** The room chat, newest last; cleared when changing areas. */
+  chatLog: ChatLine[];
+  chatOpen: boolean;
+  /** Lines that arrived while the chat panel was closed. */
+  unread: number;
+  /** The person whose card is open. */
+  selected: { id: string; name: string } | null;
+  confirm: Confirm | null;
+  /** True while standing next to the notice board. */
+  boardOpen: boolean;
   /** True while the player sits at a table. */
   seated: boolean;
   sitStep: SitStep | null;
@@ -41,7 +85,12 @@ type GameState = {
   setConnected: (connected: boolean) => void;
   setPlayersHere: (count: number) => void;
   setTyping: (typing: boolean) => void;
-  setNotice: (notice: Notice | null) => void;
+  setNotice: (notice: Notice | null, name?: string) => void;
+  addChatLine: (line: Omit<ChatLine, 'key'>) => void;
+  setChatOpen: (open: boolean) => void;
+  setSelected: (selected: { id: string; name: string } | null) => void;
+  ask: (confirm: Confirm | null) => void;
+  setBoardOpen: (open: boolean) => void;
   setSeated: (seated: boolean) => void;
   setSitStep: (step: SitStep | null) => void;
   setWardrobeOpen: (open: boolean) => void;
@@ -63,6 +112,13 @@ export const useGameStore = create<GameState>((set) => ({
   playersHere: 1,
   typing: false,
   notice: null,
+  noticeName: null,
+  chatLog: [],
+  chatOpen: typeof window !== 'undefined' && window.innerWidth >= 900,
+  unread: 0,
+  selected: null,
+  confirm: null,
+  boardOpen: false,
   seated: false,
   sitStep: null,
   wardrobeOpen: false,
@@ -75,12 +131,25 @@ export const useGameStore = create<GameState>((set) => ({
     saveLook(look);
     set({ look });
   },
-  setArea: (area) => set({ area }),
+  // Each room has its own chat and people, so nothing carries over.
+  setArea: (area) => set({ area, chatLog: [], unread: 0, selected: null, boardOpen: false }),
   setConnection: (connection) => set({ connection }),
   setConnected: (connected) => set({ connected }),
   setPlayersHere: (playersHere) => set({ playersHere }),
   setTyping: (typing) => set({ typing }),
-  setNotice: (notice) => set({ notice }),
+  setNotice: (notice, name) => set({ notice, noticeName: name ?? null }),
+  addChatLine: (line) =>
+    set((state) => ({
+      chatLog: [...state.chatLog, { ...line, key: ++chatLineKey }].slice(-CHAT_LOG_LINES),
+      // Comings and goings are worth seeing but not worth a badge.
+      unread: state.chatOpen
+        ? 0
+        : state.unread + (line.kind === 'say' || line.kind === 'whisper' ? 1 : 0),
+    })),
+  setChatOpen: (chatOpen) => set({ chatOpen, unread: 0 }),
+  setSelected: (selected) => set({ selected }),
+  ask: (confirm) => set({ confirm }),
+  setBoardOpen: (boardOpen) => set({ boardOpen }),
   // Sitting down asks what you will work on; standing up clears the table.
   setSeated: (seated) =>
     set(seated ? { seated, sitStep: 'activity' } : { seated, sitStep: null, activity: null }),
@@ -98,6 +167,8 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       session: null,
       look: null,
+      selected: null,
+      confirm: null,
       seated: false,
       sitStep: null,
       activity: null,

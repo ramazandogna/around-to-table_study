@@ -67,6 +67,14 @@ export class AreaConnection {
     this.send({ t: 'status', status });
   }
 
+  poke(to: string): void {
+    this.send({ t: 'poke', to });
+  }
+
+  whisper(to: string, text: string): void {
+    this.send({ t: 'whisper', to, text });
+  }
+
   close(): void {
     this.socket.close();
   }
