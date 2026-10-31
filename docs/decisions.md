@@ -2,6 +2,23 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-11-01: Kenney Mini Characters replace the painted character
+- **Decision:** Players pick one of the twelve Kenney "Mini Characters" (CC0; six women, six men, each with its own face, hair and outfit). The look is `{ character: index }`. The models came from a GitHub mirror of Kenney's CC0 library, since kenney.nl refuses automated downloads.
+- **Why:** The old single unisex body with a painted skin could not show clearly different women and men. The new kit ships real walk, sit and gesture clips. Studying at a desk, dancing and waving are posed on its simple rig in `poses.ts`.
+- **Trade-off:** Colour customisation is gone for now; looks from before are invalid, so returning players pick a character once.
+
+## 2026-11-01: The library grows a desk at a time
+- **Decision:** Library seats are desks for two (12 seats at launch). The renovation zone opens in strips. Whenever more people are in the room than open chairs, the next strip (a desk for two) opens, is stored in the room's Durable Object, broadcast as `grew`, and never closes again.
+- **Why:** A big half-empty table felt like an invitation nobody answered. Growing with the crowd keeps the room full and shows the community grow.
+
+## 2026-11-01: One person per seat, many per tile
+- **Decision:** The server refuses a move onto a chair or sofa someone else sits on (`seat_taken`). Floor tiles have no limit; people sharing a tile step apart into a small ring on screen.
+- **Why:** Sitting in someone's lap was a bug. Blocking floor tiles would make a busy smoking room impossible to walk through.
+
+## 2026-11-01: Sounds are made with Web Audio
+- **Decision:** Clink, phone buzz, footsteps, pops and chimes are synthesised in `audio/sound.ts`. One mute button covers everything. Notification sounds stay quiet in the library, while seated at a desk and with "do not disturb".
+- **Why:** No files to load or license, and each sound stays tiny.
+
 ## 2026-10-31: Movement is continuous, keys follow the screen
 - **Problem:** walking was tile by tile at 1.9 tiles/s along 4-direction zigzags, with a stop at every tile when using keys; the arrow keys moved along the map's axes, which on the isometric screen is diagonal; the walk clip was a slowed-down run (fists, pumping arms).
 - **Movement:** A* now runs in 8 directions (no cutting the corners of walls, furniture or chairs) and `smoothPath` turns the tiles into as few straight lines as can be walked with a body's width. Avatars follow those lines at 3 tiles/s, speeding up and braking just in time for the last point, and turn smoothly. The server still only knows tiles and checks that the target is reachable.

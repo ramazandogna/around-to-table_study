@@ -26,6 +26,9 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Measure movement, do not eyeball it.** Sampling a walker's screen position every 50 ms from another player's view showed the stop-and-go at every tile and proved the fix; a single screenshot never shows feel.
 - **On an isometric screen, keys must follow the screen.** Map axes look diagonal from the camera, so "up" walking up-right felt broken.
 - **A quick key tap must still do something.** Smooth braking turned short taps into nothing; a tap now always takes one step.
+- **Measure an animation's tempo, don't trust a formula.** The walk played twelve times too fast because its "ground speed" was measured on a foot that slid forward after landing; tracing the foot over the cycle showed it at once.
+- **Know a rig's rest pose before posing it.** Mini Characters rest in a T-pose, so arms must be aimed by direction, not by angles that assume they hang down.
+- **Spread a crowd across the screen, not into it.** People sharing a tile were offset along the camera's depth axis and stood inside each other on screen.
 - **Anything a body can walk into must block the tile.** A floor lamp on a walkable tile was invisible with tile steps and obvious with free movement.
 - **Check the HUD at phone width after adding a link or button.** The phone link pushed the top links under the room chat button and a door sign drew over them; the row now wraps and sits above world labels.
 - **Ask before throwing away someone's progress.** Standing up or leaving with a timer running asks first, and "stay" is always one of the answers.
