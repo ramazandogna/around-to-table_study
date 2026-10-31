@@ -41,6 +41,19 @@ export class SocialConnection {
     this.send({ t: 'unfriend', id });
   }
 
+  dm(to: string, text: string): void {
+    this.send({ t: 'dm', to, text });
+  }
+
+  /** Asks for a conversation's history, which also marks it read. */
+  history(other: string): void {
+    this.send({ t: 'history', with: other });
+  }
+
+  read(other: string): void {
+    this.send({ t: 'read', with: other });
+  }
+
   close(): void {
     this.socket.close();
   }

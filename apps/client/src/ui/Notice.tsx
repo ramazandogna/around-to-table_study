@@ -7,7 +7,7 @@ const NOTICE_MS = 3000;
 /** A short message above the chat bar, e.g. when sending too fast. */
 export function Notice() {
   const notice = useGameStore((s) => s.notice);
-  const name = useGameStore((s) => s.noticeName);
+  const value = useGameStore((s) => s.noticeValue) ?? '';
   const setNotice = useGameStore((s) => s.setNotice);
 
   useEffect(() => {
@@ -16,5 +16,7 @@ export function Notice() {
     return () => clearTimeout(timer);
   }, [notice, setNotice]);
 
-  return notice ? <p className="notice">{t(`notice.${notice}`, { name: name ?? '' })}</p> : null;
+  return notice ? (
+    <p className="notice">{t(`notice.${notice}`, { name: value, count: value })}</p>
+  ) : null;
 }

@@ -4,6 +4,7 @@ import {
   createAreaGrid,
   findPath,
   resolveWalkTarget,
+  smoothPath,
   type AreaGrid,
   type AreaId,
   type BlockReason,
@@ -14,13 +15,14 @@ import {
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
 import { studyStatus, useGameStore, type ConfirmChoice } from '../state/store';
-import { Avatar, type AvatarContext } from './Avatar';
+import { Avatar, type AvatarContext, type FloorPoint } from './Avatar';
 import { buildArea, FLOOR_Y, type BuiltArea } from './buildArea';
 import type { CharacterKit } from './characters';
 import type { IsoView } from './IsoView';
 import type { Furniture } from './models';
 import { createTableProps } from './tableProps';
 import { createHoverMarker, type HoverKind } from './hoverMarker';
+import { createSeatMarkers } from './seatMarkers';
 
 const BLOCK_MESSAGES: Partial<Record<BlockReason, MessageKey>> = {
   renovation: 'blocked.renovation',
@@ -42,6 +44,7 @@ const NEAR_Y = 34;
 const MAX_BUBBLE_SHIFT = 110;
 const BUBBLE_GAP = 4;
 
+/** Keys point where they point on screen: [right, down]. Two keys together walk diagonally. */
 const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
   ArrowUp: [0, -1],
   KeyW: [0, -1],
@@ -52,6 +55,17 @@ const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
   ArrowRight: [1, 0],
   KeyD: [1, 0],
 };
+
+/**
+ * Turns a screen direction into a floor direction. The camera looks from the
+ * south-east, so screen-right is (+x, -y) on the map and screen-up is (-x, -y).
+ */
+function screenToFloor(right: number, down: number): FloorPoint | null {
+  const x = right + down;
+  const y = down - right;
+  const length = Math.hypot(x, y);
+  return length > 0 ? { x: x / length, y: y / length } : null;
+}
 
 const sameTile = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 /** Tiles apart, counting diagonal steps as one. */
@@ -68,6 +82,10 @@ export class AreaWorld {
   private readonly others = new Map<string, Avatar>();
   private connection: AreaConnection | null = null;
   private readonly heldKeys = new Set<string>();
+  /** Where the keys point the player, or null when no key is held. */
+  private steerDirection: FloorPoint | null = null;
+  /** The last tile told to the server while steering, so each is sent once. */
+  private steerSent: Point | null = null;
   private leaving = false;
   private lastBlockMessageAt = -Infinity;
   private boards: Point[] = [];
@@ -75,6 +93,9 @@ export class AreaWorld {
   /** Where a mouse rests over the canvas; touch screens have no hover. */
   private pointer: { x: number; y: number } | null = null;
   private readonly hover = createHoverMarker();
+  /** Says what a click would do, next to the mouse. */
+  private readonly tip = document.createElement('div');
+  private seatMarkers: ReturnType<typeof createSeatMarkers> | null = null;
   private crowdTimer = 0;
   private readonly context: AvatarContext;
   private readonly unsubscribe: () => void;
@@ -87,6 +108,7 @@ export class AreaWorld {
     this.context = {
       seats: (tile) => this.grid.seatFacing(tile),
       props: createTableProps(assets.furniture),
+      walkable: (tile) => this.grid.isWalkable(tile),
     };
     // The player's own look and status live in the store; the world shows them and the server shares them.
     this.unsubscribe = useGameStore.subscribe((state, before) => {
@@ -116,6 +138,9 @@ export class AreaWorld {
     view.canvas.addEventListener('pointermove', this.onPointerMove);
     view.canvas.addEventListener('pointerleave', this.onPointerLeave);
     view.add(this.hover.mesh);
+    this.tip.className = 'world-tip';
+    this.tip.hidden = true;
+    view.canvas.parentElement?.append(this.tip);
     view.setLoop((delta) => this.update(delta));
   }
 
@@ -134,6 +159,14 @@ export class AreaWorld {
       [...row].forEach((c, x) => c === TILE.noticeBoard && this.boards.push({ x, y })),
     );
     this.nearBoard = false;
+    const seats: Point[] = [];
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        if (c === TILE.seat && this.grid.isWalkable({ x, y })) seats.push({ x, y });
+      }),
+    );
+    this.seatMarkers = createSeatMarkers(seats, FLOOR_Y);
+    this.view.add(this.seatMarkers.root);
 
     const look = useGameStore.getState().look;
     if (!look) throw new Error('AreaWorld needs a character look');
@@ -174,6 +207,7 @@ export class AreaWorld {
     this.view.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.view.remove(this.hover.mesh);
     this.hover.dispose();
+    this.tip.remove();
     this.view.canvas.style.cursor = '';
     this.view.setLoop(null);
   }
@@ -189,6 +223,11 @@ export class AreaWorld {
     const store = useGameStore.getState();
     store.setSeated(false);
     store.ask(null);
+    if (this.seatMarkers) {
+      this.view.remove(this.seatMarkers.root);
+      this.seatMarkers.dispose();
+      this.seatMarkers = null;
+    }
     if (this.built) {
       this.view.remove(this.built.root);
       this.built.dispose();
@@ -201,8 +240,9 @@ export class AreaWorld {
     if (!player || this.leaving) return;
     this.handleKeyboard(player);
 
-    const arrived = player.update(delta);
-    if (arrived) this.checkDoor(arrived);
+    const entered = player.update(delta);
+    if (this.steerDirection) this.sendSteering(player, this.steerDirection);
+    if (entered) this.checkDoor(entered);
     if (player.isSeated !== useGameStore.getState().seated) {
       useGameStore.getState().setSeated(player.isSeated);
     }
@@ -251,8 +291,8 @@ export class AreaWorld {
       case 'moved': {
         const other = this.others.get(message.id);
         if (!other) break;
-        const path = findPath(this.grid, other.tile, message.to);
-        if (path) other.walk(path);
+        const route = this.routeFor(other, message.to);
+        if (route) other.follow(route);
         else other.teleport(message.to);
         // Standing up clears the table, as on the server.
         other.clearActivity();
@@ -396,6 +436,12 @@ export class AreaWorld {
     this.crowdTimer -= delta;
     if (this.crowdTimer > 0 || !this.player) return;
     this.crowdTimer = CROWD_CHECK_SECONDS;
+    this.seatMarkers?.update(
+      !this.player.isSeated,
+      [...this.others.values()].map((o) => o.tile),
+    );
+    const seated = [this.player, ...this.others.values()].filter((a) => a.isSeated).length;
+    useGameStore.getState().setStudying(seated);
     // The player first, so their own bubble keeps its place.
     const avatars = [this.player, ...this.others.values()];
     const screen = this.view.canvas.getBoundingClientRect();
@@ -452,13 +498,37 @@ export class AreaWorld {
     const kind = tile ? this.hoverKind(tile) : null;
     this.hover.show(tile && kind ? { x: tile.x + 0.5, y: FLOOR_Y, z: tile.y + 0.5 } : null, kind);
     this.view.canvas.style.cursor = kind ? 'pointer' : '';
+    const label = tile && at ? this.hoverLabel(tile) : null;
+    this.tip.hidden = !label;
+    if (label && at) {
+      if (this.tip.textContent !== label) this.tip.textContent = label;
+      this.tip.style.translate = `${at.x + 16}px ${at.y + 18}px`;
+    }
+  }
+
+  /** What tapping this tile does, in a few words; nothing for plain floor. */
+  private hoverLabel(tile: Point): string | null {
+    const person = this.personAt(tile);
+    if (person) return t('tip.person', { name: this.others.get(person)?.name ?? '' });
+    const to = this.grid.doorTarget(tile);
+    if (to) return t('tip.door', { area: t(`area.${to}`) });
+    const block = this.grid.blockReason(tile);
+    if (block === 'renovation') return t('tip.renovation');
+    if (block === 'elevator') return t('tip.elevator');
+    if (this.grid.tileAt(tile) === TILE.noticeBoard) return t('tip.board');
+    if (this.grid.seatFacing(tile)) {
+      return this.player && sameTile(this.player.tile, tile) && this.player.isSeated
+        ? null
+        : t('tip.seat');
+    }
+    return null;
   }
 
   private hoverKind(tile: Point): HoverKind | null {
     if (
       this.personAt(tile) ||
       this.grid.doorTarget(tile) ||
-      this.grid.seatFacing(tile) ||
+      (this.grid.seatFacing(tile) && this.grid.isWalkable(tile)) ||
       this.grid.tileAt(tile) === TILE.noticeBoard
     )
       return 'special';
@@ -513,25 +583,66 @@ export class AreaWorld {
     return floor;
   }
 
-  /** Keys move one tile at a time. The camera looks from the south-east, so screen-up is north-west. */
+  /**
+   * Keys steer the body freely in the direction they point on screen; letting
+   * go brakes onto the nearest tile. Taps walk a route instead.
+   */
   private handleKeyboard(player: Avatar): void {
-    if (player.isMoving || useGameStore.getState().typing) return;
-    const last = [...this.heldKeys].pop();
-    const direction = last ? KEY_DIRECTIONS[last] : undefined;
-    if (!direction) return;
-
-    const [dx, dy] = direction;
-    const next = { x: player.tile.x + dx, y: player.tile.y + dy };
-    const reason = this.grid.blockReason(next);
-    if (reason) {
-      if (!player.isSeated) player.face(dx, dy);
-      this.explainBlock(reason);
+    let right = 0;
+    let down = 0;
+    if (!useGameStore.getState().typing) {
+      for (const code of this.heldKeys) {
+        const [r, d] = KEY_DIRECTIONS[code] ?? [0, 0];
+        right += r;
+        down += d;
+      }
+    }
+    const direction = screenToFloor(Math.sign(right), Math.sign(down));
+    if (!direction) {
+      if (!this.steerDirection) return;
+      this.steerDirection = null;
+      this.steerSent = null;
+      const rest = player.steer(null);
+      if (rest) this.connection?.move(rest);
+      return;
+    }
+    const ahead = {
+      x: Math.floor(player.floorPosition.x + direction.x * 0.75),
+      y: Math.floor(player.floorPosition.y + direction.y * 0.75),
+    };
+    const reason = this.grid.blockReason(ahead);
+    if (reason) this.explainBlock(reason);
+    if (this.steerDirection) {
+      this.steerDirection = direction;
+      player.steer(direction);
       return;
     }
     this.leaveSeat(player, () => {
-      player.walk([next]);
-      this.connection?.move(next);
+      this.steerDirection = direction;
+      player.steer(direction);
     });
+  }
+
+  /**
+   * While steering, tells the server the tile just ahead rather than the one
+   * underfoot, so everyone else sees a steady walk instead of a stop at every tile.
+   */
+  private sendSteering(player: Avatar, direction: FloorPoint): void {
+    const { x, y } = player.floorPosition;
+    const ahead = { x: Math.floor(x + direction.x * 0.9), y: Math.floor(y + direction.y * 0.9) };
+    const target = this.grid.isWalkable(ahead) ? ahead : player.tile;
+    if (this.steerSent && sameTile(this.steerSent, target)) return;
+    this.steerSent = target;
+    this.connection?.move(target);
+  }
+
+  /** A straight-lined route from where an avatar is to a tile, or null when it cannot get there. */
+  private routeFor(avatar: Avatar, goal: Point): FloorPoint[] | null {
+    const path = findPath(this.grid, avatar.tile, goal);
+    if (!path) return null;
+    // Already on the tile: just finish onto its middle.
+    if (path.length === 0) return [{ x: goal.x + 0.5, y: goal.y + 0.5 }];
+    return smoothPath(this.grid, avatar.floorPosition, path);
   }
 
   private walkTo(tile: Point): void {
@@ -543,10 +654,12 @@ export class AreaWorld {
       return;
     }
     const goal = resolveWalkTarget(this.grid, player.tile, tile);
-    const path = goal && findPath(this.grid, player.tile, goal);
-    if (!goal || !path || sameTile(goal, player.tile)) return;
+    const route = goal && this.routeFor(player, goal);
+    if (!goal || !route || (sameTile(goal, player.tile) && !player.isMoving)) return;
     this.leaveSeat(player, () => {
-      player.walk(path);
+      this.steerDirection = null;
+      this.steerSent = null;
+      player.follow(route);
       this.connection?.move(goal);
     });
   }
@@ -565,7 +678,9 @@ export class AreaWorld {
     // A study timer belongs to the library, so leaving it asks first.
     if (this.areaId === 'library' && this.timerRunning()) {
       this.heldKeys.clear();
-      this.player?.walk([]);
+      this.steerDirection = null;
+      this.steerSent = null;
+      this.player?.halt();
       useGameStore.getState().ask({
         kind: 'leave',
         answer: (choice) =>
@@ -583,7 +698,7 @@ export class AreaWorld {
   private stepBackFrom(door: Point): void {
     const back = this.grid.neighbors(door).find((n) => !this.grid.doorTarget(n));
     if (!back || !this.player) return;
-    this.player.walk([back]);
+    this.player.follow([{ x: back.x + 0.5, y: back.y + 0.5 }]);
     this.connection?.move(back);
   }
 

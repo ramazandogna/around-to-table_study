@@ -16,11 +16,22 @@ import type { CharacterKit } from './characters';
 import { facing } from './instancing';
 import type { TableProps } from './tableProps';
 
-const TILES_PER_SECOND = 1.9;
-const TURN_SPEED = 12;
-const FADE_SECONDS = 0.25;
-/** Keyboard walking stops for a frame between tiles; poses only change after a real stop. */
+/** Walking pace in tiles (about meters) per second: brisk, so crossing a room takes seconds, not a chore. */
+export const WALK_SPEED = 3;
+/** Reaches full pace in about a fifth of a second. */
+const ACCELERATION = 16;
+/** Brakes a little softer than it starts, so stops do not look like hitting a wall. */
+const DECELERATION = 11;
+/** How fast the body turns towards where it walks (higher is snappier). */
+const TURN_SPEED = 14;
+/** Sitting down and standing up blend over this long. */
+const SIT_FADE_SECONDS = 0.3;
+/** A stop must last this long before sitting down, so passing over a chair does not sit. */
 const SETTLE_SECONDS = 0.15;
+/** Half the body's width, for bumping into walls while steering with keys. */
+const BODY_RADIUS = 0.24;
+/** A waypoint counts as reached this close, in tiles. */
+const ARRIVE_EPSILON = 0.002;
 /** How quickly the body slides onto or off a chair. */
 const SEAT_EASE = 9;
 /** The hips rest slightly behind the chair's center, against the backrest. */
@@ -51,7 +62,15 @@ const tileCenter = (t: Point) => ({ x: t.x + 0.5, z: t.y + 0.5 });
 export type SeatLookup = (tile: Point) => Point | null;
 
 /** What every avatar in an area shares. */
-export type AvatarContext = { seats: SeatLookup; props: TableProps };
+export type AvatarContext = {
+  seats: SeatLookup;
+  props: TableProps;
+  /** Whether the body may stand on a tile, for walking with keys. */
+  walkable: (tile: Point) => boolean;
+};
+
+/** A point on the floor in tiles: x across, y down the map (world z). */
+export type FloorPoint = { x: number; y: number };
 
 /** A study status with the timer on this device's clock. */
 type LocalStatus = Omit<StudyStatus, 'timer'> & {
@@ -60,18 +79,31 @@ type LocalStatus = Omit<StudyStatus, 'timer'> & {
 
 type Pose = 'idle' | 'walk' | 'sit';
 
-/** A player in the world: animated model, tile movement and a DOM label with name and bubble. */
+/**
+ * A player in the world: animated model, smooth movement and a DOM label with
+ * name and bubble. The body moves freely along straight routes (taps) or by
+ * steering (keys), speeding up and slowing down; the tile it stands on follows.
+ */
 export class Avatar {
   readonly root = new Group();
-  /** The tile the avatar stands on, or is currently stepping onto. */
+  /** The tile under the middle of the body. */
   tile: Point;
-  private path: Point[] = [];
-  private stepping = false;
+  /** Waypoints still ahead, in tiles; the last one is where the body stops. */
+  private route: FloorPoint[] = [];
+  /** Direction held on the keys, already normalized; null when no key is down. */
+  private steering: FloorPoint | null = null;
+  /** The tile steering started on, so a quick tap of a key still takes one step. */
+  private steerStart: Point | null = null;
+  private speed = 0;
+  /** Direction of the current movement, kept while braking. */
+  private readonly velocityDir = { x: 0, y: 1 };
   private heading = 0;
   private readonly model: Group;
   private readonly mixer: AnimationMixer;
   private readonly actions: Record<Pose, AnimationAction>;
   private pose: Pose = 'idle';
+  /** 0 standing, 1 seated; blends the sit pose in and out. */
+  private sitBlend = 0;
   private stillFor = 0;
   private readonly seatedY: number;
   private readonly settleTarget = new Vector3();
@@ -117,9 +149,9 @@ export class Avatar {
       walk: this.mixer.clipAction(kit.clips.walk),
       sit: this.mixer.clipAction(kit.clips.sit),
     };
-    // Plays the walk exactly as fast as the body moves, so planted feet do not slide.
-    this.actions.walk.timeScale = TILES_PER_SECOND / kit.walkSpeed;
-    this.actions.idle.play();
+    // All three always play; their weights follow speed and sitting (see `animate`).
+    for (const action of Object.values(this.actions)) action.play().setEffectiveWeight(0);
+    this.actions.idle.setEffectiveWeight(1);
     this.seatedY = FLOOR_Y + SEAT_HEIGHT + HIP_ABOVE_SEAT - kit.seatedHipHeight;
 
     const element = document.createElement('div');
@@ -153,7 +185,7 @@ export class Avatar {
   }
 
   get isMoving(): boolean {
-    return this.stepping || this.path.length > 0;
+    return this.speed > 0 || this.route.length > 0 || this.steering !== null;
   }
 
   get position(): { x: number; z: number } {
@@ -307,14 +339,66 @@ export class Avatar {
     }
   }
 
-  /** Replaces the current route; an in-progress step finishes first. */
-  walk(path: Point[]): void {
-    this.path = [...path];
+  /** Where the body is now, in tiles. */
+  get floorPosition(): FloorPoint {
+    return { x: this.root.position.x, y: this.root.position.z };
+  }
+
+  /** Walks through these points (in tiles) from wherever the body is, without stopping in between. */
+  follow(route: readonly FloorPoint[]): void {
+    this.route = route.map((p) => ({ ...p }));
+  }
+
+  /** Stops following a route; the body brakes to a halt where it is. */
+  halt(): void {
+    this.route = [];
+    this.steering = null;
+  }
+
+  /**
+   * Steers with the keys: a direction in tiles (normalized), or null when the
+   * keys are let go. Letting go brakes onto the middle of the tile ahead, so
+   * the body always rests on a tile (and sits when that tile is a chair).
+   * Returns that tile when letting go.
+   */
+  steer(direction: FloorPoint | null): Point | null {
+    if (direction) {
+      this.route = [];
+      if (!this.steering) this.steerStart = { ...this.tile };
+      this.steering = direction;
+      return null;
+    }
+    if (!this.steering) return null;
+    const held = this.steering;
+    this.steering = null;
+    const brake = (this.speed * this.speed) / (2 * DECELERATION);
+    const ahead = {
+      x: Math.floor(this.root.position.x + this.velocityDir.x * brake),
+      y: Math.floor(this.root.position.z + this.velocityDir.y * brake),
+    };
+    let rest = this.context.walkable(ahead) ? ahead : this.tile;
+    const start = this.steerStart;
+    if (start && rest.x === start.x && rest.y === start.y) rest = this.stepFrom(start, held);
+    this.route = [{ x: rest.x + 0.5, y: rest.y + 0.5 }];
+    return rest;
+  }
+
+  /** The neighboring tile in a direction, if the body can step there; otherwise `from` itself. */
+  private stepFrom(from: Point, direction: FloorPoint): Point {
+    const dx = Math.round(direction.x * 1.4);
+    const dy = Math.round(direction.y * 1.4);
+    const walkable = this.context.walkable;
+    const next = { x: from.x + dx, y: from.y + dy };
+    const corners =
+      dx === 0 ||
+      dy === 0 ||
+      (walkable({ x: from.x + dx, y: from.y }) && walkable({ x: from.x, y: from.y + dy }));
+    return walkable(next) && corners ? next : from;
   }
 
   teleport(tile: Point): void {
-    this.path = [];
-    this.stepping = false;
+    this.halt();
+    this.speed = 0;
     this.tile = { ...tile };
     const { x, z } = tileCenter(tile);
     this.root.position.set(x, FLOOR_Y, z);
@@ -338,46 +422,28 @@ export class Avatar {
     );
   }
 
-  /** Advances movement and animation. Returns the tile reached this frame, if a step completed. */
+  /** Advances movement and animation. Returns the tile the body stepped onto this frame, if any. */
   update(delta: number): Point | null {
-    let arrived: Point | null = null;
+    if (this.steering) this.steerStep(delta);
+    else this.routeStep(delta);
 
-    if (!this.stepping) {
-      const next = this.path.shift();
-      if (next) {
-        this.face(next.x - this.tile.x, next.y - this.tile.y);
-        this.tile = next;
-        this.stepping = true;
-      }
-    }
-
-    if (this.stepping) {
-      const target = tileCenter(this.tile);
-      const step = TILES_PER_SECOND * delta;
-      const dx = target.x - this.root.position.x;
-      const dz = target.z - this.root.position.z;
-      const distance = Math.hypot(dx, dz);
-      if (distance <= step) {
-        this.root.position.x = target.x;
-        this.root.position.z = target.z;
-        this.stepping = false;
-        arrived = { ...this.tile };
-      } else {
-        this.root.position.x += (dx / distance) * step;
-        this.root.position.z += (dz / distance) * step;
-      }
+    const position = this.root.position;
+    const now = { x: Math.floor(position.x), y: Math.floor(position.z) };
+    let entered: Point | null = null;
+    if (now.x !== this.tile.x || now.y !== this.tile.y) {
+      this.tile = now;
+      entered = { ...now };
     }
 
     this.stillFor = this.isMoving ? 0 : this.stillFor + delta;
     const toTable = this.isMoving ? null : this.context.seats(this.tile);
-    if (this.isMoving || this.stillFor < SETTLE_SECONDS) {
-      if (this.isMoving) this.play('walk');
-    } else if (toTable) {
-      this.face(toTable.x, toTable.y);
-      this.play('sit');
-    } else {
-      this.play('idle');
+    if (this.isMoving) {
+      this.pose = 'walk';
+    } else if (this.stillFor >= SETTLE_SECONDS) {
+      if (toTable) this.face(toTable.x, toTable.y);
+      this.pose = toTable ? 'sit' : 'idle';
     }
+    this.animate(delta);
     this.settle(delta, toTable);
     this.placeProps(toTable);
     if (this.status.timer && this.details.classList.contains('avatar-details--visible')) {
@@ -394,16 +460,102 @@ export class Avatar {
         ? HOP_HEIGHT * Math.abs(Math.sin((this.hopFor / HOP_SECONDS) * Math.PI * 3))
         : 0;
     this.mixer.update(delta);
-    return arrived;
+    return entered;
   }
 
-  private play(pose: Pose): void {
-    if (pose === this.pose) return;
-    const from = this.actions[this.pose];
-    const to = this.actions[pose];
-    to.reset().play();
-    from.crossFadeTo(to, FADE_SECONDS, false);
-    this.pose = pose;
+  /** Follows the route: speeds up, keeps pace through corners and brakes to stop on the last point. */
+  private routeStep(delta: number): void {
+    const position = this.root.position;
+    const target = this.route[0];
+    if (!target) {
+      this.speed = 0;
+      return;
+    }
+    // Distance left to the final stop, so braking starts just in time.
+    let remaining = Math.hypot(target.x - position.x, target.y - position.z);
+    for (let i = 1; i < this.route.length; i++) {
+      const a = this.route[i - 1] as FloorPoint;
+      const b = this.route[i] as FloorPoint;
+      remaining += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    const stoppable = Math.sqrt(2 * DECELERATION * remaining);
+    const wanted = Math.min(WALK_SPEED, stoppable);
+    this.speed =
+      wanted > this.speed
+        ? Math.min(wanted, this.speed + ACCELERATION * delta)
+        : Math.max(wanted, this.speed - DECELERATION * delta * 1.5);
+    // Never crawl to a stop: the last few centimeters are walked at a gentle pace.
+    let step = Math.max(this.speed, 0.4) * delta;
+
+    while (step > 0 && this.route.length > 0) {
+      const next = this.route[0] as FloorPoint;
+      const dx = next.x - position.x;
+      const dz = next.y - position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance > ARRIVE_EPSILON) {
+        this.velocityDir.x = dx / distance;
+        this.velocityDir.y = dz / distance;
+        this.heading = Math.atan2(dx, dz);
+      }
+      if (distance <= step) {
+        position.x = next.x;
+        position.z = next.y;
+        step -= distance;
+        this.route.shift();
+      } else {
+        position.x += (dx / distance) * step;
+        position.z += (dz / distance) * step;
+        step = 0;
+      }
+    }
+    if (this.route.length === 0) this.speed = 0;
+  }
+
+  /** Walks where the keys point, sliding along walls instead of stopping dead. */
+  private steerStep(delta: number): void {
+    const direction = this.steering as FloorPoint;
+    this.speed = Math.min(WALK_SPEED, this.speed + ACCELERATION * delta);
+    this.velocityDir.x = direction.x;
+    this.velocityDir.y = direction.y;
+    this.heading = Math.atan2(direction.x, direction.y);
+    const step = this.speed * delta;
+    const position = this.root.position;
+    const nextX = position.x + direction.x * step;
+    if (this.fits(nextX, position.z)) position.x = nextX;
+    const nextZ = position.z + direction.y * step;
+    if (this.fits(position.x, nextZ)) position.z = nextZ;
+  }
+
+  /** True when a body standing at (x, z) touches nothing blocked. */
+  private fits(x: number, z: number): boolean {
+    for (const ox of [-BODY_RADIUS, BODY_RADIUS]) {
+      for (const oz of [-BODY_RADIUS, BODY_RADIUS]) {
+        if (!this.context.walkable({ x: Math.floor(x + ox), y: Math.floor(z + oz) })) return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Blends the clips by what the body does: idle and walk by speed (the walk
+   * plays exactly as fast as the body moves, so planted feet do not slide),
+   * and the sit pose in and out over a moment.
+   */
+  private animate(delta: number): void {
+    const sitTarget = this.pose === 'sit' ? 1 : 0;
+    const fade = delta / SIT_FADE_SECONDS;
+    this.sitBlend =
+      sitTarget > this.sitBlend
+        ? Math.min(1, this.sitBlend + fade)
+        : Math.max(0, this.sitBlend - fade * 1.5);
+    const pace = MathUtils.clamp(this.speed / WALK_SPEED, 0, 1);
+    // Ease in so a slow start already swings the legs a little.
+    const walking = Math.sqrt(pace);
+    const standing = 1 - this.sitBlend;
+    this.actions.sit.setEffectiveWeight(this.sitBlend);
+    this.actions.walk.setEffectiveWeight(standing * walking);
+    this.actions.idle.setEffectiveWeight(standing * (1 - walking));
+    this.actions.walk.timeScale = Math.max(this.speed, WALK_SPEED * 0.45) / this.kit.walkSpeed;
   }
 
   /** Eases the body onto the chair while seated, and back to the floor otherwise. */

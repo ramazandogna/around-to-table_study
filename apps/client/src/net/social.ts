@@ -1,4 +1,4 @@
-import { AREA_RULES } from '@att/shared';
+import { AREA_RULES, type Friend } from '@att/shared';
 import { useGameStore } from '../state/store';
 import { SocialConnection } from './SocialConnection';
 import type { GuestSession } from './session';
@@ -17,6 +17,23 @@ export function startSocial(session: GuestSession): () => void {
         case 'friends':
           store.setFriends(message.friends);
           break;
+        case 'dm': {
+          const { message: dm } = message;
+          const mine = dm.from === session.id;
+          const other = mine ? dm.to : dm.from;
+          store.addMessage(other, dm);
+          if (mine) break;
+          const reading = store.phoneOpen && store.phoneWith === other;
+          if (reading) connection.read(other);
+          // In the library the phone stays silent; the badge waits for the way out.
+          else if (AREA_RULES[store.area].dmAllowed) {
+            store.setNotice('dm', nameOf(store.friends, other));
+          }
+          break;
+        }
+        case 'history':
+          store.setConversation(message.with, message.messages);
+          break;
         case 'friendEvent':
           // In quiet rooms a request only shows as a badge on the friends button.
           if (AREA_RULES[store.area].notifySound || message.kind === 'accepted') {
@@ -27,7 +44,13 @@ export function startSocial(session: GuestSession): () => void {
           }
           break;
         case 'error':
-          if (message.code === 'unknown_user' || message.code === 'too_many') {
+          if (
+            message.code === 'unknown_user' ||
+            message.code === 'too_many' ||
+            message.code === 'not_friends' ||
+            message.code === 'link_blocked' ||
+            message.code === 'phone_silent'
+          ) {
             store.setNotice(message.code);
           } else if (message.code === 'rate_limited') {
             store.setNotice('rate_limited');
@@ -38,7 +61,15 @@ export function startSocial(session: GuestSession): () => void {
   });
   useGameStore.getState().setSocial(connection);
   const unsubscribe = useGameStore.subscribe((state, before) => {
-    if (state.area !== before.area) connection.where(state.area);
+    if (state.area === before.area) return;
+    connection.where(state.area);
+    if (!AREA_RULES[state.area].dmAllowed) {
+      state.closePhone();
+    } else if (!AREA_RULES[before.area].dmAllowed) {
+      // Leaving the quiet room: tell the player what arrived while they studied.
+      const waiting = unreadMessages(state.friends);
+      if (waiting > 0) state.setNotice('dm_waiting', String(waiting));
+    }
   });
   return () => {
     unsubscribe();
@@ -46,4 +77,13 @@ export function startSocial(session: GuestSession): () => void {
     useGameStore.getState().setSocial(null);
     useGameStore.getState().setFriends([]);
   };
+}
+
+/** Phone messages waiting across all friends. */
+export function unreadMessages(friends: readonly Friend[]): number {
+  return friends.reduce((sum, f) => sum + f.unread, 0);
+}
+
+function nameOf(friends: readonly Friend[], id: string): string {
+  return friends.find((f) => f.id === id)?.name ?? '';
 }

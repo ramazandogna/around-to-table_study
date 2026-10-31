@@ -1,8 +1,10 @@
 import {
+  DM_HISTORY,
   EMPTY_LINES,
   type Activity,
   type Appearance,
   type AreaId,
+  type DirectMessage,
   type Friend,
   type StatusLines,
   type StudyStatus,
@@ -32,7 +34,11 @@ export type Notice =
   | 'friend_request'
   | 'friend_accepted'
   | 'unknown_user'
-  | 'too_many';
+  | 'too_many'
+  | 'dm'
+  | 'dm_waiting'
+  | 'phone_silent'
+  | 'not_friends';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -78,13 +84,20 @@ type GameState = {
   /** Friends, requests both ways, and where online friends are. */
   friends: Friend[];
   friendsOpen: boolean;
+  phoneOpen: boolean;
+  /** The friend whose conversation is open on the phone; null shows the list. */
+  phoneWith: string | null;
+  /** Conversations loaded this session, by friend id, oldest message first. */
+  conversations: Record<string, DirectMessage[]>;
   connected: boolean;
   playersHere: number;
+  /** People sitting at the table in this room right now, the player included. */
+  studying: number;
   /** True while the chat input has focus, so the keyboard does not walk the character. */
   typing: boolean;
   notice: Notice | null;
-  /** The person a notice is about, e.g. who poked you. */
-  noticeName: string | null;
+  /** The person or number a notice is about, e.g. who poked you. */
+  noticeValue: string | null;
   /** The room chat, newest last; cleared when changing areas. */
   chatLog: ChatLine[];
   chatOpen: boolean;
@@ -115,10 +128,17 @@ type GameState = {
   setSocial: (social: SocialConnection | null) => void;
   setFriends: (friends: Friend[]) => void;
   setFriendsOpen: (open: boolean) => void;
+  /** Opens the phone on a conversation, or on the list with null. */
+  openPhone: (friend: string | null) => void;
+  closePhone: () => void;
+  /** Replaces a conversation with its history, or adds one message to it. */
+  setConversation: (friend: string, messages: DirectMessage[]) => void;
+  addMessage: (friend: string, message: DirectMessage) => void;
   setConnected: (connected: boolean) => void;
   setPlayersHere: (count: number) => void;
+  setStudying: (count: number) => void;
   setTyping: (typing: boolean) => void;
-  setNotice: (notice: Notice | null, name?: string) => void;
+  setNotice: (notice: Notice | null, value?: string) => void;
   addChatLine: (line: Omit<ChatLine, 'key'>) => void;
   setChatOpen: (open: boolean) => void;
   setSelected: (selected: Selected | null) => void;
@@ -149,11 +169,15 @@ export const useGameStore = create<GameState>((set) => ({
   social: null,
   friends: [],
   friendsOpen: false,
+  phoneOpen: false,
+  phoneWith: null,
+  conversations: {},
   connected: false,
   playersHere: 1,
+  studying: 0,
   typing: false,
   notice: null,
-  noticeName: null,
+  noticeValue: null,
   chatLog: [],
   chatOpen: typeof window !== 'undefined' && window.innerWidth >= 900,
   unread: 0,
@@ -180,10 +204,27 @@ export const useGameStore = create<GameState>((set) => ({
   setSocial: (social) => set({ social }),
   setFriends: (friends) => set({ friends }),
   setFriendsOpen: (friendsOpen) => set({ friendsOpen }),
+  openPhone: (phoneWith) => set({ phoneOpen: true, phoneWith }),
+  closePhone: () => set({ phoneOpen: false, phoneWith: null }),
+  setConversation: (friend, messages) =>
+    set((state) => ({ conversations: { ...state.conversations, [friend]: messages } })),
+  addMessage: (friend, message) =>
+    set((state) => {
+      const before = state.conversations[friend] ?? [];
+      // Another tab of this player may already have added it.
+      if (before.some((m) => m.id === message.id)) return {};
+      return {
+        conversations: {
+          ...state.conversations,
+          [friend]: [...before, message].slice(-DM_HISTORY),
+        },
+      };
+    }),
   setConnected: (connected) => set({ connected }),
   setPlayersHere: (playersHere) => set({ playersHere }),
+  setStudying: (studying) => set((state) => (state.studying === studying ? {} : { studying })),
   setTyping: (typing) => set({ typing }),
-  setNotice: (notice, name) => set({ notice, noticeName: name ?? null }),
+  setNotice: (notice, value) => set({ notice, noticeValue: value ?? null }),
   addChatLine: (line) =>
     set((state) => ({
       chatLog: [...state.chatLog, { ...line, key: ++chatLineKey }].slice(-CHAT_LOG_LINES),
@@ -222,6 +263,9 @@ export const useGameStore = create<GameState>((set) => ({
       lines: EMPTY_LINES,
       selected: null,
       confirm: null,
+      phoneOpen: false,
+      phoneWith: null,
+      conversations: {},
       seated: false,
       sitStep: null,
       activity: null,

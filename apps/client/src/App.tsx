@@ -5,6 +5,7 @@ import { t } from './i18n/t';
 import { useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { ChatPanel } from './ui/ChatPanel';
+import { Coach } from './ui/Coach';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { NoticeBoard } from './ui/NoticeBoard';
 import { PlayerCard } from './ui/PlayerCard';
@@ -15,6 +16,7 @@ import { SitDialog } from './ui/SitDialog';
 import { startSocial } from './net/social';
 import { EmoteMenu } from './ui/EmoteMenu';
 import { FriendsLink, FriendsPanel } from './ui/Friends';
+import { PhoneLink, PhonePanel } from './ui/Phone';
 import { StartOver } from './ui/StartOver';
 import { StatusDialog } from './ui/StatusDialog';
 import { TimerHud } from './ui/TimerHud';
@@ -26,6 +28,7 @@ export function App() {
   const area = useGameStore((s) => s.area);
   const connected = useGameStore((s) => s.connected);
   const playersHere = useGameStore((s) => s.playersHere);
+  const studying = useGameStore((s) => s.studying);
   const look = useGameStore((s) => s.look);
 
   // Friends and presence follow the player across rooms, so they live outside the world.
@@ -47,10 +50,12 @@ export function App() {
         <span>{APP_NAME}</span>
         <span className="hud-area">
           {t(`area.${area}`)} · {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
+          {connected && area === 'library' && ` · ${t('hud.studying', { count: studying })}`}
         </span>
         <div className="hud-links">
           <StatusDialog />
           <FriendsLink />
+          <PhoneLink />
           <Wardrobe />
           <StartOver />
         </div>
@@ -58,11 +63,13 @@ export function App() {
       <TimerHud />
       <aside className="hud-side">
         <FriendsPanel />
-        <NoticeBoard />
+        <PhonePanel />
         <PlayerCard />
       </aside>
       <ChatPanel />
+      <NoticeBoard />
       <footer className="hud-bottom">
+        <Coach />
         <Notice />
         <SeatBar />
         <div className="chat-row">

@@ -151,7 +151,13 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
           break;
         }
         case TILE.plant:
-          plants.push({ x: cx, z: cz, y: FLOOR_Y, rotation: noise(x, y) * Math.PI * 2 });
+          // Off to one side, leaving room in the tile for the floor lamp beside it.
+          plants.push({
+            x: cx - (x < W / 2 ? 1 : -1) * 0.12,
+            z: cz + 0.12,
+            y: FLOOR_Y,
+            rotation: noise(x, y) * Math.PI * 2,
+          });
           break;
         case TILE.receptionDesk: {
           // The desk faces the middle of the room, across its run of tiles.
@@ -189,7 +195,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
           sideTables.push({ x: cx, z: cz, y: FLOOR_Y, scale: [0.45, 1, 0.45] });
           break;
         case TILE.bookcase: {
-          const [dx, dz] = awayFromWall(x, y, W, H);
+          const [dx, dz] = awayFromWall(x, y, W, H, at);
           const depth = furniture.bookcaseClosedWide.size.z;
           const back = 0.5 - depth / 2 - 0.02;
           // Unlike chairs, the Kenney bookcase opens towards -z.
@@ -222,7 +228,9 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   const tables = buildTables(grid, furniture, root);
   materials.push(...tables);
   decorate(grid, furniture, root, desks);
-  materials.push(...buildNoticeBoards(boards, root));
+  materials.push(
+    ...buildNoticeBoards(boards, root, grid.area.id === 'library' ? 'library' : 'hall'),
+  );
   for (const zone of grid.area.renovation) {
     if (grid.userCount < zone.unlockAtUsers)
       materials.push(...buildRenovation(zone, furniture, root));
@@ -294,12 +302,22 @@ function buildWalls(
   root.add(instance(furniture.doorway, elevator));
 }
 
-function awayFromWall(x: number, y: number, W: number, H: number): [number, number] {
+/**
+ * Which way a bookcase opens: away from the wall it stands against, or for a
+ * freestanding stack two rows deep, back to back (the top row faces north).
+ */
+function awayFromWall(
+  x: number,
+  y: number,
+  W: number,
+  H: number,
+  at: (x: number, y: number) => string,
+): [number, number] {
   if (y === 1) return [0, 1];
   if (x === 1) return [1, 0];
   if (x === W - 2) return [-1, 0];
   if (y === H - 2) return [0, -1];
-  return [0, 1];
+  return at(x, y + 1) === TILE.bookcase ? [0, -1] : [0, 1];
 }
 
 /** Shelf heights in the Kenney bookcase, as fractions of its height. */
@@ -427,14 +445,19 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
       ]),
     );
   }
-  // Floor lamps next to plants give rooms some warm vertical accents.
+  // Floor lamps beside plants give rooms some warm vertical accents. They share the plant's
+  // tile (which nobody walks on), so no one ever walks through a lamp.
   const lamps: Placement[] = [];
   grid.area.layout.forEach((row, y) =>
     [...row].forEach((c, x) => {
       if (c !== TILE.plant) return;
       const side = x < grid.width / 2 ? 1 : -1;
-      const p: Point = { x: x + side, y };
-      if (grid.tileAt(p) === TILE.floor) lamps.push({ x: p.x + 0.5, z: y + 0.5, y: FLOOR_Y });
+      lamps.push({
+        x: x + 0.5 + side * 0.3,
+        z: y + 0.5 - 0.25,
+        y: FLOOR_Y,
+        scale: [0.8, 0.9, 0.8],
+      });
     }),
   );
   root.add(instance(furniture.lampSquareFloor, lamps));
@@ -520,45 +543,79 @@ function buildRenovation(
   return [shade, tapeMaterial, post];
 }
 
-const CORK_TEXTURE = (() => {
+type BoardKind = 'hall' | 'library';
+
+/** Paints a board's face: flyers on cork in the hall, printed sheets on green felt in the library. */
+function boardTexture(kind: BoardKind): CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 128;
   const g = canvas.getContext('2d');
   if (g) {
-    g.fillStyle = '#B98A55';
+    g.fillStyle = kind === 'hall' ? '#B98A55' : '#35573F';
     g.fillRect(0, 0, 128, 128);
-    // Pinned notes: the rules sheet is the big one, events are the small colored cards.
-    const notes: [number, number, number, number, string][] = [
-      [10, 10, 52, 66, '#F6F0E2'],
-      [70, 12, 46, 30, '#F2D27A'],
-      [72, 50, 44, 28, '#A9CBE3'],
-      [14, 84, 42, 32, '#F3B5A4'],
-      [66, 88, 50, 28, '#F6F0E2'],
-    ];
-    for (const [x, y, w, h, color] of notes) {
-      g.fillStyle = 'rgba(0,0,0,0.18)';
-      g.fillRect(x + 2, y + 2, w, h);
+    // [x, y, w, h, color, tilt]: flyers sit crooked; library sheets are straight and white.
+    const notes: [number, number, number, number, string, number][] =
+      kind === 'hall'
+        ? [
+            [10, 10, 52, 66, '#F6F0E2', -0.05],
+            [70, 12, 46, 30, '#F2D27A', 0.08],
+            [72, 50, 44, 28, '#A9CBE3', -0.07],
+            [14, 84, 42, 32, '#F3B5A4', 0.06],
+            [66, 88, 50, 28, '#BFDCA1', -0.04],
+          ]
+        : [
+            [10, 12, 108, 30, '#FBFAF5', 0],
+            [10, 52, 50, 64, '#FBFAF5', 0],
+            [68, 52, 50, 30, '#FBFAF5', 0],
+            [68, 88, 50, 28, '#FBFAF5', 0],
+          ];
+    for (const [x, y, w, h, color, tilt] of notes) {
+      g.save();
+      g.translate(x + w / 2, y + h / 2);
+      g.rotate(tilt);
+      g.translate(-w / 2, -h / 2);
+      g.fillStyle = 'rgba(0,0,0,0.2)';
+      g.fillRect(2, 2, w, h);
       g.fillStyle = color;
-      g.fillRect(x, y, w, h);
+      g.fillRect(0, 0, w, h);
+      if (kind === 'library') {
+        // A dark heading bar and a rule under it, like a printed notice.
+        g.fillStyle = '#2F4A3A';
+        g.fillRect(5, 5, w - 10, 4);
+      }
       g.fillStyle = 'rgba(60,45,35,0.45)';
-      for (let line = y + 9; line < y + h - 4; line += 7) g.fillRect(x + 5, line, w - 10, 2);
-      g.fillStyle = '#C8403A';
-      g.beginPath();
-      g.arc(x + w / 2, y + 4, 3, 0, Math.PI * 2);
-      g.fill();
+      for (let line = 12; line < h - 4; line += 7) g.fillRect(5, line, w - 10, 2);
+      g.fillStyle = kind === 'hall' ? '#C8403A' : '#B08D3C';
+      if (kind === 'hall') {
+        g.beginPath();
+        g.arc(w / 2, 4, 3, 0, Math.PI * 2);
+        g.fill();
+      } else {
+        g.fillRect(w / 2 - 6, -2, 12, 4);
+      }
+      g.restore();
     }
   }
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   return texture;
-})();
+}
 
-/** A standing cork board on two legs, facing +x towards the path people walk in on. */
-function buildNoticeBoards(boards: Point[], root: Group): MeshStandardMaterial[] {
+/**
+ * A standing board on two legs, facing +x towards the path people walk in on:
+ * a wooden cork board for the community in the hall, a brass-framed felt board
+ * for library notices.
+ */
+function buildNoticeBoards(boards: Point[], root: Group, kind: BoardKind): MeshStandardMaterial[] {
   if (boards.length === 0) return [];
+  const texture = boardTexture(kind);
   const wood = new MeshStandardMaterial({ color: 0x6e4a2f, roughness: 0.8 });
-  const cork = new MeshStandardMaterial({ map: CORK_TEXTURE, roughness: 0.95 });
+  const frameMaterial =
+    kind === 'hall'
+      ? wood
+      : new MeshStandardMaterial({ color: 0xb08d3c, roughness: 0.45, metalness: 0.5 });
+  const face = new MeshStandardMaterial({ map: texture, roughness: 0.95 });
   for (const { x, y } of boards) {
     const { x: cx, z: cz } = tileCenter(x, y);
     const board = new Group();
@@ -569,17 +626,25 @@ function buildNoticeBoards(boards: Point[], root: Group): MeshStandardMaterial[]
       leg.castShadow = true;
       board.add(leg);
     }
-    const frame = new Mesh(new BoxGeometry(0.07, 0.82, 0.96), wood);
+    const frame = new Mesh(new BoxGeometry(0.07, 0.82, 0.96), frameMaterial);
     frame.position.set(0, 1.05, 0);
     frame.castShadow = true;
-    // Only the front face (+x) shows the cork and its notes.
-    const face = new Mesh(new BoxGeometry(0.02, 0.72, 0.86), [cork, wood, wood, wood, wood, wood]);
-    face.position.set(0.04, 1.05, 0);
-    board.add(frame, face);
-    board.add(sign(t('sign.board'), 'world-sign world-sign--board', 0, 1.75, 0));
+    // Only the front face (+x) shows the board and its notes.
+    const front = new Mesh(new BoxGeometry(0.02, 0.72, 0.86), [face, wood, wood, wood, wood, wood]);
+    front.position.set(0.04, 1.05, 0);
+    board.add(frame, front);
+    board.add(
+      sign(
+        t(kind === 'hall' ? 'sign.board.hall' : 'sign.board.library'),
+        'world-sign world-sign--board',
+        0,
+        1.75,
+        0,
+      ),
+    );
     root.add(board);
   }
-  return [wood, cork];
+  return kind === 'hall' ? [wood, face] : [wood, frameMaterial, face];
 }
 
 /** One sign over the middle of each door run, the street entrance and the elevator. */

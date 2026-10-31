@@ -1,4 +1,4 @@
-import type { Friend } from '@att/shared';
+import { AREA_RULES, type Friend } from '@att/shared';
 import type { ReactNode } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
@@ -22,6 +22,7 @@ export function FriendsPanel() {
   const open = useGameStore((s) => s.friendsOpen);
   const friends = useGameStore((s) => s.friends);
   const social = useGameStore((s) => s.social);
+  const dmAllowed = useGameStore((s) => AREA_RULES[s.area].dmAllowed);
   if (!open) return null;
 
   const incoming = friends.filter((f) => f.state === 'incoming');
@@ -63,6 +64,21 @@ export function FriendsPanel() {
         <Section title={t('friends.list')}>
           {accepted.map((f) => (
             <Row key={f.id} friend={f}>
+              {dmAllowed && (
+                <button
+                  type="button"
+                  className="mini-button"
+                  aria-label={t('friends.message', { name: f.name })}
+                  title={t('friends.message', { name: f.name })}
+                  onClick={() => {
+                    const store = useGameStore.getState();
+                    store.setFriendsOpen(false);
+                    store.openPhone(f.id);
+                  }}
+                >
+                  💬{f.unread > 0 && <span className="chat-unread hud-badge">{f.unread}</span>}
+                </button>
+              )}
               <button
                 type="button"
                 className="mini-button"

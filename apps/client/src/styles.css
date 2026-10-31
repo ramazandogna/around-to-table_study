@@ -333,6 +333,10 @@ button {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
   left: 16px;
+  /* Above world labels, so a door sign never covers the links. */
+  z-index: 2;
+  /* Clear of the room chat button in the top right corner. */
+  max-width: calc(100vw - 170px);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -343,7 +347,8 @@ button {
 
 .hud-links {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 2px 12px;
   margin-top: 4px;
 }
 
@@ -1306,4 +1311,358 @@ button:disabled {
 .mini-button--ok {
   border-color: var(--panel-edge);
   color: var(--panel-ok);
+}
+
+/* ---------- Phone ---------- */
+
+.hud-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--panel-select);
+  vertical-align: 2px;
+}
+
+.phone-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: min(56vh, 460px);
+}
+
+.phone-contact {
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phone-contact:hover,
+.phone-contact:focus-visible {
+  background: var(--panel-well);
+}
+
+.phone-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-head .icon-button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
+.phone-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 120px;
+}
+
+.phone-lines .chat-line + .chat-line {
+  margin-top: 0;
+}
+
+.phone-bubble {
+  align-self: flex-start;
+  max-width: 85%;
+  padding: 6px 10px 4px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--panel-well);
+}
+
+.phone-bubble--mine {
+  align-self: flex-end;
+  border-radius: 12px 12px 4px 12px;
+  background: #d9ecd2;
+}
+
+.phone-time {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--panel-ink-soft);
+  text-align: right;
+}
+
+/* ---------- Notice boards: a cork community board in the hall, a felt board in the library ---------- */
+
+.board {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 84px);
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 230px);
+  translate: -50% 0;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+}
+
+.board-header {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 10px 48px 8px 16px;
+}
+
+.board-header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.board-header span {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.board-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
+.board-surface {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  /* Small notes fill the gaps next to wide ones, like people pin things where there is room. */
+  grid-auto-flow: dense;
+  align-items: start;
+  gap: 16px 14px;
+  padding: 18px 16px 20px;
+  overflow-y: auto;
+  border-radius: 0 0 8px 8px;
+}
+
+.board .note--wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 440px) {
+  .board-surface {
+    grid-template-columns: 1fr;
+  }
+
+  .board .note--wide {
+    grid-column: auto;
+  }
+}
+
+.board h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.board p,
+.board ul,
+.board ol {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.board ul,
+.board ol {
+  padding-left: 18px;
+}
+
+.board li + li {
+  margin-top: 4px;
+}
+
+/* Hall: a wooden frame around cork, flyers pinned crooked. */
+.board--hall {
+  border: 8px solid #6e4a2f;
+  background: #6e4a2f;
+  color: #fff3dc;
+}
+
+.board--hall .board-surface {
+  background:
+    radial-gradient(circle at 20% 30%, rgb(255 255 255 / 0.06) 0 1px, transparent 2px) 0 0 / 9px 9px,
+    radial-gradient(circle at 70% 60%, rgb(0 0 0 / 0.1) 0 1px, transparent 2px) 0 0 / 7px 7px,
+    #b98a55;
+}
+
+.note {
+  position: relative;
+  padding: 16px 12px 12px;
+  color: #3b2a1e;
+  box-shadow: 2px 4px 8px rgb(0 0 0 / 0.28);
+}
+
+.note--paper {
+  background: #f6f0e2;
+}
+
+.note--yellow {
+  background: #f2d27a;
+}
+
+.note--pink {
+  background: #f3b5a4;
+}
+
+.note--blue {
+  background: #a9cbe3;
+}
+
+.note--green {
+  background: #bfdca1;
+}
+
+.note-pin {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  translate: -50% 0;
+  border-radius: 50%;
+  box-shadow:
+    inset -2px -2px 0 rgb(0 0 0 / 0.25),
+    1px 2px 2px rgb(0 0 0 / 0.35);
+}
+
+.note-pin--red {
+  background: #c8403a;
+}
+
+.note-pin--blue {
+  background: #3f6fb5;
+}
+
+.note-pin--green {
+  background: #3f8f4f;
+}
+
+.note-pin--yellow {
+  background: #e3b130;
+}
+
+.note-tape {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 70px;
+  height: 18px;
+  translate: -50% 0;
+  rotate: -3deg;
+  background: rgb(255 250 230 / 0.6);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+
+.note-when {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 2px 6px;
+  background: #3b2a1e;
+  color: #fff3dc;
+  font-size: 12px;
+}
+
+/* Library: brass frame, green felt, printed notices lined up straight. */
+.board--library {
+  border: 6px solid #b08d3c;
+  background: #2f4a3a;
+  color: #f1ead8;
+}
+
+.board--library .board-header {
+  border-bottom: 2px solid #b08d3c;
+}
+
+.board--library .board-surface {
+  background:
+    repeating-linear-gradient(45deg, rgb(255 255 255 / 0.025) 0 2px, transparent 2px 5px), #35573f;
+}
+
+.notice-sheet {
+  position: relative;
+  padding: 14px 14px 12px;
+  background: #fbfaf5;
+  color: #263028;
+  box-shadow: 1px 3px 6px rgb(0 0 0 / 0.3);
+}
+
+.notice-sheet h3 {
+  padding-bottom: 5px;
+  border-bottom: 2px solid #2f4a3a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.notice-clip {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 26px;
+  height: 10px;
+  translate: -50% 0;
+  border-radius: 2px;
+  background: #b08d3c;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+.note-sub {
+  display: block;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* ---------- Hover tip: what a click does ---------- */
+
+.world-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  padding: 3px 8px;
+  border: 2px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.world-tip[hidden] {
+  display: none;
+}
+
+/* ---------- First-visit tips ---------- */
+
+.coach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  pointer-events: auto;
+}
+
+.coach p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.coach .mini-button {
+  flex: none;
 }
