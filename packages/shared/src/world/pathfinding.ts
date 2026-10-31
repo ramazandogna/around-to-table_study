@@ -1,5 +1,4 @@
 import type { AreaGrid, Point } from './grid';
-import { TILE } from './tiles';
 
 /** Walking through a chair is allowed but avoided, unless the chair is where you're going. */
 const SEAT_STEP_COST = 5;
@@ -26,9 +25,8 @@ const octile = (a: Point, b: Point) => {
   return Math.max(dx, dy) + (DIAGONAL_COST - 1) * Math.min(dx, dy);
 };
 
-/** A tile a diagonal step may brush past: open floor, not furniture or a chair. */
-const clearCorner = (grid: AreaGrid, p: Point) =>
-  grid.isWalkable(p) && grid.tileAt(p) !== TILE.seat;
+/** A tile a diagonal step may brush past: open floor, not furniture or a seat. */
+const clearCorner = (grid: AreaGrid, p: Point) => grid.isWalkable(p) && !grid.isSeat(p);
 
 /** Neighbors in 8 directions; a diagonal step never cuts the corner of a wall, furniture or chair. */
 function steps(grid: AreaGrid, p: Point): Point[] {
@@ -85,7 +83,7 @@ export function findPath(grid: AreaGrid, start: Point, goal: Point): Point[] | n
     for (const next of steps(grid, current)) {
       const nextKey = key(next);
       const diagonal = next.x !== current.x && next.y !== current.y;
-      const seat = !same(next, goal) && grid.tileAt(next) === TILE.seat;
+      const seat = !same(next, goal) && grid.isSeat(next);
       const cost = (diagonal ? DIAGONAL_COST : 1) * (seat ? SEAT_STEP_COST : 1);
       const tentative = (g.get(currentKey) ?? Infinity) + cost;
       if (tentative < (g.get(nextKey) ?? Infinity)) {
@@ -130,8 +128,8 @@ export function hasClearLine(
     for (const s of [-1, 0, 1]) {
       const tile = { x: Math.floor(x + side.x * s), y: Math.floor(y + side.y * s) };
       if (!grid.isWalkable(tile)) return false;
-      // Chairs are small: only the middle of the body has to stay off them.
-      if (s !== 0 || grid.tileAt(tile) !== TILE.seat) continue;
+      // Seats are small: only the middle of the body has to stay off them.
+      if (s !== 0 || !grid.isSeat(tile)) continue;
       if (!(goal && same(tile, goal))) {
         // The seat you stand up from is fine to leave.
         if (!same(tile, { x: Math.floor(a.x), y: Math.floor(a.y) })) return false;

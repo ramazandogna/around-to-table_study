@@ -18,6 +18,8 @@ export type AreaRules = {
   dmAllowed: boolean;
   /** A room chat panel next to the bubbles; everywhere but the library. */
   chatLog: boolean;
+  /** People may dance here. */
+  dance: boolean;
 };
 
 export const AREA_RULES: Record<AreaId, AreaRules> = {
@@ -31,6 +33,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     notifySound: false,
     dmAllowed: false,
     chatLog: false,
+    dance: false,
   },
   hall: {
     maxChars: 200,
@@ -41,6 +44,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     notifySound: true,
     dmAllowed: true,
     chatLog: true,
+    dance: true,
   },
   smoking: {
     maxChars: 300,
@@ -51,6 +55,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     notifySound: true,
     dmAllowed: true,
     chatLog: true,
+    dance: true,
   },
 };
 

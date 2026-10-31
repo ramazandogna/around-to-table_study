@@ -1,25 +1,17 @@
 import { z } from 'zod';
-import { LOOK_OPTIONS, type Appearance } from './character';
+import { CHARACTERS, type Appearance } from './character';
 import { DOINGS, EMOTES, MOODS, STATUS_LIMITS, type Emote, type StatusLines } from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
-const choice = (options: readonly unknown[]) =>
-  z
+const appearance = z.object({
+  character: z
     .number()
     .int()
     .min(0)
-    .max(options.length - 1);
-const appearance = z.object({
-  skin: choice(LOOK_OPTIONS.skin),
-  hair: choice(LOOK_OPTIONS.hair),
-  hairColor: choice(LOOK_OPTIONS.hairColor),
-  top: choice(LOOK_OPTIONS.top),
-  topColor: choice(LOOK_OPTIONS.topColor),
-  bottom: choice(LOOK_OPTIONS.bottom),
-  bottomColor: choice(LOOK_OPTIONS.bottomColor),
+    .max(CHARACTERS.length - 1),
 });
 const studyStatus = z.object({
   activity: z.enum(ACTIVITIES).nullable(),
@@ -64,6 +56,8 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   /** Replaces the sender's status lines. */
   z.object({ t: z.literal('lines'), lines: statusLines }),
   z.object({ t: z.literal('emote'), emote: z.enum(EMOTES) }),
+  /** Starts or stops dancing, where the area allows it. Walking stops it too. */
+  z.object({ t: z.literal('dance'), on: z.boolean() }),
   /** A friendly nudge to someone in the same area. */
   z.object({ t: z.literal('poke'), to: z.string().min(1).max(64) }),
   /** A private message to someone in the same area; only where the area allows it. */
@@ -83,6 +77,7 @@ export type PlayerSnapshot = {
   tile: Point;
   status: StudyStatus;
   lines: StatusLines;
+  dancing: boolean;
 };
 
 export type ErrorCode =
@@ -96,10 +91,22 @@ export type ErrorCode =
   /** The person left the area. */
   | 'unavailable'
   /** This area does not allow that, e.g. whispers in the library. */
-  | 'not_allowed';
+  | 'not_allowed'
+  /** Someone else already sits there. */
+  | 'seat_taken';
 
 export type ServerMessage =
-  | { t: 'welcome'; self: string; tile: Point; area: AreaId; players: PlayerSnapshot[] }
+  | {
+      t: 'welcome';
+      self: string;
+      tile: Point;
+      area: AreaId;
+      players: PlayerSnapshot[];
+      /** How many renovation strips of the room are open. */
+      opened: number;
+    }
+  /** The room grew: another renovation strip (a desk for two) opened. */
+  | { t: 'grew'; opened: number }
   | { t: 'joined'; player: PlayerSnapshot }
   | { t: 'left'; id: string }
   | { t: 'moved'; id: string; to: Point }
@@ -110,7 +117,9 @@ export type ServerMessage =
   | { t: 'looked'; id: string; look: Appearance }
   | { t: 'lined'; id: string; lines: StatusLines }
   | { t: 'emoted'; id: string; emote: Emote }
-  | { t: 'poked'; from: string }
+  /** Sent to the person poked and to whoever poked them. */
+  | { t: 'poked'; from: string; to: string }
+  | { t: 'danced'; id: string; on: boolean }
   /** Sent to both the sender and the receiver. */
   | { t: 'whispered'; from: string; to: string; text: string }
   | { t: 'error'; code: ErrorCode; retryInMs?: number };

@@ -19,8 +19,11 @@ export const DM_MAX_CHARS = 500;
 export const DM_HISTORY = 200;
 
 export const socialClientSchema = z.discriminatedUnion('t', [
-  /** First message on every (re)connect, and again whenever the player changes rooms. */
-  z.object({ t: z.literal('where'), area: areaId }),
+  /**
+   * First message on every (re)connect, and again whenever the player changes
+   * rooms or sits down at a table or gets up.
+   */
+  z.object({ t: z.literal('where'), area: areaId, studying: z.boolean().optional() }),
   /** Sends a request, or accepts theirs if they already asked. */
   z.object({ t: z.literal('befriend'), to: userId }),
   /** Declines a request, cancels one, or ends a friendship. */
@@ -81,6 +84,8 @@ export type SocialServerMessage =
   | { t: 'dm'; message: DirectMessage }
   /** The newest messages of one conversation, oldest first. */
   | { t: 'history'; with: string; messages: DirectMessage[] }
+  /** How lively the building is: everyone online, and how many sit at a table. */
+  | { t: 'world'; online: number; studying: number }
   | { t: 'error'; code: SocialErrorCode };
 
 export function parseSocialMessage(raw: string): SocialClientMessage | null {

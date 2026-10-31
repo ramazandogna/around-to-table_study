@@ -20,6 +20,8 @@ type Member = {
   id: string;
   name: string;
   area: AreaId | null;
+  /** Sitting at a table, as told by the player. */
+  studying?: boolean;
   changes: RateWindow;
   messages: RateWindow;
 };
@@ -33,6 +35,8 @@ const CHANGES_PER_MINUTE = 10;
 /** Phone messages per person per 10 seconds: quick replies, but no flooding. */
 const MESSAGES_PER_WINDOW = 8;
 const MESSAGE_WINDOW_MS = 10_000;
+/** Building-wide counts go out at most this often, however busy it gets. */
+const WORLD_EVERY_MS = 1_500;
 
 export const SOCIAL_HEADERS = { id: 'x-user-id', name: 'x-user-name' } as const;
 
@@ -45,6 +49,7 @@ export class SocialHub extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   /** A socket being closed may still be listed for a moment; it no longer counts as online. */
   private closing: WebSocket | null = null;
+  private worldTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -124,7 +129,10 @@ export class SocialHub extends DurableObject<Env> {
 
   private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void {
     if (message.t === 'where') {
-      ws.serializeAttachment({ ...me, area: message.area });
+      const moved = me.area !== message.area;
+      ws.serializeAttachment({ ...me, area: message.area, studying: message.studying ?? false });
+      this.tellWorld();
+      if (!moved && me.area) return;
       this.sendList(me.id);
       this.tellFriends(me.id);
       return;
@@ -302,6 +310,38 @@ export class SocialHub extends DurableObject<Env> {
     this.closing = ws;
     this.tellFriends(me.id);
     this.closing = null;
+    this.tellWorld();
+  }
+
+  /**
+   * Soon tells everyone how many people are in the building and how many of
+   * them study, batching changes that come close together.
+   */
+  private tellWorld(): void {
+    this.worldTimer ??= setTimeout(() => {
+      this.worldTimer = null;
+      const online = new Set<string>();
+      const studying = new Set<string>();
+      const sockets = this.ctx.getWebSockets();
+      for (const ws of sockets) {
+        const member = ws.deserializeAttachment() as Member | null;
+        if (!member?.area || ws.readyState !== WebSocket.OPEN) continue;
+        online.add(member.id);
+        if (member.studying) studying.add(member.id);
+      }
+      const data = JSON.stringify({
+        t: 'world',
+        online: online.size,
+        studying: studying.size,
+      } satisfies SocialServerMessage);
+      for (const ws of sockets) {
+        try {
+          ws.send(data);
+        } catch {
+          // Closing.
+        }
+      }
+    }, WORLD_EVERY_MS);
   }
 
   private countFor(id: string): number {

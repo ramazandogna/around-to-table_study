@@ -6,6 +6,7 @@ import {
   createAreaGrid,
   findPath,
   isValidAppearance,
+  stripsNeeded,
   parseClientMessage,
   type Appearance,
   type AreaGrid,
@@ -36,6 +37,7 @@ type Connection = {
   lastPokeAt: number;
   lines: StatusLines;
   lastEmoteAt: number;
+  dancing: boolean;
 };
 
 /** Timers are kept as an end time on the server's clock and sent out as time left. */
@@ -50,6 +52,7 @@ const CLOSE_REPLACED = 4000;
 /** One nudge per person every few seconds is plenty. */
 const POKE_COOLDOWN_MS = 10_000;
 const EMOTE_COOLDOWN_MS = 1_500;
+const OPENED_KEY = 'opened';
 
 export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-area' } as const;
 
@@ -59,6 +62,8 @@ export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-are
  */
 export class AreaRoom extends DurableObject<Env> {
   private grids = new Map<AreaId, AreaGrid>();
+  /** Renovation strips opened so far; loaded from storage on the first message. */
+  private opened: number | null = null;
 
   override async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -83,6 +88,7 @@ export class AreaRoom extends DurableObject<Env> {
       lastPokeAt: 0,
       lines: EMPTY_LINES,
       lastEmoteAt: 0,
+      dancing: false,
     });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -91,6 +97,7 @@ export class AreaRoom extends DurableObject<Env> {
     const message = typeof raw === 'string' ? parseClientMessage(raw) : null;
     const me = this.load(ws);
     if (!message || !me) return this.send(ws, { t: 'error', code: 'bad_message' });
+    this.opened ??= (await this.ctx.storage.get<number>(OPENED_KEY)) ?? 0;
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
     const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
     this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
@@ -115,7 +122,15 @@ export class AreaRoom extends DurableObject<Env> {
         const study = message.status ? this.storeStudy(grid, tile, message.status, now) : NO_STUDY;
         // Lines with a link are dropped rather than refusing the whole hello.
         const lines = (message.lines && cleanStatusLines(message.lines)) ?? EMPTY_LINES;
-        const joined: Connection = { ...me, joined: true, look: message.look, tile, study, lines };
+        const joined: Connection = {
+          ...me,
+          joined: true,
+          look: message.look,
+          tile,
+          study,
+          lines,
+          dancing: false,
+        };
         this.save(ws, joined);
         this.send(ws, {
           t: 'welcome',
@@ -123,22 +138,30 @@ export class AreaRoom extends DurableObject<Env> {
           tile,
           area: me.area,
           players: this.players(now).filter((p) => p.id !== me.id),
+          opened: this.opened ?? 0,
         });
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
+        this.grow(me.area);
         return;
       }
       case 'move': {
         if (!me.joined || !me.tile) return;
         const moves = takeToken(me.moves, now, MOVES_PER_SECOND, 1000);
         if (!moves) return this.send(ws, { t: 'error', code: 'rate_limited' });
-        const path = findPath(this.grid(me.area), me.tile, message.to);
+        const grid = this.grid(me.area);
+        if (grid.isSeat(message.to) && this.seatedBy(message.to, me.id)) {
+          this.save(ws, { ...me, moves });
+          return this.send(ws, { t: 'error', code: 'seat_taken' });
+        }
+        const path = findPath(grid, me.tile, message.to);
         if (!path) {
           this.save(ws, { ...me, moves });
           return this.send(ws, { t: 'placed', id: me.id, tile: me.tile });
         }
-        // Standing up clears what was on the table; everyone else does the same on "moved".
+        // Standing up clears what was on the table and walking stops a dance;
+        // everyone else does the same on "moved".
         const study = { ...me.study, activity: null };
-        this.save(ws, { ...me, moves, tile: message.to, study });
+        this.save(ws, { ...me, moves, tile: message.to, study, dancing: false });
         this.broadcast({ t: 'moved', id: me.id, to: message.to }, ws);
         return;
       }
@@ -191,6 +214,15 @@ export class AreaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'emoted', id: me.id, emote: message.emote });
         return;
       }
+      case 'dance': {
+        if (!me.joined || me.dancing === message.on) return;
+        if (message.on && !AREA_RULES[me.area].dance) {
+          return this.send(ws, { t: 'error', code: 'not_allowed' });
+        }
+        this.save(ws, { ...me, dancing: message.on });
+        this.broadcast({ t: 'danced', id: me.id, on: message.on });
+        return;
+      }
       case 'poke': {
         if (!me.joined) return;
         // No retry time: that one belongs to the chat cooldown on the client.
@@ -199,7 +231,9 @@ export class AreaRoom extends DurableObject<Env> {
         const target = this.reach(ws, me, message.to);
         if (!target) return;
         this.save(ws, { ...me, lastPokeAt: now });
-        this.send(target, { t: 'poked', from: me.id });
+        const poke: ServerMessage = { t: 'poked', from: me.id, to: message.to };
+        this.send(target, poke);
+        this.send(ws, poke);
         return;
       }
       case 'whisper': {
@@ -244,6 +278,28 @@ export class AreaRoom extends DurableObject<Env> {
       return null;
     }
     return target;
+  }
+
+  /** Whether someone other than `self` sits on (stands at) this seat. */
+  private seatedBy(seat: Point, self: string): boolean {
+    return this.ctx.getWebSockets().some((ws) => {
+      const c = this.load(ws);
+      return !!c?.joined && c.id !== self && c.tile?.x === seat.x && c.tile.y === seat.y;
+    });
+  }
+
+  /**
+   * Opens the next desk when more people are in the room than there are
+   * chairs. It stays open, as a library that grew would.
+   */
+  private grow(area: AreaId): void {
+    const people = this.players(Date.now()).length;
+    const opened = stripsNeeded(area, people, this.opened ?? 0);
+    if (opened === this.opened) return;
+    this.opened = opened;
+    this.grids.delete(area);
+    void this.ctx.storage.put(OPENED_KEY, opened);
+    this.broadcast({ t: 'grew', opened });
   }
 
   /** A second tab or a reconnect takes over; the old socket is told why and closed. */
@@ -310,7 +366,7 @@ export class AreaRoom extends DurableObject<Env> {
   private grid(area: AreaId): AreaGrid {
     let grid = this.grids.get(area);
     if (!grid) {
-      grid = createAreaGrid(area);
+      grid = createAreaGrid(area, this.opened ?? 0);
       this.grids.set(area, grid);
     }
     return grid;
@@ -326,6 +382,7 @@ export class AreaRoom extends DurableObject<Env> {
           lastPokeAt: 0,
           lines: EMPTY_LINES,
           lastEmoteAt: 0,
+          dancing: false,
           ...stored,
         } as Connection)
       : null;
@@ -346,6 +403,7 @@ function snapshot(c: Connection, now: number): PlayerSnapshot {
     tile: c.tile ?? { x: 0, y: 0 },
     status: publicStudy(c.study, now),
     lines: c.lines,
+    dancing: c.dancing,
   };
 }
 

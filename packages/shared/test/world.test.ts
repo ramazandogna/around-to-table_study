@@ -7,6 +7,7 @@ import {
   hasClearLine,
   resolveWalkTarget,
   smoothPath,
+  stripsNeeded,
   type AreaId,
 } from '../src';
 
@@ -48,29 +49,59 @@ describe('area layouts', () => {
 });
 
 describe('renovation zone', () => {
-  const [zone] = AREAS.library.renovation;
+  const zone = AREAS.library.renovation;
   if (!zone) throw new Error('library must have a renovation zone');
-  const inside = { x: zone.x + 2, y: 4 };
+  const inside = { x: zone.x + zone.w - 2, y: 8 };
+  const firstStrip = zone.expansions[0];
+  if (!firstStrip) throw new Error('library renovation must open in strips');
+  const inFirstStrip = { x: firstStrip.x + 1, y: 8 };
 
-  it('blocks the right side of the library while locked', () => {
+  it('blocks the right side of the library while closed', () => {
     const grid = createAreaGrid('library', 0);
     expect(grid.blockReason(inside)).toBe('renovation');
-    expect(findPath(grid, AREAS.library.spawn, inside)).toBeNull();
+    expect(findPath(grid, AREAS.library.spawn, inFirstStrip)).toBeNull();
   });
 
-  it('opens once enough users have joined', () => {
-    const grid = createAreaGrid('library', zone.unlockAtUsers);
-    expect(grid.isWalkable(inside)).toBe(true);
-    expect(findPath(grid, AREAS.library.spawn, inside)).not.toBeNull();
+  it('opens strip by strip, each reachable from the open room', () => {
+    for (let opened = 1; opened <= zone.expansions.length; opened++) {
+      const grid = createAreaGrid('library', opened);
+      const strip = zone.expansions[opened - 1];
+      if (!strip) continue;
+      expect(findPath(grid, AREAS.library.spawn, { x: strip.x + 1, y: 8 })).not.toBeNull();
+    }
+    expect(createAreaGrid('library', zone.expansions.length).isWalkable(inside)).toBe(true);
   });
 
-  it('leaves some seats usable at launch', () => {
-    const grid = createAreaGrid('library', 0);
-    let openSeats = 0;
-    AREAS.library.layout.forEach((row, y) =>
-      [...row].forEach((c, x) => c === 'S' && grid.isWalkable({ x, y }) && openSeats++),
-    );
-    expect(openSeats).toBeGreaterThanOrEqual(6);
+  it('starts with twelve chairs, and each strip adds a desk for two', () => {
+    expect(createAreaGrid('library', 0).openChairs()).toHaveLength(12);
+    for (let opened = 1; opened <= zone.expansions.length; opened++) {
+      expect(createAreaGrid('library', opened).openChairs()).toHaveLength(12 + opened * 2);
+    }
+  });
+
+  it('opens a desk when the thirteenth person comes in, and never closes it again', () => {
+    expect(stripsNeeded('library', 12, 0)).toBe(0);
+    expect(stripsNeeded('library', 13, 0)).toBe(1);
+    expect(stripsNeeded('library', 15, 1)).toBe(2);
+    expect(stripsNeeded('library', 2, 2)).toBe(2);
+    expect(stripsNeeded('library', 500, 0)).toBe(zone.expansions.length);
+    expect(stripsNeeded('hall', 500, 0)).toBe(0);
+  });
+});
+
+describe('seatAt', () => {
+  it('turns sofas towards the middle of the room', () => {
+    const smoking = createAreaGrid('smoking');
+    expect(smoking.seatAt({ x: 3, y: 2 })).toEqual({ kind: 'sofa', facing: { x: 0, y: 1 } });
+    expect(smoking.seatAt({ x: 3, y: 7 })).toEqual({ kind: 'sofa', facing: { x: 0, y: -1 } });
+    expect(smoking.isWalkable({ x: 3, y: 7 })).toBe(true);
+  });
+
+  it('knows chairs from sofas and floor', () => {
+    const library = createAreaGrid('library');
+    expect(library.seatAt({ x: 3, y: 6 })?.kind).toBe('chair');
+    expect(library.seatAt({ x: 1, y: 14 })?.kind).toBe('sofa');
+    expect(library.seatAt(AREAS.library.spawn)).toBeNull();
   });
 });
 
@@ -112,7 +143,7 @@ describe('findPath', () => {
 
   it('walks around chairs on the way to a seat', () => {
     const library = createAreaGrid('library');
-    const goal = { x: 8, y: 7 };
+    const goal = { x: 8, y: 6 };
     const path = findPath(library, { x: 8, y: 10 }, goal);
     expect(path?.at(-1)).toEqual(goal);
     expect(path?.slice(0, -1).some((p) => library.tileAt(p) === 'S')).toBe(false);
@@ -190,13 +221,13 @@ describe('smoothPath', () => {
 
   it('does not cut through chairs on the way to a seat', () => {
     const library = createAreaGrid('library');
-    const goal = { x: 8, y: 7 };
+    const goal = { x: 8, y: 6 };
     const path = findPath(library, { x: 8, y: 10 }, goal) ?? [];
     let at = { x: 8.5, y: 10.5 };
     for (const point of smoothPath(library, at, path)) {
       expect(hasClearLine(library, at, point, goal)).toBe(true);
       at = point;
     }
-    expect(at).toEqual({ x: 8.5, y: 7.5 });
+    expect(at).toEqual({ x: 8.5, y: 6.5 });
   });
 });

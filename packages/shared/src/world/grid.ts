@@ -6,6 +6,13 @@ export type Point = { x: number; y: number };
 
 export type BlockReason = 'wall' | 'renovation' | 'elevator';
 
+/** Somewhere to sit: a chair at a table (for studying) or a sofa (for resting). */
+export type Seat = {
+  kind: 'chair' | 'sofa';
+  /** The way a seated person faces: towards the table, or out into the room. */
+  facing: Point;
+};
+
 const DIRECTIONS: readonly Point[] = [
   { x: 1, y: 0 },
   { x: -1, y: 0 },
@@ -24,8 +31,8 @@ export class AreaGrid {
 
   constructor(
     readonly area: AreaDefinition,
-    /** Number of users counted towards unlocking renovation zones. */
-    readonly userCount = 0,
+    /** How many strips of the renovation have opened so far. */
+    readonly opened = 0,
   ) {
     this.height = area.layout.length;
     this.width = area.layout[0]?.length ?? 0;
@@ -36,7 +43,12 @@ export class AreaGrid {
   }
 
   isLockedRenovation(p: Point): boolean {
-    return this.area.renovation.some((z) => this.userCount < z.unlockAtUsers && inRect(p, z));
+    const zone = this.area.renovation;
+    return (
+      !!zone &&
+      inRect(p, zone) &&
+      !zone.expansions.slice(0, this.opened).some((strip) => inRect(p, strip))
+    );
   }
 
   blockReason(p: Point): BlockReason | null {
@@ -50,12 +62,40 @@ export class AreaGrid {
     return this.blockReason(p) === null;
   }
 
-  /** For a seat tile, the direction towards the table it belongs to. */
+  /** For a chair tile, the direction towards the table it belongs to. */
   seatFacing(p: Point): Point | null {
     if (this.tileAt(p) !== TILE.seat) return null;
     return (
       DIRECTIONS.find((d) => this.tileAt({ x: p.x + d.x, y: p.y + d.y }) === TILE.table) ?? null
     );
+  }
+
+  /** True for anything one sits on: chairs and sofas. Only one person fits. */
+  isSeat(p: Point): boolean {
+    const tile = this.tileAt(p);
+    return tile === TILE.seat || tile === TILE.bench;
+  }
+
+  /** The chair or sofa on a tile, and which way someone sitting there faces. */
+  seatAt(p: Point): Seat | null {
+    const tile = this.tileAt(p);
+    if (tile === TILE.bench) {
+      // Sofas face the middle of the room, away from the wall behind them.
+      return { kind: 'sofa', facing: { x: 0, y: p.y < this.height / 2 ? 1 : -1 } };
+    }
+    const facing = this.seatFacing(p);
+    return facing ? { kind: 'chair', facing } : null;
+  }
+
+  /** Every free-standing chair at a table that is open, for counting room. */
+  openChairs(): Point[] {
+    const chairs: Point[] = [];
+    this.area.layout.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        if (c === TILE.seat && this.isWalkable({ x, y })) chairs.push({ x, y });
+      }),
+    );
+    return chairs;
   }
 
   doorTarget(p: Point): AreaId | null {
@@ -87,6 +127,17 @@ export class AreaGrid {
   }
 }
 
-export function createAreaGrid(id: AreaId, userCount = 0): AreaGrid {
-  return new AreaGrid(AREAS[id], userCount);
+export function createAreaGrid(id: AreaId, opened = 0): AreaGrid {
+  return new AreaGrid(AREAS[id], opened);
+}
+
+/**
+ * How many renovation strips should be open with `people` in the room: one
+ * more each time everyone would not find a chair, never fewer than already open.
+ */
+export function stripsNeeded(id: AreaId, people: number, opened: number): number {
+  const strips = AREAS[id].renovation?.expansions.length ?? 0;
+  let count = opened;
+  while (count < strips && people > new AreaGrid(AREAS[id], count).openChairs().length) count++;
+  return count;
 }

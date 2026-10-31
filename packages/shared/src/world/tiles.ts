@@ -10,6 +10,7 @@ export const TILE = {
   seat: 'S',
   plant: 'P',
   receptionDesk: 'C',
+  /** One half of a sofa; people can sit on it like a chair, facing the room. */
   bench: 'b',
   ashtray: 'A',
   elevator: 'E',
@@ -27,6 +28,7 @@ export type TileChar = (typeof TILE)[keyof typeof TILE];
 const WALKABLE: ReadonlySet<string> = new Set([
   TILE.floor,
   TILE.seat,
+  TILE.bench,
   TILE.doorToHall,
   TILE.doorToLibrary,
   TILE.doorToSmoking,
