@@ -1,8 +1,12 @@
 import {
+  AREA_RULES,
+  cleanDm,
+  DM_HISTORY,
   friendPair,
   MAX_FRIENDS,
   parseSocialMessage,
   type AreaId,
+  type DirectMessage,
   type Friend,
   type SocialClientMessage,
   type SocialServerMessage,
@@ -12,12 +16,23 @@ import type { Env } from './env';
 import { takeToken, type RateWindow } from './rate-limit';
 
 /** Per-socket state, kept in the attachment so it survives hibernation. */
-type Member = { id: string; name: string; area: AreaId | null; changes: RateWindow };
+type Member = {
+  id: string;
+  name: string;
+  area: AreaId | null;
+  changes: RateWindow;
+  messages: RateWindow;
+};
 
 type FriendRow = { other: string; name: string; accepted: number; requested_by: string };
 
+type MessageRow = { id: number; sender: string; text: string; at: number };
+
 /** Friend requests and removals per person per minute. */
 const CHANGES_PER_MINUTE = 10;
+/** Phone messages per person per 10 seconds: quick replies, but no flooding. */
+const MESSAGES_PER_WINDOW = 8;
+const MESSAGE_WINDOW_MS = 10_000;
 
 export const SOCIAL_HEADERS = { id: 'x-user-id', name: 'x-user-name' } as const;
 
@@ -49,6 +64,16 @@ export class SocialHub extends DurableObject<Env> {
         PRIMARY KEY (a, b)
       );
       CREATE INDEX IF NOT EXISTS friends_by_b ON friends (b);
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        a TEXT NOT NULL,
+        b TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        text TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        read INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS messages_by_pair ON messages (a, b, id);
     `);
   }
 
@@ -67,6 +92,7 @@ export class SocialHub extends DurableObject<Env> {
       name: decodeURIComponent(name),
       area: null,
       changes: { start: 0, count: 0 },
+      messages: { start: 0, count: 0 },
     };
     server.serializeAttachment(member);
     this.sql.exec(
@@ -81,8 +107,10 @@ export class SocialHub extends DurableObject<Env> {
 
   override async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
     const message = typeof raw === 'string' ? parseSocialMessage(raw) : null;
-    const me = ws.deserializeAttachment() as Member | null;
-    if (!message || !me) return send(ws, { t: 'error', code: 'bad_message' });
+    const stored = ws.deserializeAttachment() as Member | null;
+    if (!message || !stored) return send(ws, { t: 'error', code: 'bad_message' });
+    // Sockets from before the phone have no message window yet.
+    const me: Member = { ...stored, messages: stored.messages ?? { start: 0, count: 0 } };
     this.handle(ws, me, message);
   }
 
@@ -100,6 +128,12 @@ export class SocialHub extends DurableObject<Env> {
       this.sendList(me.id);
       this.tellFriends(me.id);
       return;
+    }
+    if (message.t === 'dm') return this.dm(ws, me, message.to, message.text);
+    if (message.t === 'history') return this.history(ws, me.id, message.with);
+    if (message.t === 'read') {
+      this.markRead(me.id, message.with);
+      return this.sendList(me.id);
     }
     const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
     if (!changes) return send(ws, { t: 'error', code: 'rate_limited' });
@@ -145,9 +179,114 @@ export class SocialHub extends DurableObject<Env> {
     this.sendList(to);
   }
 
+  private dm(ws: WebSocket, me: Member, to: string, raw: string): void {
+    // The library is quiet: the phone can only receive there.
+    if (me.area && !AREA_RULES[me.area].dmAllowed) {
+      return send(ws, { t: 'error', code: 'phone_silent' });
+    }
+    if (!this.areFriends(me.id, to)) return send(ws, { t: 'error', code: 'not_friends' });
+    const messages = takeToken(me.messages, Date.now(), MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
+    if (!messages) return send(ws, { t: 'error', code: 'rate_limited' });
+    ws.serializeAttachment({ ...me, messages });
+    const clean = cleanDm(raw);
+    if (!clean.ok) {
+      if (clean.reason === 'link') send(ws, { t: 'error', code: 'link_blocked' });
+      return;
+    }
+
+    const [a, b] = friendPair(me.id, to);
+    const at = Date.now();
+    const row = this.sql
+      .exec<{ id: number }>(
+        'INSERT INTO messages (a, b, sender, text, at) VALUES (?, ?, ?, ?, ?) RETURNING id',
+        a,
+        b,
+        me.id,
+        clean.text,
+        at,
+      )
+      .one();
+    // Keep only the newest messages of each conversation.
+    this.sql.exec(
+      `DELETE FROM messages WHERE a = ? AND b = ? AND id <= (
+         SELECT id FROM messages WHERE a = ? AND b = ? ORDER BY id DESC LIMIT 1 OFFSET ?
+       )`,
+      a,
+      b,
+      a,
+      b,
+      DM_HISTORY,
+    );
+    const message: DirectMessage = { id: row.id, from: me.id, to, text: clean.text, at };
+    this.sendTo(me.id, { t: 'dm', message });
+    this.sendTo(to, { t: 'dm', message });
+    this.sendList(to);
+  }
+
+  private history(ws: WebSocket, me: string, other: string): void {
+    if (!this.areFriends(me, other)) return send(ws, { t: 'error', code: 'not_friends' });
+    const [a, b] = friendPair(me, other);
+    const messages = this.sql
+      .exec<MessageRow>(
+        `SELECT id, sender, text, at FROM (
+           SELECT id, sender, text, at FROM messages WHERE a = ? AND b = ? ORDER BY id DESC LIMIT ?
+         ) ORDER BY id`,
+        a,
+        b,
+        DM_HISTORY,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        from: row.sender,
+        to: row.sender === me ? other : me,
+        text: row.text,
+        at: row.at,
+      }));
+    send(ws, { t: 'history', with: other, messages });
+    this.markRead(me, other);
+    this.sendList(me);
+  }
+
+  private markRead(me: string, other: string): void {
+    const [a, b] = friendPair(me, other);
+    this.sql.exec(
+      'UPDATE messages SET read = 1 WHERE a = ? AND b = ? AND sender = ? AND read = 0',
+      a,
+      b,
+      other,
+    );
+  }
+
+  private areFriends(me: string, other: string): boolean {
+    const [a, b] = friendPair(me, other);
+    return (
+      this.sql
+        .exec<{ accepted: number }>('SELECT accepted FROM friends WHERE a = ? AND b = ?', a, b)
+        .toArray()[0]?.accepted === 1
+    );
+  }
+
+  /** Unread phone messages per sender. */
+  private unreadFor(id: string): Map<string, number> {
+    const rows = this.sql
+      .exec<{ sender: string; n: number }>(
+        `SELECT sender, COUNT(*) AS n FROM messages
+         WHERE (a = ? OR b = ?) AND sender != ? AND read = 0
+         GROUP BY sender`,
+        id,
+        id,
+        id,
+      )
+      .toArray();
+    return new Map(rows.map((row) => [row.sender, row.n]));
+  }
+
   private unfriend(me: string, other: string): void {
     const [a, b] = friendPair(me, other);
     this.sql.exec('DELETE FROM friends WHERE a = ? AND b = ?', a, b);
+    // A conversation belongs to the friendship and goes with it.
+    this.sql.exec('DELETE FROM messages WHERE a = ? AND b = ?', a, b);
     this.sendList(me);
     this.sendList(other);
   }
@@ -188,11 +327,13 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   private list(id: string): Friend[] {
+    const unread = this.unreadFor(id);
     return this.rows(id).map((row) => ({
       id: row.other,
       name: row.name,
       state: row.accepted ? 'friend' : row.requested_by === id ? 'outgoing' : 'incoming',
       area: row.accepted ? this.areaOf(row.other) : null,
+      unread: row.accepted ? (unread.get(row.other) ?? 0) : 0,
     }));
   }
 
