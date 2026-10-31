@@ -23,6 +23,11 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 ## Layout and design
 - **Lay rooms out by how people move.** Entrance and main destination on one straight line, service desks facing arrivals, side rooms off the main path, arriving and leaving never crossing.
 - **Put boards and signs where nothing frames them.** The first notice board stood behind the entrance's door frame and was hard to see; move it until a screenshot shows it plainly.
+- **Measure movement, do not eyeball it.** Sampling a walker's screen position every 50 ms from another player's view showed the stop-and-go at every tile and proved the fix; a single screenshot never shows feel.
+- **On an isometric screen, keys must follow the screen.** Map axes look diagonal from the camera, so "up" walking up-right felt broken.
+- **A quick key tap must still do something.** Smooth braking turned short taps into nothing; a tap now always takes one step.
+- **Anything a body can walk into must block the tile.** A floor lamp on a walkable tile was invisible with tile steps and obvious with free movement.
+- **Check the HUD at phone width after adding a link or button.** The phone link pushed the top links under the room chat button and a door sign drew over them; the row now wraps and sits above world labels.
 - **Ask before throwing away someone's progress.** Standing up or leaving with a timer running asks first, and "stay" is always one of the answers.
 - **Make doors read as doors without labels:** frame, leaves, doormat and a sign, and let them open as people approach.
 - **Rooms should fit their content.** Big empty floors look unfinished; shrink the room before adding filler.

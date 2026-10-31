@@ -2,6 +2,27 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-10-31: Movement is continuous, keys follow the screen
+- **Problem:** walking was tile by tile at 1.9 tiles/s along 4-direction zigzags, with a stop at every tile when using keys; the arrow keys moved along the map's axes, which on the isometric screen is diagonal; the walk clip was a slowed-down run (fists, pumping arms).
+- **Movement:** A* now runs in 8 directions (no cutting the corners of walls, furniture or chairs) and `smoothPath` turns the tiles into as few straight lines as can be walked with a body's width. Avatars follow those lines at 3 tiles/s, speeding up and braking just in time for the last point, and turn smoothly. The server still only knows tiles and checks that the target is reachable.
+- **Keys** point where they point on screen (up is screen-up), two keys walk diagonally, and the body slides along walls. Letting go brakes onto the tile ahead, so people always rest on a tile (and sit when it is a chair); a quick tap still takes one step. While steering, the client sends the tile just ahead, so others see a steady walk rather than a stop at each tile.
+- **Animation:** the walk is posed on the skeleton (`createWalkCycle`): thighs swing, knees bend most in the swing, the foot rolls heel to toe, arms swing against the legs, the hips rise and fall so the standing foot stays on the floor. Idle, walk and sit are blended by speed and sitting instead of cross-faded, and the walk plays exactly as fast as the body moves. `run.fbx` is no longer shipped.
+
+## 2026-10-31: Two notice boards, guidance on what a tap does
+- **Boards:** the hall has a cork *community board* (flyers at odd angles, pins and tape: welcome, events, the break room, meeting people, house rules); the library a brass-framed green felt board with printed *library notices* (quiet rules, how studying works, the table, study sessions). Both the 3D board and the panel look the part. Events and study sessions are lists in `apps/client/src/content/boards.ts` until there is an admin screen.
+- **Guidance:** with a mouse, a tip next to the pointer says what a click does ("Sit here and study", "Go to Library", "Under renovation"...). Free chairs glow softly while you stand, so phones (no hover) see where to sit too. Each room shows one short tip on the first visit. The library HUD shows how many people are studying.
+
+## 2026-10-31: The library reads as a library
+- The long table stays the heart of the room (the concept). Around it: two back-to-back stacks behind the table, the wall shelves, a librarian's desk beside the way in, a reading corner with a sofa by the door, and plants with floor lamps. Floor lamps now stand inside the plant's tile, so nobody walks through them.
+- Freestanding bookcases two rows deep face away from each other.
+
+## 2026-10-31: The phone (DMs) runs on the SocialHub socket
+- **Decision:** 1:1 messages between friends go over the same SocialHub socket and are stored in its SQLite (`messages` table, newest 200 per conversation). A message reaches every open tab of both people; offline friends see it as unread when they come back.
+- **Rules:** friends only; up to 500 characters (`DM_MAX_CHARS`); case is kept; links are refused like in the hall; 8 messages per 10 s per person. Removing a friend deletes the conversation.
+- **Unread** is a column per message, counted per friend into the friends list (`Friend.unread`), so badges stay right across tabs and reloads. Opening a conversation (`history`) or reading it while open (`read`) clears it.
+- **The library silences the phone:** it cannot be opened and the server refuses sending (`phone_silent`). Messages still arrive, and the Phone link only shows a dot. Leaving the library says "N new messages on your phone".
+- **Whispers stay:** a whisper is to someone in the same room and is not stored; the phone is for friends anywhere.
+
 ## 2026-10-31: Friends live in one SocialHub Durable Object
 - **Decision:** friendships are rows in the SQLite storage of a single `SocialHub` Durable Object (tables `users`, `friends`), not in D1 yet. Every player keeps one socket to it (`/api/social/ws`) next to the area socket; it carries friend requests, the friends list and presence (online + which room) across rooms.
 - **Why:** it deploys with no manual setup (no `wrangler d1 create`), stays on the free plan with hibernation, and one object comfortably serves the 200 users we design for. The same socket is where whispers to friends in other rooms and the phone (DMs) will go. If it ever outgrows one object, the two tables move to D1 unchanged.
