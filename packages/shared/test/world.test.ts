@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { AREAS, TILE, createAreaGrid, findPath, resolveWalkTarget, type AreaId } from '../src';
+import {
+  AREAS,
+  TILE,
+  createAreaGrid,
+  findPath,
+  hasClearLine,
+  resolveWalkTarget,
+  smoothPath,
+  type AreaId,
+} from '../src';
 
 const areaIds = Object.keys(AREAS) as AreaId[];
 
@@ -109,6 +118,26 @@ describe('findPath', () => {
     expect(path?.slice(0, -1).some((p) => library.tileAt(p) === 'S')).toBe(false);
   });
 
+  it('steps diagonally across open floor', () => {
+    const path = findPath(grid, { x: 2, y: 2 }, { x: 4, y: 4 });
+    expect(path).toEqual([
+      { x: 3, y: 3 },
+      { x: 4, y: 4 },
+    ]);
+  });
+
+  it('never cuts the corner of a blocked tile', () => {
+    const path = findPath(grid, { x: 11, y: 8 }, { x: 13, y: 8 }) ?? [];
+    let from = { x: 11, y: 8 };
+    for (const step of path) {
+      if (step.x !== from.x && step.y !== from.y) {
+        expect(grid.isWalkable({ x: step.x, y: from.y })).toBe(true);
+        expect(grid.isWalkable({ x: from.x, y: step.y })).toBe(true);
+      }
+      from = step;
+    }
+  });
+
   it('reports the elevator as blocked', () => {
     expect(grid.blockReason({ x: 17, y: 5 })).toBe('elevator');
   });
@@ -136,5 +165,38 @@ describe('notice boards', () => {
       // Someone can stand next to it to read it.
       expect(resolveWalkTarget(grid, grid.area.spawn, board)).not.toBeNull();
     }
+  });
+});
+
+describe('smoothPath', () => {
+  const grid = createAreaGrid('hall');
+
+  it('walks open floor in one straight line', () => {
+    const path = findPath(grid, { x: 2, y: 2 }, { x: 7, y: 4 }) ?? [];
+    expect(smoothPath(grid, { x: 2.5, y: 2.5 }, path)).toEqual([{ x: 7.5, y: 4.5 }]);
+  });
+
+  it('keeps corners where a straight line would hit something', () => {
+    const from = { x: 11, y: 8 };
+    const path = findPath(grid, from, { x: 13, y: 8 }) ?? [];
+    const route = smoothPath(grid, { x: 11.5, y: 8.5 }, path);
+    expect(route.length).toBeGreaterThan(1);
+    let at = { x: 11.5, y: 8.5 };
+    for (const point of route) {
+      expect(hasClearLine(grid, at, point, { x: 13, y: 8 })).toBe(true);
+      at = point;
+    }
+  });
+
+  it('does not cut through chairs on the way to a seat', () => {
+    const library = createAreaGrid('library');
+    const goal = { x: 8, y: 7 };
+    const path = findPath(library, { x: 8, y: 10 }, goal) ?? [];
+    let at = { x: 8.5, y: 10.5 };
+    for (const point of smoothPath(library, at, path)) {
+      expect(hasClearLine(library, at, point, goal)).toBe(true);
+      at = point;
+    }
+    expect(at).toEqual({ x: 8.5, y: 7.5 });
   });
 });

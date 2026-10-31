@@ -48,23 +48,27 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
   },
   library: {
     id: 'library',
+    // The long table is the heart of the room. Around it the room reads as a library:
+    // two back-to-back stacks behind the table, wall shelves, a librarian's desk facing
+    // the way in, and a reading corner with a sofa by the door. The path from the door
+    // to the table stays open, with the notice board beside it.
     layout: [
       '##############################',
       '#BBBB.BBBB.BBBB.BBBB.BBBB.BBB#',
       '#............................#',
-      '#P..........................P#',
-      '#............................#',
+      '#P.BBBB..BBBB................#',
+      '#..BBBB..BBBB................#',
       '#............................#',
       '#............................#',
       '#.......SSSSSSSSSSSSSS.......#',
       '#......STTTTTTTTTTTTTTS......#',
       '#.......SSSSSSSSSSSSSS.......#',
       '#............................#',
-      '#............................#',
-      '#B..N.......................B#',
-      '#B..........................B#',
-      '#B..........................B#',
-      '#............................#',
+      '#B...........................#',
+      '#B..N.....CCC................#',
+      '#B...........................#',
+      '#bbA.........................#',
+      '#P............P..............#',
       '#####HHHH#####################',
     ],
     doors: { [TILE.doorToHall]: 'hall' },
