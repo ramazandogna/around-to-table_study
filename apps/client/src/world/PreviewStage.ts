@@ -31,8 +31,8 @@ export class PreviewStage {
   ) {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     host.appendChild(this.renderer.domElement);
-    this.camera.position.set(0, 1.05, 4.6);
-    this.camera.lookAt(0, 0.85, 0);
+    this.camera.position.set(0, 0.95, 4.2);
+    this.camera.lookAt(0, 0.72, 0);
     const sun = new DirectionalLight(0xfff1dc, 2);
     sun.position.set(2, 4, 3);
     this.scene.add(new HemisphereLight(0xfff4e0, 0x5a4636, 1.8), sun);
@@ -43,10 +43,7 @@ export class PreviewStage {
     void loadCharacterKit().then((kit) => {
       if (this.disposed) return;
       this.kit = kit;
-      this.model = kit.create(this.look);
-      this.mixer = new AnimationMixer(this.model);
-      this.mixer.clipAction(kit.clips.idle).play();
-      this.scene.add(this.model);
+      this.show(this.look);
     });
 
     let last = performance.now();
@@ -64,7 +61,21 @@ export class PreviewStage {
 
   setLook(look: Appearance): void {
     this.look = look;
-    if (this.kit && this.model) this.kit.dress(this.model, look);
+    if (this.kit) this.show(look);
+  }
+
+  /** Swaps in the chosen character, turned the way the last one was. */
+  private show(look: Appearance): void {
+    if (!this.kit) return;
+    const turned = this.model?.rotation.y ?? this.yaw;
+    this.mixer?.stopAllAction();
+    this.model?.removeFromParent();
+    const { model, clips } = this.kit.create(look);
+    model.rotation.y = turned;
+    this.model = model;
+    this.mixer = new AnimationMixer(model);
+    this.mixer.clipAction(clips.idle).play();
+    this.scene.add(model);
   }
 
   /** Turns the character to face `yaw` radians away from the camera's view. */

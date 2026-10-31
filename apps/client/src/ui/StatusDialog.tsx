@@ -19,7 +19,10 @@ export function StatusDialog() {
   return (
     <>
       <button type="button" className="hud-link" onClick={() => setOpen(true)}>
-        {t('hud.status')}
+        <span className="hud-icon" aria-hidden>
+          🏷️
+        </span>
+        <span className="hud-label">{t('hud.status')}</span>
       </button>
       {open && (
         <Dialog>

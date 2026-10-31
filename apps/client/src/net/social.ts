@@ -1,4 +1,5 @@
 import { AREA_RULES, type Friend } from '@att/shared';
+import { play } from '../audio/sound';
 import { useGameStore } from '../state/store';
 import { SocialConnection } from './SocialConnection';
 import type { GuestSession } from './session';
@@ -11,6 +12,7 @@ export function startSocial(session: GuestSession): () => void {
   const connection = new SocialConnection({
     token: session.token,
     area: () => useGameStore.getState().area,
+    studying: () => useGameStore.getState().seated,
     onMessage: (message) => {
       const store = useGameStore.getState();
       switch (message.t) {
@@ -28,6 +30,7 @@ export function startSocial(session: GuestSession): () => void {
           // In the library the phone stays silent; the badge waits for the way out.
           else if (AREA_RULES[store.area].dmAllowed) {
             store.setNotice('dm', nameOf(store.friends, other));
+            if (mayRing()) play('phone');
           }
           break;
         }
@@ -41,7 +44,11 @@ export function startSocial(session: GuestSession): () => void {
               message.kind === 'request' ? 'friend_request' : 'friend_accepted',
               message.name,
             );
+            if (mayRing()) play('clink');
           }
+          break;
+        case 'world':
+          store.setWorld({ online: message.online, studying: message.studying });
           break;
         case 'error':
           if (
@@ -61,8 +68,11 @@ export function startSocial(session: GuestSession): () => void {
   });
   useGameStore.getState().setSocial(connection);
   const unsubscribe = useGameStore.subscribe((state, before) => {
+    if (state.seated !== before.seated && state.area === before.area) {
+      connection.where(state.area, state.seated);
+    }
     if (state.area === before.area) return;
-    connection.where(state.area);
+    connection.where(state.area, state.seated);
     if (!AREA_RULES[state.area].dmAllowed) {
       state.closePhone();
     } else if (!AREA_RULES[before.area].dmAllowed) {
@@ -77,6 +87,15 @@ export function startSocial(session: GuestSession): () => void {
     useGameStore.getState().setSocial(null);
     useGameStore.getState().setFriends([]);
   };
+}
+
+/**
+ * Notification sounds stay quiet in rooms that ask for it (the library) and
+ * while the player sits studying or asked not to be disturbed.
+ */
+export function mayRing(): boolean {
+  const { area, seated, dnd } = useGameStore.getState();
+  return AREA_RULES[area].notifySound && !seated && !dnd;
 }
 
 /** Phone messages waiting across all friends. */

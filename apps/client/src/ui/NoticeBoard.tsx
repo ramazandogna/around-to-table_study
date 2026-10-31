@@ -1,4 +1,4 @@
-import { AREA_RULES, AREAS } from '@att/shared';
+import { AREA_RULES, createAreaGrid } from '@att/shared';
 import type { ReactNode } from 'react';
 import { HALL_EVENTS, LIBRARY_SESSIONS, type Pinned } from '../content/boards';
 import { t } from '../i18n/t';
@@ -42,6 +42,13 @@ function HallFlyers() {
     <>
       <Note tone="paper" pin="red" tilt={-1.5} wide icon="👋" title={t('board.welcome.title')}>
         <p>{t('board.welcome.text')}</p>
+        <button
+          type="button"
+          className="mini-button note-button"
+          onClick={() => useGameStore.getState().setIntroOpen(true)}
+        >
+          {t('board.welcome.more')}
+        </button>
       </Note>
       {HALL_EVENTS.length === 0 ? (
         <Note tone="yellow" pin="blue" tilt={2} icon="📅" title={t('board.events.title')}>
@@ -88,7 +95,8 @@ function EventNote({ event, index }: { event: Pinned; index: number }) {
 
 function LibraryNotices() {
   const rules = AREA_RULES.library;
-  const opensAt = AREAS.library.renovation[0]?.unlockAtUsers;
+  const opened = useGameStore((s) => s.opened.library ?? 0);
+  const seats = createAreaGrid('library', opened).openChairs().length;
   return (
     <>
       <Notice heading={`🤫 ${t('board.quiet.title')}`} wide>
@@ -111,11 +119,10 @@ function LibraryNotices() {
           <li>{t('board.how.4')}</li>
         </ol>
       </Notice>
-      {opensAt !== undefined && (
-        <Notice heading={`🪑 ${t('board.table.title')}`}>
-          <p>{t('board.table.text', { count: opensAt })}</p>
-        </Notice>
-      )}
+      <Notice heading={`🌱 ${t('board.grow.title')}`} wide>
+        <p>{t('board.grow.text')}</p>
+        <p className="note-sub">{t('board.grow.now', { count: seats })}</p>
+      </Notice>
       <Notice heading={`⏱ ${t('board.sessions.title')}`}>
         {LIBRARY_SESSIONS.length === 0 ? (
           <p>{t('board.sessions.none')}</p>

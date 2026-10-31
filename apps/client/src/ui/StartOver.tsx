@@ -15,7 +15,7 @@ export function StartOver() {
 
   return (
     <>
-      <button type="button" className="hud-link" onClick={() => setAsking(true)}>
+      <button type="button" className="hud-link hud-link--quiet" onClick={() => setAsking(true)}>
         {t('startOver.button')}
       </button>
       {asking && (

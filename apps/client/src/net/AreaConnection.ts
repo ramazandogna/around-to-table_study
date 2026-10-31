@@ -79,6 +79,10 @@ export class AreaConnection {
     this.send({ t: 'emote', emote });
   }
 
+  dance(on: boolean): void {
+    this.send({ t: 'dance', on });
+  }
+
   poke(to: string): void {
     this.send({ t: 'poke', to });
   }

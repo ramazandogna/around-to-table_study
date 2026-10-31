@@ -1,81 +1,102 @@
-import type { Appearance } from '@att/shared';
-import {
-  Box3,
-  MeshStandardMaterial,
-  Vector3,
-  type AnimationClip,
-  type Group,
-  type Mesh,
-  type Object3D,
-} from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { CHARACTERS, type Appearance } from '@att/shared';
+import { AnimationMixer, Box3, Vector3, type AnimationClip, type Group, type Mesh } from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { createSitPose, createWalkCycle, measureStrideSpeed } from './poses';
-import { skinTexture } from './skin';
+import { createDanceCycle, createStudyPose, createWaveGesture } from './poses';
 
 const PATH = 'models/characters/';
-/** Character height in tiles (a tile is about a meter); doors are 2 tiles tall. */
-const CHARACTER_HEIGHT = 1.7;
+/** Standing height in tiles (a tile is about a meter): small and chibi, like the furniture kit. */
+const CHARACTER_HEIGHT = 1.3;
 
-export type CharacterKit = {
-  create: (look: Appearance) => Group;
-  /** Repaints a model made by `create` with another look. */
-  dress: (model: Object3D, look: Appearance) => void;
-  clips: { idle: AnimationClip; walk: AnimationClip; sit: AnimationClip };
-  /** Height of the hip joint above the soles while seated. */
-  seatedHipHeight: number;
-  /** Ground speed of the walk clip at normal speed, in tiles per second. */
-  walkSpeed: number;
+/** Every animation an avatar uses. Clips come with each model, so they always fit its rig. */
+export type CharacterClips = {
+  idle: AnimationClip;
+  walk: AnimationClip;
+  /** Sitting back, hands on the lap: sofas. */
+  sit: AnimationClip;
+  /** Sitting at a table with the forearms on it. */
+  study: AnimationClip;
+  dance: AnimationClip;
+  /** One-off gestures. */
+  poke: AnimationClip;
+  nod: AnimationClip;
+  wave: AnimationClip;
 };
 
-/** Each FBX holds a one-frame "Targeting Pose" next to the real clip, so clips are picked by name. */
-function clipNamed(animations: AnimationClip[], name: string): AnimationClip {
-  const clip = animations.find((c) => c.name.endsWith(`|${name}`));
-  if (!clip) throw new Error(`Character animation ${name} is missing`);
-  return clip;
-}
+export type Character = { model: Group; clips: CharacterClips };
+
+export type CharacterKit = {
+  /** A fresh copy of a character, scaled to the world, with its animations. */
+  create: (look: Appearance) => Character;
+  /** Height of the hip joints above the model's origin while seated. */
+  seatedHipHeight: number;
+};
+
+type Loaded = { scene: Group; clips: CharacterClips };
 
 let kit: Promise<CharacterKit> | null = null;
 
-/** Loads the Kenney "Animated Characters" model and animations once; the world and the creator share it. */
+/** Loads Kenney's "Mini Characters" once; the world and the creator share them. */
 export function loadCharacterKit(): Promise<CharacterKit> {
   kit ??= loadKit();
   return kit;
 }
 
+function clipNamed(animations: AnimationClip[], name: string): AnimationClip {
+  const clip = animations.find((c) => c.name === name);
+  if (!clip) throw new Error(`Character animation ${name} is missing`);
+  return clip;
+}
+
 async function loadKit(): Promise<CharacterKit> {
-  const fbx = new FBXLoader().setPath(PATH);
-  const [base, idleFile] = await Promise.all([
-    fbx.loadAsync('characterMedium.fbx'),
-    fbx.loadAsync('idle.fbx'),
-  ]);
-
-  const height = new Box3().setFromObject(base).getSize(new Vector3()).y;
-  base.scale.setScalar(CHARACTER_HEIGHT / height);
-
-  const idle = clipNamed(idleFile.animations, 'Idle');
-  const walk = createWalkCycle(clone(base), idle);
-  const sit = createSitPose(clone(base), idle);
-
-  return {
-    clips: { idle, walk, sit: sit.clip },
-    seatedHipHeight: sit.hipHeight,
-    walkSpeed: measureStrideSpeed(clone(base), walk),
-    create: (look) => {
-      const model = clone(base) as Group;
-      model.traverse((child) => {
+  const loader = new GLTFLoader().setPath(PATH);
+  const loaded = await Promise.all(
+    CHARACTERS.map(async (id): Promise<Loaded> => {
+      const gltf = await loader.loadAsync(`character-${id}.glb`);
+      const scene = gltf.scene;
+      const height = new Box3().setFromObject(scene).getSize(new Vector3()).y;
+      scene.scale.setScalar(CHARACTER_HEIGHT / height);
+      scene.traverse((child) => {
         const mesh = child as Mesh;
-        if (!mesh.isMesh) return;
-        mesh.castShadow = true;
-        // The FBX material is dark and untextured; the painted skin carries all the color.
-        mesh.material = new MeshStandardMaterial({ map: skinTexture(look), roughness: 0.8 });
+        if (mesh.isMesh) mesh.castShadow = true;
       });
-      return model;
+      const animations = gltf.animations;
+      const sit = clipNamed(animations, 'sit');
+      return {
+        scene,
+        clips: {
+          idle: clipNamed(animations, 'idle'),
+          walk: clipNamed(animations, 'walk'),
+          sit,
+          study: createStudyPose(sit),
+          dance: createDanceCycle(),
+          poke: clipNamed(animations, 'interact-right'),
+          nod: clipNamed(animations, 'emote-yes'),
+          wave: createWaveGesture(),
+        },
+      };
+    }),
+  );
+
+  const first = loaded[0];
+  if (!first) throw new Error('No characters to load');
+  return {
+    seatedHipHeight: measureSeatedHip(first),
+    create: (look) => {
+      const source = loaded[look.character] ?? first;
+      return { model: clone(source.scene) as Group, clips: source.clips };
     },
-    dress: (model, look) =>
-      model.traverse((child) => {
-        const mesh = child as Mesh;
-        if (mesh.isMesh) (mesh.material as MeshStandardMaterial).map = skinTexture(look);
-      }),
   };
+}
+
+/** How high the hip joints are above the model's origin in the sit pose, in world units. */
+function measureSeatedHip({ scene, clips }: Loaded): number {
+  const model = clone(scene);
+  const mixer = new AnimationMixer(model);
+  mixer.clipAction(clips.sit).play();
+  mixer.update(0);
+  model.updateMatrixWorld(true);
+  const hip = model.getObjectByName('leg-left')?.getWorldPosition(new Vector3()).y ?? 0;
+  mixer.stopAllAction();
+  return hip;
 }

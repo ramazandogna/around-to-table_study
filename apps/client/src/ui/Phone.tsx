@@ -23,7 +23,10 @@ export function PhoneLink() {
 
   return (
     <button type="button" className="hud-link" aria-expanded={open} onClick={toggle}>
-      📱 {t('phone.title')}
+      <span className="hud-icon" aria-hidden>
+        📱
+      </span>
+      <span className="hud-label">{t('phone.title')}</span>
       {unread > 0 &&
         (silent ? (
           <span className="hud-dot" aria-label={t('phone.waiting')} />

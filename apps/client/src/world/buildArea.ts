@@ -1,21 +1,28 @@
-import { TILE, type AreaGrid, type AreaId, type Point, type RenovationZone } from '@att/shared';
+import { TILE, type AreaGrid, type AreaId, type Point } from '@att/shared';
 import {
   BoxGeometry,
   CanvasTexture,
   CylinderGeometry,
   ExtrudeGeometry,
   Group,
+  InstancedMesh,
   Mesh,
   MeshStandardMaterial,
-  RepeatWrapping,
+  PlaneGeometry,
   Shape,
   SRGBColorSpace,
+  type Material,
+  type Object3D,
 } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { SHELF_TOPICS } from '../content/discoveries';
 import { t } from '../i18n/t';
 import { buildDoors, WALL_HEIGHT, type Person } from './doors';
+import { floorTexture } from './floors';
 import { facing, instance, type Placement } from './instancing';
 import type { Furniture, ModelTemplate } from './models';
+import { hangPaintings } from './paintings';
+import { buildRenovation } from './renovation';
 
 /** Top of the floor tiles; furniture stands on this. */
 export const FLOOR_Y = 0.05;
@@ -24,8 +31,9 @@ type AreaStyle = { floor: number; slab: number; wall: number; carpet: [number, n
 
 const AREA_STYLE: Record<AreaId, AreaStyle> = {
   hall: { floor: 0xd8cfc0, slab: 0x5b4a3d, wall: 0xf1e6d2, carpet: [0xb2473a, 0x8a3329] },
-  library: { floor: 0xa9774c, slab: 0x4a3426, wall: 0xe9dcc4, carpet: [0x4f7a5c, 0x3b5e46] },
-  smoking: { floor: 0x8c5b3a, slab: 0x3b2a1e, wall: 0xd9c9ad, carpet: [0x6c5a86, 0x54456b] },
+  // Warm oak, deep green and cream: an old reading room.
+  library: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xeadcc0, carpet: [0x3f6b55, 0x2f5242] },
+  smoking: { floor: 0x7a4f34, slab: 0x3b2a1e, wall: 0xd9c9ad, carpet: [0x6c5a86, 0x54456b] },
 };
 
 const WOOD = 0xd4a76c;
@@ -43,6 +51,8 @@ export const CHAIR_INSET = 0.2;
 const CHAIR_SQUASH = 0.75;
 /** Top of the chair seat cushion above the floor (the model's seat is at 0.48). */
 export const SEAT_HEIGHT = 0.48 * CHAIR_SQUASH;
+/** Top of the sofa cushions above the floor. */
+export const SOFA_SEAT_HEIGHT = 0.46;
 /** Table top surface; seated forearms rest on it. */
 export const TABLE_HEIGHT = 0.62;
 const TABLE_DEPTH = 1.2;
@@ -55,11 +65,27 @@ const noise = (x: number, y: number, salt = 0) => {
   return n - Math.floor(n);
 };
 
+/** Something to look at up close: a shelf of books, a painting, the renovation. */
+export type Examinable = {
+  id: string;
+  kind: 'shelf' | 'painting' | 'renovation';
+  /** Index into the content list for its kind. */
+  index: number;
+  /** Where to stand to look at it. */
+  stand: Point;
+};
+
 export type BuiltArea = {
   root: Group;
   /** Animates the room, e.g. doors opening for the people near them. */
   update: (delta: number, people: readonly Person[]) => void;
   dispose: () => void;
+  examinables: ReadonlyMap<string, Examinable>;
+  /**
+   * Meshes the mouse can point at to examine something. Each has
+   * `userData.examine` (an id), or `userData.examineByInstance` (ids per instance).
+   */
+  pickables: Object3D[];
 };
 
 /** Builds the 3D room for an area from its ASCII layout and the Kenney furniture. */
@@ -75,20 +101,35 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   const wallMaterial = new MeshStandardMaterial({ color: style.wall, roughness: 0.95 });
   const carpet = new MeshStandardMaterial({ color: style.carpet[0], roughness: 1 });
   const carpetBorder = new MeshStandardMaterial({ color: style.carpet[1], roughness: 1 });
-  const materials = [floorMaterial, wallMaterial, carpet, carpetBorder];
+  const materials: Material[] = [floorMaterial, wallMaterial, carpet, carpetBorder];
+  const textures: CanvasTexture[] = [];
+  const examinables = new Map<string, Examinable>();
+  const pickables: Object3D[] = [];
 
-  // Floor tiles inside the walls plus door openings, on a dark slab for a diorama edge.
-  const floor: Placement[] = [];
+  // One painted floor inside the walls, door openings in plain colour, on a dark slab for a diorama edge.
+  const boards = floorTexture(grid.area.id, W - 2, H - 2);
+  const painted = new MeshStandardMaterial({ map: boards, roughness: 0.72 });
+  materials.push(painted);
+  const inside = new Mesh(new BoxGeometry(W - 2, FLOOR_Y, H - 2), [
+    floorMaterial,
+    floorMaterial,
+    painted,
+    floorMaterial,
+    floorMaterial,
+    floorMaterial,
+  ]);
+  inside.position.set(W / 2, FLOOR_Y / 2, H / 2);
+  inside.receiveShadow = true;
+  root.add(inside);
+  const doorTiles: Placement[] = [];
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const inside = x > 0 && y > 0 && x < W - 1 && y < H - 1;
-      if (inside || DOORS.has(at(x, y))) floor.push(tileCenter(x, y));
+      if (DOORS.has(at(x, y))) doorTiles.push({ ...tileCenter(x, y), scale: [0.5, 0.5, 0.5] });
     }
   }
   // The floor model covers two tiles; halving it keeps the 0.05 thickness that FLOOR_Y assumes.
-  const floorTiles = floor.map((p) => ({ ...p, scale: [0.5, 0.5, 0.5] as const }));
   root.add(
-    instance(furniture.floorFull, floorTiles, { material: floorMaterial, castShadow: false }),
+    instance(furniture.floorFull, doorTiles, { material: floorMaterial, castShadow: false }),
   );
   const slab = new Mesh(
     new BoxGeometry(W - 2, 0.3, H - 2),
@@ -130,8 +171,11 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   const sofas: Placement[] = [];
   const sideTables: Placement[] = [];
   const bookcases: Placement[] = [];
+  /** The shelf topic of each bookcase, in the order of `bookcases`. */
+  const bookcaseTopics: (string | null)[] = [];
   const books: Placement[] = [];
-  const boards: Point[] = [];
+  const noticeBoards: Point[] = [];
+  const shelves = shelfRuns(grid);
 
   for (let y = 1; y < H - 1; y++) {
     for (let x = 1; x < W - 1; x++) {
@@ -141,11 +185,12 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
         case TILE.seat: {
           const toTable = grid.seatFacing({ x, y }) ?? { x: 0, y: 1 };
           seats.push({
-            x: cx + toTable.x * CHAIR_INSET,
-            z: cz + toTable.y * CHAIR_INSET,
+            x: cx + toTable.x * CHAIR_INSET + (noise(x, y, 5) - 0.5) * 0.06,
+            z: cz + toTable.y * CHAIR_INSET + (noise(x, y, 6) - 0.5) * 0.06,
             y: FLOOR_Y,
             // The Kenney chair's backrest is on +z, so it faces -z like the bookcase.
-            rotation: facing(toTable.x, toTable.y) + Math.PI,
+            // Chairs are never quite straight once people have used them.
+            rotation: facing(toTable.x, toTable.y) + Math.PI + (noise(x, y, 7) - 0.5) * 0.22,
             scale: [1, CHAIR_SQUASH, 1],
           });
           break;
@@ -189,7 +234,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
           break;
         }
         case TILE.noticeBoard:
-          boards.push({ x, y });
+          noticeBoards.push({ x, y });
           break;
         case TILE.ashtray:
           sideTables.push({ x: cx, z: cz, y: FLOOR_Y, scale: [0.45, 1, 0.45] });
@@ -209,6 +254,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
             rotation,
             scale: [0.96 / furniture.bookcaseClosedWide.size.x, 1, 1],
           });
+          bookcaseTopics.push(shelves.topicAt.get(`${x},${y}`) ?? null);
           books.push(
             ...fillShelves(furniture.bookcaseClosedWide.size.y, { bx, bz, dx, dz, rotation }, x, y),
           );
@@ -222,30 +268,59 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
   add('desk', desks);
   add('loungeSofa', sofas);
   add('tableRound', sideTables);
-  add('bookcaseClosedWide', bookcases);
+  const shelfGroup = instance(furniture.bookcaseClosedWide, bookcases);
+  for (const mesh of shelfGroup.children) mesh.userData.examineByInstance = bookcaseTopics;
+  root.add(shelfGroup);
+  pickables.push(shelfGroup);
   add('books', books);
+  for (const run of shelves.runs) {
+    if (!grid.isWalkable(run.stand)) continue;
+    examinables.set(run.id, { id: run.id, kind: 'shelf', index: run.topic, stand: run.stand });
+  }
+  materials.push(...labelShelves(shelves.runs, furniture, root, textures));
 
-  const tables = buildTables(grid, furniture, root);
-  materials.push(...tables);
+  materials.push(...buildDesks(grid, furniture, root));
   decorate(grid, furniture, root, desks);
   materials.push(
-    ...buildNoticeBoards(boards, root, grid.area.id === 'library' ? 'library' : 'hall'),
+    ...buildNoticeBoards(noticeBoards, root, grid.area.id === 'library' ? 'library' : 'hall'),
   );
-  for (const zone of grid.area.renovation) {
-    if (grid.userCount < zone.unlockAtUsers)
-      materials.push(...buildRenovation(zone, furniture, root));
+  const hung = hangPaintings(grid.area.id, root);
+  materials.push(...hung.materials);
+  for (const { painting, stand, mesh } of hung.paintings) {
+    const id = `painting:${painting}`;
+    examinables.set(id, { id, kind: 'painting', index: painting, stand });
+    pickables.push(mesh);
+  }
+  const renovation = buildRenovation(grid, furniture, root);
+  if (renovation) {
+    materials.push(...renovation.materials);
+    examinables.set('renovation', {
+      id: 'renovation',
+      kind: 'renovation',
+      index: 0,
+      stand: renovation.stand,
+    });
+    pickables.push(renovation.pickable);
   }
   addDoorSigns(grid, root);
 
   return {
     root,
     update: doors.update,
+    examinables,
+    pickables,
     dispose: () => {
       root.traverse((child) => {
         if (child instanceof CSS2DObject) child.element.remove();
+        // Instanced furniture shares its geometry with every other room.
+        if (child instanceof Mesh && !(child instanceof InstancedMesh)) child.geometry.dispose();
       });
       root.clear();
-      for (const material of materials) material.dispose();
+      for (const material of materials) {
+        (material as MeshStandardMaterial).map?.dispose();
+        material.dispose();
+      }
+      for (const texture of textures) texture.dispose();
     },
   };
 }
@@ -320,6 +395,109 @@ function awayFromWall(
   return at(x, y + 1) === TILE.bookcase ? [0, -1] : [0, 1];
 }
 
+type ShelfRun = {
+  id: string;
+  /** Index into SHELF_TOPICS. */
+  topic: number;
+  tiles: Point[];
+  /** Which way the books face. */
+  dx: number;
+  dz: number;
+  stand: Point;
+};
+
+/**
+ * Groups bookcases into runs that face the same way, and gives every run the
+ * camera can see a topic, so the shelves read as sections of a real library.
+ */
+function shelfRuns(grid: AreaGrid): { runs: ShelfRun[]; topicAt: Map<string, string> } {
+  const { width: W, height: H } = grid;
+  const at = (x: number, y: number) => grid.tileAt({ x, y });
+  const seen = new Set<string>();
+  const runs: ShelfRun[] = [];
+  const topicAt = new Map<string, string>();
+  for (let y = 1; y < H - 1; y++) {
+    for (let x = 1; x < W - 1; x++) {
+      if (at(x, y) !== TILE.bookcase || seen.has(`${x},${y}`)) continue;
+      const [dx, dz] = awayFromWall(x, y, W, H, at);
+      const step = dz !== 0 ? { x: 1, y: 0 } : { x: 0, y: 1 };
+      const tiles: Point[] = [];
+      for (
+        let p = { x, y };
+        at(p.x, p.y) === TILE.bookcase;
+        p = { x: p.x + step.x, y: p.y + step.y }
+      ) {
+        const [px, pz] = awayFromWall(p.x, p.y, W, H, at);
+        if (px !== dx || pz !== dz) break;
+        tiles.push(p);
+        seen.add(`${p.x},${p.y}`);
+      }
+      // The camera looks from the south-east: books facing north or west are never seen.
+      if (dx < 0 || dz < 0) continue;
+      const middle = tiles[Math.floor((tiles.length - 1) / 2)] ?? { x, y };
+      const id = `shelf:${x},${y}`;
+      runs.push({
+        id,
+        topic: runs.length % SHELF_TOPICS.length,
+        tiles,
+        dx,
+        dz,
+        stand: { x: middle.x + dx, y: middle.y + dz },
+      });
+      for (const tile of tiles) topicAt.set(`${tile.x},${tile.y}`, id);
+    }
+  }
+  return { runs, topicAt };
+}
+
+/** A brass plaque with the section's name on top of each run of shelves. */
+function labelShelves(
+  runs: readonly ShelfRun[],
+  furniture: Furniture,
+  root: Group,
+  textures: CanvasTexture[],
+): MeshStandardMaterial[] {
+  const materials: MeshStandardMaterial[] = [];
+  const { y: height, z: depth } = furniture.bookcaseClosedWide.size;
+  for (const run of runs) {
+    const name = SHELF_TOPICS[run.topic]?.name ?? '';
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 52;
+    const g = canvas.getContext('2d');
+    if (g) {
+      const brass = g.createLinearGradient(0, 0, 0, 52);
+      brass.addColorStop(0, '#E2C27A');
+      brass.addColorStop(1, '#A47E36');
+      g.fillStyle = brass;
+      g.fillRect(0, 0, 256, 52);
+      g.strokeStyle = '#6B4F1E';
+      g.lineWidth = 4;
+      g.strokeRect(2, 2, 252, 48);
+      g.fillStyle = '#3A2810';
+      g.font = 'bold 26px Georgia, serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(name.toUpperCase(), 128, 28, 236);
+    }
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    textures.push(texture);
+    const material = new MeshStandardMaterial({ map: texture, roughness: 0.4, metalness: 0.3 });
+    materials.push(material);
+    const plaque = new Mesh(new PlaneGeometry(0.62, 0.126), material);
+    const first = run.tiles[0] ?? run.stand;
+    const last = run.tiles.at(-1) ?? first;
+    const back = 0.5 - depth / 2 - 0.02;
+    const cx = (first.x + last.x) / 2 + 0.5 - run.dx * back + run.dx * (depth / 2 + 0.01);
+    const cz = (first.y + last.y) / 2 + 0.5 - run.dz * back + run.dz * (depth / 2 + 0.01);
+    plaque.position.set(cx, FLOOR_Y + height + 0.02, cz);
+    plaque.rotation.y = facing(run.dx, run.dz);
+    root.add(plaque);
+  }
+  return materials;
+}
+
 /** Shelf heights in the Kenney bookcase, as fractions of its height. */
 const SHELF_LEVELS = [0.089, 0.392, 0.696];
 const SHELF_SLOTS = [-0.3, 0, 0.3];
@@ -352,11 +530,24 @@ function fillShelves(
   return placements;
 }
 
-/** Long tables are runs of table tiles, built as one stadium-shaped top with a runner. */
-function buildTables(grid: AreaGrid, furniture: Furniture, root: Group): MeshStandardMaterial[] {
-  const wood = new MeshStandardMaterial({ color: WOOD, roughness: 0.7 });
+/**
+ * Desks for two: each short run of table tiles becomes a wooden desk with a
+ * modesty panel on the far side and a lamp between the two places. Desks are
+ * never quite square to the room, like real ones that have been nudged around.
+ * Longer runs still make one long table.
+ */
+function buildDesks(grid: AreaGrid, furniture: Furniture, root: Group): MeshStandardMaterial[] {
+  const wood = new MeshStandardMaterial({ color: WOOD, roughness: 0.62 });
+  const dark = new MeshStandardMaterial({ color: 0x6e4a2f, roughness: 0.7 });
+  const leather = new MeshStandardMaterial({ color: 0x2f5242, roughness: 0.8 });
   const runner = new MeshStandardMaterial({ color: RUNNER, roughness: 0.95 });
   const lamps: Placement[] = [];
+  const box = (w: number, h: number, d: number, material: MeshStandardMaterial) => {
+    const mesh = new Mesh(new BoxGeometry(w, h, d), material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  };
 
   grid.area.layout.forEach((row, y) => {
     for (const match of row.matchAll(/T+/g)) {
@@ -364,37 +555,90 @@ function buildTables(grid: AreaGrid, furniture: Furniture, root: Group): MeshSta
       const length = match[0].length;
       const centerX = start + length / 2;
       const z = y + 0.5;
-      const height = TABLE_HEIGHT - 0.05;
-
-      // The round ends reach past the last side seats, so every chair faces a straight edge.
-      const top = stadium(length + 0.3, TABLE_DEPTH, 0.05);
-      top.position.set(centerX, FLOOR_Y + height, z);
-      const cloth = stadium(length - 0.5, 0.4, 0.01);
-      cloth.material = runner;
-      cloth.position.set(centerX, FLOOR_Y + TABLE_HEIGHT, z);
-      top.material = wood;
-      for (const mesh of [top, cloth]) {
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        root.add(mesh);
+      if (length > 3) {
+        buildLongTable(root, wood, runner, centerX, z, length);
+        for (let i = 2; i < length; i += 4) {
+          lamps.push({ x: start + i + 0.5, z, y: FLOOR_Y + TABLE_HEIGHT, scale: [0.7, 0.7, 0.7] });
+        }
+        continue;
       }
-
-      // Pedestals run down the middle so seated knees fit under the top.
-      for (let lx = start + 1; lx < start + length; lx += 3) {
-        const leg = new Mesh(new CylinderGeometry(0.07, 0.11, height, 10), wood);
-        leg.position.set(lx, FLOOR_Y + height / 2, z);
-        leg.castShadow = true;
-        root.add(leg);
+      // Which side people sit on: the panel goes on the other side.
+      const seatsNorth = grid.tileAt({ x: start, y: y - 1 }) === TILE.seat;
+      const away = seatsNorth ? 1 : -1;
+      const desk = new Group();
+      desk.position.set(
+        centerX + (noise(start, y, 1) - 0.5) * 0.08,
+        FLOOR_Y,
+        z + (noise(start, y, 2) - 0.5) * 0.08,
+      );
+      desk.rotation.y = (noise(start, y, 3) - 0.5) * 0.1;
+      const width = length - 0.12;
+      const depth = 0.86;
+      const top = box(width, 0.05, depth, wood);
+      top.position.y = TABLE_HEIGHT - 0.025;
+      // A green leather writing pad in front of each place.
+      for (let i = 0; i < length; i++) {
+        const pad = box(0.62, 0.006, 0.36, leather);
+        pad.position.set(i - (length - 1) / 2, TABLE_HEIGHT + 0.003, -away * 0.14);
+        desk.add(pad);
       }
-
-      // Only lamps belong to the table; people bring their own things when they sit.
-      for (let i = 2; i < length; i += 4) {
-        lamps.push({ x: start + i + 0.5, z, y: FLOOR_Y + TABLE_HEIGHT, scale: [0.7, 0.7, 0.7] });
+      const panel = box(width - 0.1, 0.42, 0.04, dark);
+      panel.position.set(0, TABLE_HEIGHT - 0.27, away * (depth / 2 - 0.04));
+      desk.add(top, panel);
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const leg = box(0.05, TABLE_HEIGHT - 0.05, 0.05, dark);
+          leg.position.set(
+            sx * (width / 2 - 0.06),
+            (TABLE_HEIGHT - 0.05) / 2,
+            sz * (depth / 2 - 0.06),
+          );
+          desk.add(leg);
+        }
       }
+      root.add(desk);
+      // One lamp shared by the two places, at the back of the desk.
+      lamps.push({
+        x: desk.position.x,
+        z: desk.position.z + away * 0.26,
+        y: FLOOR_Y + TABLE_HEIGHT,
+        scale: [0.6, 0.6, 0.6],
+      });
     }
   });
   root.add(instance(furniture.lampRoundTable, lamps));
-  return [wood, runner];
+  return [wood, dark, leather, runner];
+}
+
+function buildLongTable(
+  root: Group,
+  wood: MeshStandardMaterial,
+  runner: MeshStandardMaterial,
+  centerX: number,
+  z: number,
+  length: number,
+): void {
+  const height = TABLE_HEIGHT - 0.05;
+  // The round ends reach past the last side seats, so every chair faces a straight edge.
+  const top = stadium(length + 0.3, TABLE_DEPTH, 0.05);
+  top.position.set(centerX, FLOOR_Y + height, z);
+  top.material = wood;
+  const cloth = stadium(length - 0.5, 0.4, 0.01);
+  cloth.material = runner;
+  cloth.position.set(centerX, FLOOR_Y + TABLE_HEIGHT, z);
+  for (const mesh of [top, cloth]) {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    root.add(mesh);
+  }
+  // Pedestals run down the middle so seated knees fit under the top.
+  const start = centerX - length / 2;
+  for (let lx = start + 1; lx < start + length; lx += 3) {
+    const leg = new Mesh(new CylinderGeometry(0.07, 0.11, height, 10), wood);
+    leg.position.set(lx, FLOOR_Y + height / 2, z);
+    leg.castShadow = true;
+    root.add(leg);
+  }
 }
 
 /** A flat stadium (rectangle with round ends) lying on the floor plane, centered on the origin. */
@@ -464,83 +708,6 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
   if (grid.area.id === 'hall') {
     root.add(instance(furniture.coatRackStanding, [{ x: 1.5, z: 7.5, y: FLOOR_Y }]));
   }
-}
-
-const TAPE_TEXTURE = (() => {
-  const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 8;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    for (let i = 0; i < 8; i++) {
-      ctx.fillStyle = i % 2 ? '#1d1d1d' : '#f2c230';
-      ctx.beginPath();
-      ctx.moveTo(i * 8, 8);
-      ctx.lineTo(i * 8 + 8, 0);
-      ctx.lineTo(i * 8 + 16, 0);
-      ctx.lineTo(i * 8 + 8, 8);
-      ctx.fill();
-    }
-  }
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  texture.wrapS = RepeatWrapping;
-  return texture;
-})();
-
-/** Darkened, taped-off part of the room with boxes and a sign. */
-function buildRenovation(
-  zone: RenovationZone,
-  furniture: Furniture,
-  root: Group,
-): MeshStandardMaterial[] {
-  const shade = new MeshStandardMaterial({
-    color: 0x000000,
-    transparent: true,
-    opacity: 0.45,
-    depthWrite: false,
-  });
-  // Tall enough to dim the bookcases, low enough not to read as a wall.
-  const volume = new Mesh(new BoxGeometry(zone.w, 1.7, zone.h), shade);
-  volume.position.set(zone.x + zone.w / 2, 0.85, zone.y + zone.h / 2);
-  volume.renderOrder = 1;
-  root.add(volume);
-
-  const tapeMaterial = new MeshStandardMaterial({ map: TAPE_TEXTURE.clone(), roughness: 0.6 });
-  tapeMaterial.map?.repeat.set(zone.h * 2, 1);
-  const tape = new Mesh(new BoxGeometry(0.02, 0.1, zone.h), tapeMaterial);
-  tape.position.set(zone.x, FLOOR_Y + 0.9, zone.y + zone.h / 2);
-  tape.castShadow = true;
-  root.add(tape);
-
-  const post = new MeshStandardMaterial({ color: 0xf2c230, roughness: 0.6 });
-  for (let z = zone.y; z <= zone.y + zone.h; z += 2) {
-    const pole = new Mesh(new CylinderGeometry(0.04, 0.07, 0.95, 8), post);
-    pole.position.set(zone.x, FLOOR_Y + 0.475, z);
-    pole.castShadow = true;
-    root.add(pole);
-  }
-
-  const boxes: Placement[] = [];
-  const open: Placement[] = [];
-  for (let i = 0; i < 10; i++) {
-    const x = zone.x + 1 + noise(i, 1) * (zone.w - 2);
-    const z = zone.y + 0.5 + noise(i, 2) * (zone.h - 1);
-    (i % 3 ? boxes : open).push({ x, z, y: FLOOR_Y, rotation: noise(i, 3) * Math.PI });
-  }
-  root.add(instance(furniture.cardboardBoxClosed, boxes));
-  root.add(instance(furniture.cardboardBoxOpen, open));
-
-  root.add(
-    sign(
-      t('sign.renovation'),
-      'world-sign world-sign--warning',
-      zone.x + 1.2,
-      2.1,
-      zone.y + zone.h / 2,
-    ),
-  );
-  return [shade, tapeMaterial, post];
 }
 
 type BoardKind = 'hall' | 'library';

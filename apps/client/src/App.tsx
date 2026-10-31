@@ -1,38 +1,45 @@
-import { APP_NAME } from '@att/shared';
 import { useEffect } from 'react';
 
+import { unlockAudio } from './audio/sound';
 import { t } from './i18n/t';
 import { useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { ChatPanel } from './ui/ChatPanel';
 import { Coach } from './ui/Coach';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { Discovery } from './ui/Discovery';
 import { NoticeBoard } from './ui/NoticeBoard';
 import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
+import { HudPlate, MapCorner } from './ui/Hud';
+import { Intro } from './ui/Intro';
 import { Notice } from './ui/Notice';
+import { RadialMenu } from './ui/RadialMenu';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
 import { startSocial } from './net/social';
 import { EmoteMenu } from './ui/EmoteMenu';
-import { FriendsLink, FriendsPanel } from './ui/Friends';
-import { PhoneLink, PhonePanel } from './ui/Phone';
-import { StartOver } from './ui/StartOver';
-import { StatusDialog } from './ui/StatusDialog';
+import { FriendsPanel } from './ui/Friends';
+import { PhonePanel } from './ui/Phone';
 import { TimerHud } from './ui/TimerHud';
-import { Wardrobe } from './ui/Wardrobe';
 import { WorldCanvas } from './world/WorldCanvas';
 
 export function App() {
   const session = useGameStore((s) => s.session);
-  const area = useGameStore((s) => s.area);
-  const connected = useGameStore((s) => s.connected);
-  const playersHere = useGameStore((s) => s.playersHere);
-  const studying = useGameStore((s) => s.studying);
   const look = useGameStore((s) => s.look);
 
   // Friends and presence follow the player across rooms, so they live outside the world.
   useEffect(() => (session && look ? startSocial(session) : undefined), [session, look]);
+
+  // Browsers keep sound off until the first touch or key press.
+  useEffect(() => {
+    window.addEventListener('pointerdown', unlockAudio);
+    window.addEventListener('keydown', unlockAudio);
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, []);
 
   // Everyone makes a character first; players from before the creator only pick a look.
   if (!session || !look) {
@@ -46,28 +53,20 @@ export function App() {
   return (
     <main className="app">
       <WorldCanvas />
-      <header className="hud-title">
-        <span>{APP_NAME}</span>
-        <span className="hud-area">
-          {t(`area.${area}`)} · {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
-          {connected && area === 'library' && ` · ${t('hud.studying', { count: studying })}`}
-        </span>
-        <div className="hud-links">
-          <StatusDialog />
-          <FriendsLink />
-          <PhoneLink />
-          <Wardrobe />
-          <StartOver />
-        </div>
-      </header>
+      <HudPlate />
       <TimerHud />
       <aside className="hud-side">
         <FriendsPanel />
         <PhonePanel />
         <PlayerCard />
       </aside>
-      <ChatPanel />
+      <div className="hud-right">
+        <MapCorner />
+        <ChatPanel />
+      </div>
       <NoticeBoard />
+      <Discovery />
+      <RadialMenu />
       <footer className="hud-bottom">
         <Coach />
         <Notice />
@@ -80,6 +79,7 @@ export function App() {
       </footer>
       <SitDialog />
       <ConfirmDialog />
+      <Intro />
     </main>
   );
 }

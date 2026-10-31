@@ -157,6 +157,32 @@ export class IsoView {
     return hit ? { x: Math.floor(hit.x), y: Math.floor(hit.z) } : null;
   }
 
+  /** Where a world point shows on screen, in client pixels. */
+  project(x: number, y: number, z: number): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const point = new Vector3(x, y, z).project(this.camera);
+    return {
+      x: rect.left + ((point.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - point.y) / 2) * rect.height,
+    };
+  }
+
+  /** The first of `objects` under a screen position, with the instance hit for instanced meshes. */
+  pickObject(
+    clientX: number,
+    clientY: number,
+    objects: readonly Object3D[],
+  ): { object: Object3D; instanceId: number | undefined } | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObjects([...objects], true)[0];
+    return hit ? { object: hit.object, instanceId: hit.instanceId } : null;
+  }
+
   add(object: Object3D): void {
     this.scene.add(object);
   }

@@ -1,31 +1,29 @@
-import {
-  LOOK_OPTIONS,
-  normalizeName,
-  randomAppearance,
-  type Appearance,
-  type LookPart,
-} from '@att/shared';
+import { CHARACTERS, normalizeName, randomAppearance, type Appearance } from '@att/shared';
 import { useState, type FormEvent } from 'react';
 import { t } from '../i18n/t';
 import { createGuest, type GuestError } from '../net/session';
 import { useGameStore } from '../state/store';
 import { CharacterPreview } from './CharacterPreview';
-import { Panel, Stepper, Swatches } from './Panel';
+import { Panel, Stepper } from './Panel';
 
 /**
  * - `new`: first visit, name and look together (then a guest session is made)
- * - `returning`: has a name from before the creator existed, only the look
+ * - `returning`: has a name from before, only the look
  * - `wardrobe`: changing the look in the game, can be cancelled
  */
 export type CreatorMode = 'new' | 'returning' | 'wardrobe';
 
 const TURN = Math.PI / 4;
 
-function styleName(part: 'hair' | 'top' | 'bottom', index: number): string {
-  if (part === 'hair') return t(`look.hair.${LOOK_OPTIONS.hair[index] ?? 'short'}`);
-  if (part === 'top') return t(`look.top.${LOOK_OPTIONS.top[index] ?? 'tee'}`);
-  return t(`look.bottom.${LOOK_OPTIONS.bottom[index] ?? 'jeans'}`);
-}
+type Body = 'female' | 'male';
+const BODIES: readonly Body[] = ['female', 'male'];
+
+/** The characters of one body type, as indexes into CHARACTERS. */
+const choicesFor = (body: Body) =>
+  CHARACTERS.flatMap((id, index) => (id.startsWith(`${body}-`) ? [index] : []));
+
+const bodyOf = (look: Appearance): Body =>
+  CHARACTERS[look.character]?.startsWith('male-') ? 'male' : 'female';
 
 export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose?: () => void }) {
   const [look, setLook] = useState<Appearance>(
@@ -36,10 +34,18 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
   const [error, setError] = useState<GuestError | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const choose = (part: LookPart, index: number) => setLook((l) => ({ ...l, [part]: index }));
-  const step = (part: LookPart, direction: -1 | 1) => {
-    const count = LOOK_OPTIONS[part].length;
-    choose(part, (look[part] + direction + count) % count);
+  const body = bodyOf(look);
+  const choices = choicesFor(body);
+  const position = Math.max(0, choices.indexOf(look.character));
+  const step = (direction: -1 | 1) => {
+    const next = choices[(position + direction + choices.length) % choices.length];
+    if (next !== undefined) setLook({ character: next });
+  };
+  const pickBody = (next: Body) => {
+    if (next === body) return;
+    // Keep the same place in the list, so switching back and forth is predictable.
+    const index = choicesFor(next)[position];
+    if (index !== undefined) setLook({ character: index });
   };
 
   async function submit(event: FormEvent) {
@@ -58,24 +64,6 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
     store.setLook(look);
     store.setSession(result);
   }
-
-  const style = (part: 'hair' | 'top' | 'bottom') => (
-    <Stepper
-      label={t(`look.part.${part}`)}
-      value={styleName(part, look[part])}
-      previous={t('creator.previous')}
-      next={t('creator.next')}
-      onStep={(direction) => step(part, direction)}
-    />
-  );
-  const colors = (part: 'skin' | 'hairColor' | 'topColor' | 'bottomColor') => (
-    <Swatches
-      label={t(`look.part.${part}`)}
-      colors={LOOK_OPTIONS[part]}
-      value={look[part]}
-      onChange={(index) => choose(part, index)}
-    />
-  );
 
   return (
     <Panel
@@ -132,13 +120,32 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                 />
               </label>
             )}
-            {colors('skin')}
-            {style('hair')}
-            {colors('hairColor')}
-            {style('top')}
-            {colors('topColor')}
-            {style('bottom')}
-            {colors('bottomColor')}
+            <div className="option-row">
+              <span className="option-label">{t('look.part.body')}</span>
+              <div className="body-choice" role="radiogroup" aria-label={t('look.part.body')}>
+                {BODIES.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    role="radio"
+                    aria-checked={option === body}
+                    className="tag"
+                    aria-pressed={option === body}
+                    onClick={() => pickBody(option)}
+                  >
+                    {t(`look.body.${option}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Stepper
+              label={t('look.part.style')}
+              value={t('look.style', { n: position + 1, of: choices.length })}
+              previous={t('creator.previous')}
+              next={t('creator.next')}
+              onStep={step}
+            />
+            <p className="creator-note">{t('look.note')}</p>
           </div>
         </div>
         {error && <p className="panel-error">{t(`gate.error.${error}`)}</p>}

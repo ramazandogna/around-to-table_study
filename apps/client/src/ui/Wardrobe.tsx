@@ -10,7 +10,10 @@ export function Wardrobe() {
   return (
     <>
       <button type="button" className="hud-link" onClick={() => setOpen(true)}>
-        {t('hud.wardrobe')}
+        <span className="hud-icon" aria-hidden>
+          👕
+        </span>
+        <span className="hud-label">{t('hud.wardrobe')}</span>
       </button>
       {open && (
         <Dialog>

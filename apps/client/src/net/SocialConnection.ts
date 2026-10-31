@@ -5,6 +5,8 @@ type Options = {
   token: string;
   /** Read on every (re)connect, so friends always see the current room. */
   area: () => AreaId;
+  /** Whether the player sits at a table, for the building's "studying" count. */
+  studying: () => boolean;
   onMessage: (message: SocialServerMessage) => void;
 };
 
@@ -18,7 +20,7 @@ export class SocialConnection {
       return `${scheme}://${location.host}/api/social/ws?token=${encodeURIComponent(options.token)}`;
     };
     this.socket = new ReconnectingWebSocket(url, [], { maxRetries: Infinity });
-    this.socket.addEventListener('open', () => this.where(options.area()));
+    this.socket.addEventListener('open', () => this.where(options.area(), options.studying()));
     this.socket.addEventListener('message', (event) => {
       if (typeof event.data !== 'string') return;
       try {
@@ -29,8 +31,8 @@ export class SocialConnection {
     });
   }
 
-  where(area: AreaId): void {
-    this.send({ t: 'where', area });
+  where(area: AreaId, studying: boolean): void {
+    this.send({ t: 'where', area, studying });
   }
 
   befriend(to: string): void {

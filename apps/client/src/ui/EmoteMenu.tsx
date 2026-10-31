@@ -2,12 +2,13 @@ import { AREA_RULES, EMOTES, type Emote } from '@att/shared';
 import { useEffect } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
-import { EMOTE_ICON } from '../state/study';
+import { emoteImage } from '../world/emotes';
 
 /** Quick feelings: the 😊 button or E opens them, a number key or a tap sends one. */
 export function EmoteMenu() {
   const open = useGameStore((s) => s.emoteOpen);
   const area = useGameStore((s) => s.area);
+  const dancing = useGameStore((s) => s.dancing);
   const setOpen = useGameStore((s) => s.setEmoteOpen);
 
   function send(emote: Emote) {
@@ -47,10 +48,23 @@ export function EmoteMenu() {
                 aria-label={t(`emote.${emote}`)}
                 onClick={() => send(emote)}
               >
-                {EMOTE_ICON[emote]}
+                <img src={emoteImage(emote)} alt="" />
               </button>
             ))}
           </div>
+          {AREA_RULES[area].dance && (
+            <button
+              type="button"
+              className="mini-button emote-dance"
+              aria-pressed={dancing}
+              onClick={() => {
+                useGameStore.getState().setDancing(!dancing);
+                setOpen(false);
+              }}
+            >
+              {t(dancing ? 'radial.stop' : 'radial.dance')}
+            </button>
+          )}
         </div>
       )}
       <button
@@ -61,7 +75,7 @@ export function EmoteMenu() {
         title={`${t('emote.title')} (E)`}
         onClick={() => setOpen(!open)}
       >
-        😊
+        <img src={emoteImage('wave')} alt="" className="emote-toggle-icon" />
       </button>
     </div>
   );

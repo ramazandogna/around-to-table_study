@@ -12,13 +12,18 @@ import {
   type Point,
   type ServerMessage,
 } from '@att/shared';
+import { play, unlockAudio } from '../audio/sound';
+import { RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
+import { mayRing } from '../net/social';
 import { studyStatus, useGameStore, type ConfirmChoice } from '../state/store';
 import { Avatar, type AvatarContext, type FloorPoint } from './Avatar';
-import { buildArea, FLOOR_Y, type BuiltArea } from './buildArea';
+import { buildArea, FLOOR_Y, type BuiltArea, type Examinable } from './buildArea';
 import type { CharacterKit } from './characters';
+import { cursorFor, type CursorKind } from './cursors';
 import type { IsoView } from './IsoView';
+import { minimap, type MapPerson } from './minimap';
 import type { Furniture } from './models';
 import { createTableProps } from './tableProps';
 import { createHoverMarker, type HoverKind } from './hoverMarker';
@@ -43,6 +48,12 @@ const NEAR_Y = 34;
 /** A bubble moved up further than this folds to 💬 instead. */
 const MAX_BUBBLE_SHIFT = 110;
 const BUBBLE_GAP = 4;
+/** How often the minimap is redrawn. */
+const MAP_SECONDS = 0.1;
+/** Footsteps no closer together than this. */
+const STEP_SECONDS = 0.26;
+/** How far apart people sharing one tile stand, at most (tiles from its middle). */
+const SPREAD_RADIUS = 0.3;
 
 /** Keys point where they point on screen: [right, down]. Two keys together walk diagonally. */
 const KEY_DIRECTIONS: Record<string, readonly [number, number]> = {
@@ -73,6 +84,19 @@ const reach = (a: Point, b: Point) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y
 
 type Assets = { furniture: Furniture; characters: CharacterKit };
 
+/** Something to do once the player has walked over to it. */
+type Pending =
+  | { kind: 'person'; id: string }
+  | { kind: 'examine'; examinable: Examinable }
+  | { kind: 'desk'; tile: Point };
+
+/** What the mouse is over: a person, something to look at, or a tile. */
+type Target =
+  | { kind: 'self' }
+  | { kind: 'person'; id: string }
+  | { kind: 'examine'; examinable: Examinable }
+  | { kind: 'tile'; tile: Point };
+
 /** Runs one area at a time: builds the room, moves avatars and talks to the server. */
 export class AreaWorld {
   private areaId: AreaId = 'hall';
@@ -97,6 +121,13 @@ export class AreaWorld {
   private readonly tip = document.createElement('div');
   private seatMarkers: ReturnType<typeof createSeatMarkers> | null = null;
   private crowdTimer = 0;
+  private mapTimer = 0;
+  private stepTimer = 0;
+  private pending: Pending | null = null;
+  /** The person lit up under the mouse. */
+  private highlighted: Avatar | null = null;
+  /** True while the mouse rests on the player, so the ring opens once per visit. */
+  private overSelf = false;
   private readonly context: AvatarContext;
   private readonly unsubscribe: () => void;
 
@@ -106,9 +137,10 @@ export class AreaWorld {
     private readonly fader: HTMLElement,
   ) {
     this.context = {
-      seats: (tile) => this.grid.seatFacing(tile),
+      seats: (tile) => this.grid.seatAt(tile),
       props: createTableProps(assets.furniture),
-      walkable: (tile) => this.grid.isWalkable(tile),
+      // Only the player steers with keys: someone else's seat is as good as a wall.
+      walkable: (tile) => this.grid.isWalkable(tile) && !this.seatTaken(tile),
     };
     // The player's own look and status live in the store; the world shows them and the server shares them.
     this.unsubscribe = useGameStore.subscribe((state, before) => {
@@ -117,6 +149,7 @@ export class AreaWorld {
         this.connection?.changeLook(state.look);
       }
       if (state.friends !== before.friends) this.markFriends();
+      if (state.dancing !== before.dancing) this.dance(state.dancing);
       if (state.lines !== before.lines) {
         this.player?.setLines(state.lines);
         this.connection?.setLines(state.lines);
@@ -150,23 +183,14 @@ export class AreaWorld {
     if (!session) throw new Error('AreaWorld needs a guest session');
 
     this.areaId = area;
-    this.grid = createAreaGrid(area);
-    this.built = buildArea(this.grid, this.assets.furniture);
-    this.view.add(this.built.root);
+    this.buildRoom(useGameStore.getState().opened[area] ?? 0);
     this.view.setBounds(this.grid.width, this.grid.height);
     this.boards = [];
     this.grid.area.layout.forEach((row, y) =>
       [...row].forEach((c, x) => c === TILE.noticeBoard && this.boards.push({ x, y })),
     );
     this.nearBoard = false;
-    const seats: Point[] = [];
-    this.grid.area.layout.forEach((row, y) =>
-      [...row].forEach((c, x) => {
-        if (c === TILE.seat && this.grid.isWalkable({ x, y })) seats.push({ x, y });
-      }),
-    );
-    this.seatMarkers = createSeatMarkers(seats, FLOOR_Y);
-    this.view.add(this.seatMarkers.root);
+    this.pending = null;
 
     const look = useGameStore.getState().look;
     if (!look) throw new Error('AreaWorld needs a character look');
@@ -212,17 +236,18 @@ export class AreaWorld {
     this.view.setLoop(null);
   }
 
-  private teardown(): void {
-    this.connection?.close();
-    this.connection = null;
-    useGameStore.getState().setConnection(null);
-    for (const other of this.others.values()) other.dispose();
-    this.others.clear();
-    this.player?.dispose();
-    this.player = null;
-    const store = useGameStore.getState();
-    store.setSeated(false);
-    store.ask(null);
+  /** Builds (or rebuilds, when the room grows) the room around the people in it. */
+  private buildRoom(opened: number): void {
+    this.removeRoom();
+    this.grid = createAreaGrid(this.areaId, opened);
+    this.built = buildArea(this.grid, this.assets.furniture);
+    this.view.add(this.built.root);
+    this.seatMarkers = createSeatMarkers(this.grid.openChairs(), FLOOR_Y);
+    this.view.add(this.seatMarkers.root);
+    minimap.setGrid(this.grid);
+  }
+
+  private removeRoom(): void {
     if (this.seatMarkers) {
       this.view.remove(this.seatMarkers.root);
       this.seatMarkers.dispose();
@@ -235,6 +260,31 @@ export class AreaWorld {
     }
   }
 
+  /** The room grew (or we learned how big it is): rebuild it with the new desks open. */
+  private regrow(opened: number, announce: boolean): void {
+    useGameStore.getState().setOpened(this.areaId, opened);
+    if (opened === this.grid.opened) return;
+    this.buildRoom(opened);
+    if (!announce) return;
+    useGameStore.getState().setNotice('desk_opened');
+    play('chime');
+  }
+
+  private teardown(): void {
+    this.connection?.close();
+    this.connection = null;
+    useGameStore.getState().setConnection(null);
+    for (const other of this.others.values()) other.dispose();
+    this.others.clear();
+    this.player?.dispose();
+    this.player = null;
+    this.highlighted = null;
+    const store = useGameStore.getState();
+    store.setSeated(false);
+    store.ask(null);
+    this.removeRoom();
+  }
+
   private update(delta: number): void {
     const player = this.player;
     if (!player || this.leaving) return;
@@ -243,13 +293,31 @@ export class AreaWorld {
     const entered = player.update(delta);
     if (this.steerDirection) this.sendSteering(player, this.steerDirection);
     if (entered) this.checkDoor(entered);
-    if (player.isSeated !== useGameStore.getState().seated) {
-      useGameStore.getState().setSeated(player.isSeated);
+    this.stepTimer -= delta;
+    if (player.isMoving && this.stepTimer <= 0) {
+      this.stepTimer = STEP_SECONDS;
+      play('step');
     }
+    const store = useGameStore.getState();
+    // Only a chair at a table counts as studying; a sofa is for resting.
+    const studying = player.seatKind === 'chair';
+    if (studying !== store.seated) store.setSeated(studying);
+    if (store.dancing && !player.isDancing) store.setDancing(false);
+    if (store.radial && player.isMoving) store.setRadial(null);
+    // Walking off puts the book back.
+    if (store.discovery && player.isMoving) store.setDiscovery(null);
+    // A board opened at the librarian's desk closes again once the player walks on.
+    if (store.boardOpen && player.isMoving && !this.nearBoard) store.setBoardOpen(false);
+    if (this.pending && !player.isMoving) this.arrive(player, this.pending);
     this.updateBoard(player);
     this.updateHover();
     for (const other of this.others.values()) other.update(delta);
     this.arrangeCrowd(delta);
+    this.mapTimer -= delta;
+    if (this.mapTimer <= 0) {
+      this.mapTimer = MAP_SECONDS;
+      this.drawMap(player);
+    }
     const people = [player.position, ...[...this.others.values()].map((o) => o.position)];
     this.built?.update(delta, people);
 
@@ -266,6 +334,7 @@ export class AreaWorld {
       case 'welcome':
         for (const other of this.others.values()) other.dispose();
         this.others.clear();
+        this.regrow(message.opened, false);
         message.players.forEach((p) => this.addOther(p));
         // After a reconnect the server puts us at the door; walk back to where we are,
         // then repeat the status, since an activity only counts once seated.
@@ -298,18 +367,27 @@ export class AreaWorld {
         other.clearActivity();
         break;
       }
+      case 'grew':
+        this.regrow(message.opened, true);
+        break;
+      case 'danced':
+        if (message.id !== selfId) this.others.get(message.id)?.setDancing(message.on);
+        break;
       case 'status':
         if (message.id !== selfId) this.others.get(message.id)?.setStatus(message.status);
         break;
       case 'lined':
         if (message.id !== selfId) this.others.get(message.id)?.setLines(message.lines);
         break;
-      case 'emoted':
+      case 'emoted': {
+        const quiet = !AREA_RULES[this.areaId].effectsVisible;
         (message.id === selfId ? this.player : this.others.get(message.id))?.emote(
           message.emote,
-          !AREA_RULES[this.areaId].effectsVisible,
+          quiet,
         );
+        if (!quiet) play('pop');
         break;
+      }
       case 'looked':
         this.others.get(message.id)?.setLook(message.look);
         break;
@@ -341,15 +419,28 @@ export class AreaWorld {
         });
         if (message.from !== selfId) store.setChatOpen(true);
         break;
-      case 'poked':
-        // Only the poked person sees the nudge, over whoever sent it.
-        this.others.get(message.from)?.say('👉');
-        store.setNotice('poked', nameOf(message.from));
+      case 'poked': {
+        // Only the two of them see it: the poker reaches out, the poked one jumps.
+        const poker = message.from === selfId ? this.player : this.others.get(message.from);
+        const poked = message.to === selfId ? this.player : this.others.get(message.to);
+        if (poker && poked) {
+          poker.face(poked.position.x - poker.position.x, poked.position.z - poker.position.z);
+        }
+        poker?.play('poke');
+        poked?.poked(nameOf(message.from), message.to === selfId);
+        if (message.to === selfId) {
+          store.setNotice('poked', nameOf(message.from));
+          if (mayRing()) play('poke');
+        }
         break;
+      }
       case 'error':
         // A known wait shows on the send button; anything else gets a short notice.
         if (message.code === 'rate_limited' && message.retryInMs) {
           store.setCooldown(this.areaId, Date.now() + message.retryInMs);
+        } else if (message.code === 'seat_taken') {
+          this.stepOffSeat();
+          store.setNotice('seat_taken');
         } else if (message.code !== 'bad_message' && message.code !== 'blocked') {
           store.setNotice(message.code);
         }
@@ -371,7 +462,8 @@ export class AreaWorld {
     avatar.setStatus(player.status);
     avatar.setLines(player.lines);
     avatar.setFriend(this.isFriend(player.id));
-    avatar.onTap = () => this.select(player.id);
+    avatar.setDancing(player.dancing);
+    avatar.onTap = () => this.approach(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
   }
@@ -390,13 +482,39 @@ export class AreaWorld {
   private readonly onBlur = () => this.heldKeys.clear();
 
   private readonly onPointerDown = (event: PointerEvent) => {
-    if (this.view.isPinching || useGameStore.getState().confirm) return;
-    const tile = this.pickTile(event.clientX, event.clientY);
-    if (!tile) return;
-    // Tapping someone opens their card instead of walking onto them.
-    const someone = this.personAt(tile);
-    if (someone) this.select(someone);
-    else this.walkTo(tile);
+    unlockAudio();
+    const store = useGameStore.getState();
+    if (this.view.isPinching || store.confirm) return;
+    if (store.radial) store.setRadial(null);
+    const target = this.targetAt(event.clientX, event.clientY);
+    if (!target) return;
+    switch (target.kind) {
+      case 'self': {
+        // Tapping yourself opens the ring of things you can do.
+        const at = this.selfScreenPoint();
+        if (at) store.setRadial(at);
+        return;
+      }
+      case 'person':
+        // Tapping someone walks over to them and opens what you can do together.
+        this.ripple(event, 'talk');
+        this.approach(target.id);
+        return;
+      case 'examine':
+        this.ripple(event, 'look');
+        this.goTo(target.examinable.stand, { kind: 'examine', examinable: target.examinable });
+        return;
+      case 'tile': {
+        const { tile } = target;
+        const kind = this.cursorKind(tile);
+        this.ripple(event, kind ?? (this.grid.isWalkable(tile) ? 'walk' : null));
+        if (this.grid.tileAt(tile) === TILE.receptionDesk) {
+          this.goTo(tile, { kind: 'desk', tile });
+          return;
+        }
+        this.walkTo(tile);
+      }
+    }
   };
 
   private readonly onPointerMove = (event: PointerEvent) => {
@@ -406,6 +524,208 @@ export class AreaWorld {
   private readonly onPointerLeave = () => {
     this.pointer = null;
   };
+
+  /** What is under a screen point: a person (by their whole body), something to look at, or a tile. */
+  private targetAt(clientX: number, clientY: number): Target | null {
+    const person = this.avatarAt(clientX, clientY);
+    if (person === 'self') return { kind: 'self' };
+    if (person) return { kind: 'person', id: person };
+    const examinable = this.examinableAt(clientX, clientY);
+    if (examinable) return { kind: 'examine', examinable };
+    const tile = this.pickTile(clientX, clientY);
+    if (!tile) return null;
+    // A tap on the floor under someone still means them.
+    const someone = this.personAt(tile);
+    return someone ? { kind: 'person', id: someone } : { kind: 'tile', tile };
+  }
+
+  /**
+   * Whose body is under a screen point, the front-most one if several overlap:
+   * head, chest or feet all count, not just the tile they stand on.
+   */
+  private avatarAt(clientX: number, clientY: number): string | 'self' | null {
+    let best: { id: string | 'self'; depth: number } | null = null;
+    const check = (id: string | 'self', avatar: Avatar) => {
+      const box = avatar.bodyBox;
+      const foot = this.view.project(box.x, box.bottom, box.z);
+      const head = this.view.project(box.x, box.top, box.z);
+      const side = this.view.project(
+        box.x + box.radius * 0.7,
+        box.bottom,
+        box.z - box.radius * 0.7,
+      );
+      const half = Math.abs(side.x - foot.x);
+      const inside =
+        clientX >= foot.x - half &&
+        clientX <= foot.x + half &&
+        clientY >= head.y - half * 0.3 &&
+        clientY <= foot.y + half * 0.4;
+      // Nearer the camera (south-east) is in front. Where someone overlaps the
+      // player, they win: the player can open their own ring from anywhere else on them.
+      const depth = box.x + box.z - (id === 'self' ? 0.6 : 0);
+      if (inside && (!best || depth > best.depth)) best = { id, depth };
+    };
+    if (this.player) check('self', this.player);
+    for (const [id, other] of this.others) check(id, other);
+    return (best as { id: string | 'self' } | null)?.id ?? null;
+  }
+
+  private examinableAt(clientX: number, clientY: number): Examinable | null {
+    const built = this.built;
+    if (!built) return null;
+    const hit = this.view.pickObject(clientX, clientY, built.pickables);
+    if (!hit) return null;
+    let id: string | undefined;
+    for (let node: typeof hit.object | null = hit.object; node && !id; node = node.parent) {
+      const byInstance = node.userData.examineByInstance as (string | null)[] | undefined;
+      id =
+        (node.userData.examine as string | undefined) ??
+        (byInstance && hit.instanceId !== undefined
+          ? (byInstance[hit.instanceId] ?? undefined)
+          : undefined);
+    }
+    return id ? (built.examinables.get(id) ?? null) : null;
+  }
+
+  /** The player's chest on screen, where the ring of actions opens. */
+  private selfScreenPoint(): { x: number; y: number } | null {
+    const player = this.player;
+    if (!player) return null;
+    const box = player.bodyBox;
+    return this.view.project(box.x, box.bottom + (box.top - box.bottom) * 0.55, box.z);
+  }
+
+  /** A short ring where a tap landed, so it is clear what was tapped. */
+  private ripple(event: PointerEvent, kind: CursorKind | 'walk' | null): void {
+    if (!kind) return;
+    const ring = document.createElement('div');
+    ring.className = `click-ripple click-ripple--${kind}`;
+    ring.style.translate = `${event.clientX}px ${event.clientY}px`;
+    this.view.canvas.parentElement?.append(ring);
+    ring.addEventListener('animationend', () => ring.remove());
+    play('click');
+  }
+
+  /** Someone else sits on this seat (they are standing on its tile). */
+  private seatTaken(tile: Point): boolean {
+    if (!this.grid.isSeat(tile)) return false;
+    for (const other of this.others.values()) if (sameTile(other.tile, tile)) return true;
+    return false;
+  }
+
+  /** The server said the seat was taken first: step to the nearest free tile beside it. */
+  private stepOffSeat(): void {
+    const player = this.player;
+    if (!player) return;
+    const seat = player.tile;
+    const free = this.grid
+      .neighbors(seat)
+      .filter((n) => !this.grid.isSeat(n) && !this.personAt(n))
+      .sort((a, b) => reach(a, seat) - reach(b, seat))[0];
+    if (!free) return;
+    player.follow([{ x: free.x + 0.5, y: free.y + 0.5 }]);
+    this.connection?.move(free);
+  }
+
+  /** Walks over next to someone, then opens what you can do with them. */
+  private approach(id: string): void {
+    const other = this.others.get(id);
+    const player = this.player;
+    if (!other || !player) return;
+    if (reach(player.tile, other.tile) <= 1 && !player.isMoving) {
+      this.arrive(player, { kind: 'person', id });
+      return;
+    }
+    const spots = [-1, 0, 1]
+      .flatMap((dx) => [-1, 0, 1].map((dy) => ({ x: other.tile.x + dx, y: other.tile.y + dy })))
+      .filter(
+        (p) =>
+          !sameTile(p, other.tile) &&
+          this.grid.isWalkable(p) &&
+          !this.grid.isSeat(p) &&
+          !this.personAt(p),
+      )
+      .sort((a, b) => reach(a, player.tile) - reach(b, player.tile));
+    const spot = spots[0];
+    if (!spot) {
+      this.select(id);
+      return;
+    }
+    this.goTo(spot, { kind: 'person', id });
+  }
+
+  /** Walks to `tile` (or next to it) and does `then` on arrival. */
+  private goTo(tile: Point, then: Pending): void {
+    const player = this.player;
+    if (!player) return;
+    const goal = resolveWalkTarget(this.grid, player.tile, tile);
+    if (goal && sameTile(goal, player.tile) && !player.isMoving) {
+      this.arrive(player, then);
+      return;
+    }
+    this.walkTo(tile);
+    this.pending = then;
+  }
+
+  /** Does what the player walked over for, once they stand still. */
+  private arrive(player: Avatar, pending: Pending): void {
+    this.pending = null;
+    const store = useGameStore.getState();
+    const lookAt = (p: Point) =>
+      player.face(p.x + 0.5 - player.position.x, p.y + 0.5 - player.position.z);
+    switch (pending.kind) {
+      case 'person': {
+        const other = this.others.get(pending.id);
+        if (!other) return;
+        lookAt(other.tile);
+        this.select(pending.id);
+        return;
+      }
+      case 'examine': {
+        const { examinable } = pending;
+        const pick =
+          examinable.kind === 'shelf'
+            ? Math.floor(Math.random() * (SHELF_TOPICS[examinable.index]?.moments.length ?? 1))
+            : examinable.kind === 'renovation'
+              ? Math.floor(Math.random() * RENOVATION_NOTES.length)
+              : 0;
+        store.setDiscovery({ kind: examinable.kind, index: examinable.index, pick });
+        return;
+      }
+      case 'desk':
+        lookAt(pending.tile);
+        // The reception hands out the welcome note; the librarian points to the notices.
+        if (this.areaId === 'hall') store.setIntroOpen(true);
+        else store.setBoardOpen(true);
+        return;
+    }
+  }
+
+  /** Starts or stops dancing, where the room allows it. */
+  private dance(on: boolean): void {
+    const player = this.player;
+    if (!player || player.isDancing === on) return;
+    if (on && (!AREA_RULES[this.areaId].dance || player.isSeated)) {
+      const store = useGameStore.getState();
+      store.setDancing(false);
+      store.setNotice('no_dance');
+      return;
+    }
+    player.setDancing(on);
+    this.connection?.dance(on);
+  }
+
+  private drawMap(player: Avatar): void {
+    const people: MapPerson[] = [{ x: player.position.x, z: player.position.z, kind: 'me' }];
+    for (const [id, other] of this.others) {
+      people.push({
+        x: other.position.x,
+        z: other.position.z,
+        kind: this.isFriend(id) ? 'friend' : 'other',
+      });
+    }
+    minimap.draw(people);
+  }
 
   private isFriend(id: string): boolean {
     return useGameStore.getState().friends.some((f) => f.id === id && f.state === 'friend');
@@ -440,8 +760,10 @@ export class AreaWorld {
       !this.player.isSeated,
       [...this.others.values()].map((o) => o.tile),
     );
-    const seated = [this.player, ...this.others.values()].filter((a) => a.isSeated).length;
+    const everyone = [this.player, ...this.others.values()];
+    const seated = everyone.filter((a) => a.seatKind === 'chair').length;
     useGameStore.getState().setStudying(seated);
+    this.spreadOut(everyone);
     // The player first, so their own bubble keeps its place.
     const avatars = [this.player, ...this.others.values()];
     const screen = this.view.canvas.getBoundingClientRect();
@@ -491,47 +813,139 @@ export class AreaWorld {
     }
   }
 
-  /** Lights up the tile under the mouse when tapping it would do something. */
-  private updateHover(): void {
-    const at = this.pointer;
-    const tile = at && !useGameStore.getState().confirm ? this.pickTile(at.x, at.y) : null;
-    const kind = tile ? this.hoverKind(tile) : null;
-    this.hover.show(tile && kind ? { x: tile.x + 0.5, y: FLOOR_Y, z: tile.y + 0.5 } : null, kind);
-    this.view.canvas.style.cursor = kind ? 'pointer' : '';
-    const label = tile && at ? this.hoverLabel(tile) : null;
-    this.tip.hidden = !label;
-    if (label && at) {
-      if (this.tip.textContent !== label) this.tip.textContent = label;
-      this.tip.style.translate = `${at.x + 16}px ${at.y + 18}px`;
+  /**
+   * People standing on the same tile step apart into a small ring, so twenty
+   * people in the smoking room stand together instead of inside each other.
+   */
+  private spreadOut(avatars: readonly Avatar[]): void {
+    const byTile = new Map<string, Avatar[]>();
+    for (const avatar of avatars) {
+      if (avatar.isMoving || avatar.isSeated) {
+        avatar.setSpread(0, 0);
+        continue;
+      }
+      const key = `${avatar.tile.x},${avatar.tile.y}`;
+      byTile.set(key, [...(byTile.get(key) ?? []), avatar]);
+    }
+    for (const group of byTile.values()) {
+      if (group.length === 1) {
+        group[0]?.setSpread(0, 0);
+        continue;
+      }
+      // A steady order, so nobody swaps places every check.
+      group.sort((a, b) => a.name.localeCompare(b.name));
+      const radius = Math.min(SPREAD_RADIUS, 0.14 + 0.04 * group.length);
+      group.forEach((avatar, i) => {
+        // Start along the screen's left-right line, so two people stand side by side.
+        const angle = (i / group.length) * Math.PI * 2 - Math.PI / 4;
+        avatar.setSpread(Math.cos(angle) * radius, Math.sin(angle) * radius);
+      });
     }
   }
 
-  /** What tapping this tile does, in a few words; nothing for plain floor. */
-  private hoverLabel(tile: Point): string | null {
-    const person = this.personAt(tile);
-    if (person) return t('tip.person', { name: this.others.get(person)?.name ?? '' });
+  /**
+   * Shows what a click would do: a cursor of its own, a tip beside the mouse,
+   * the person lit up or the tile marked, and the ring of actions when the
+   * mouse comes to rest on the player.
+   */
+  private updateHover(): void {
+    const at = this.pointer;
+    const store = useGameStore.getState();
+    const target = at && !store.confirm ? this.targetAt(at.x, at.y) : null;
+
+    const person = target?.kind === 'person' ? this.others.get(target.id) : undefined;
+    if (person !== this.highlighted) {
+      this.highlighted?.setHighlight(false);
+      person?.setHighlight(true);
+      this.highlighted = person ?? null;
+    }
+
+    const overSelf = target?.kind === 'self';
+    if (overSelf && !this.overSelf && !store.radial && this.player && !this.player.isMoving) {
+      const point = this.selfScreenPoint();
+      if (point) store.setRadial(point);
+    }
+    this.overSelf = overSelf;
+
+    const tile = target?.kind === 'tile' ? target.tile : null;
+    const kind = tile ? this.hoverKind(tile) : null;
+    this.hover.show(tile && kind ? { x: tile.x + 0.5, y: FLOOR_Y, z: tile.y + 0.5 } : null, kind);
+    const cursor = target ? this.targetCursor(target) : null;
+    this.view.canvas.style.cursor = cursor ? cursorFor(cursor) : kind ? 'pointer' : '';
+
+    const label = target && at ? this.hoverLabel(target) : null;
+    this.tip.hidden = !label;
+    if (label && at) {
+      if (this.tip.textContent !== label) this.tip.textContent = label;
+      this.tip.style.translate = `${at.x + 18}px ${at.y + 20}px`;
+    }
+  }
+
+  private targetCursor(target: Target): CursorKind | null {
+    switch (target.kind) {
+      case 'self':
+        return 'self';
+      case 'person':
+        return 'talk';
+      case 'examine':
+        return 'look';
+      case 'tile':
+        return this.cursorKind(target.tile);
+    }
+  }
+
+  /** The cursor for a tile that does more than walking; null for plain floor. */
+  private cursorKind(tile: Point): CursorKind | null {
+    if (this.grid.doorTarget(tile)) return 'door';
+    const block = this.grid.blockReason(tile);
+    if (block === 'renovation' || block === 'elevator') return 'closed';
+    const c = this.grid.tileAt(tile);
+    if (c === TILE.noticeBoard || c === TILE.receptionDesk) return 'read';
+    if (this.grid.isSeat(tile)) {
+      if (this.seatTaken(tile)) return 'closed';
+      return this.player && sameTile(this.player.tile, tile) && this.player.isSeated ? null : 'sit';
+    }
+    return null;
+  }
+
+  /** What clicking does, in a few words; nothing for plain floor. */
+  private hoverLabel(target: Target): string | null {
+    switch (target.kind) {
+      case 'self':
+        return t('tip.self');
+      case 'person':
+        return t('tip.person', { name: this.others.get(target.id)?.name ?? '' });
+      case 'examine': {
+        const { examinable } = target;
+        if (examinable.kind === 'shelf') {
+          return t('tip.shelf', { topic: SHELF_TOPICS[examinable.index]?.name ?? '' });
+        }
+        return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
+      }
+      case 'tile':
+        break;
+    }
+    const { tile } = target;
     const to = this.grid.doorTarget(tile);
     if (to) return t('tip.door', { area: t(`area.${to}`) });
     const block = this.grid.blockReason(tile);
     if (block === 'renovation') return t('tip.renovation');
     if (block === 'elevator') return t('tip.elevator');
-    if (this.grid.tileAt(tile) === TILE.noticeBoard) return t('tip.board');
-    if (this.grid.seatFacing(tile)) {
-      return this.player && sameTile(this.player.tile, tile) && this.player.isSeated
-        ? null
-        : t('tip.seat');
+    const c = this.grid.tileAt(tile);
+    if (c === TILE.noticeBoard) return t('tip.board');
+    if (c === TILE.receptionDesk)
+      return t(this.areaId === 'hall' ? 'tip.reception' : 'tip.librarian');
+    const seat = this.grid.seatAt(tile);
+    if (seat) {
+      if (this.seatTaken(tile)) return t('tip.taken');
+      if (this.player && sameTile(this.player.tile, tile) && this.player.isSeated) return null;
+      return t(seat.kind === 'chair' ? 'tip.seat' : 'tip.sofa');
     }
     return null;
   }
 
   private hoverKind(tile: Point): HoverKind | null {
-    if (
-      this.personAt(tile) ||
-      this.grid.doorTarget(tile) ||
-      (this.grid.seatFacing(tile) && this.grid.isWalkable(tile)) ||
-      this.grid.tileAt(tile) === TILE.noticeBoard
-    )
-      return 'special';
+    if (this.cursorKind(tile) && this.cursorKind(tile) !== 'closed') return 'special';
     return this.grid.isWalkable(tile) ? 'floor' : null;
   }
 
@@ -612,6 +1026,7 @@ export class AreaWorld {
     };
     const reason = this.grid.blockReason(ahead);
     if (reason) this.explainBlock(reason);
+    this.pending = null;
     if (this.steerDirection) {
       this.steerDirection = direction;
       player.steer(direction);
@@ -653,7 +1068,12 @@ export class AreaWorld {
       this.explainBlock(reason);
       return;
     }
+    this.pending = null;
     const goal = resolveWalkTarget(this.grid, player.tile, tile);
+    if (goal && this.seatTaken(goal)) {
+      useGameStore.getState().setNotice('seat_taken');
+      return;
+    }
     const route = goal && this.routeFor(player, goal);
     if (!goal || !route || (sameTile(goal, player.tile) && !player.isMoving)) return;
     this.leaveSeat(player, () => {

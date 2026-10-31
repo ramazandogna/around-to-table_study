@@ -11,7 +11,10 @@ export function FriendsLink() {
   const setOpen = useGameStore((s) => s.setFriendsOpen);
   return (
     <button type="button" className="hud-link" aria-expanded={open} onClick={() => setOpen(!open)}>
-      {t('friends.title')}
+      <span className="hud-icon" aria-hidden>
+        🤝
+      </span>
+      <span className="hud-label">{t('friends.title')}</span>
       {incoming > 0 && <span className="chat-unread hud-badge">{incoming}</span>}
     </button>
   );

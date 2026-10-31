@@ -1,9 +1,12 @@
 import { AREA_RULES } from '@att/shared';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore, type ChatLine } from '../state/store';
 
-/** The room's chat along the side; every room has one except the quiet library. */
+/**
+ * The room's chat in a thin column on the right. The quiet library has none:
+ * there it folds into an icon that says why.
+ */
 export function ChatPanel() {
   const area = useGameStore((s) => s.area);
   const lines = useGameStore((s) => s.chatLog);
@@ -16,15 +19,11 @@ export function ChatPanel() {
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [lines, open]);
 
-  if (!AREA_RULES[area].chatLog) return null;
+  if (!AREA_RULES[area].chatLog) return <ChatClosed />;
   if (!open) {
     return (
-      <button
-        type="button"
-        className="chat-toggle panel panel--compact"
-        onClick={() => setOpen(true)}
-      >
-        💬 {t('chat.title')}
+      <button type="button" className="chat-toggle" onClick={() => setOpen(true)}>
+        <span aria-hidden>💬</span> {t('chat.title')}
         {unread > 0 && <span className="chat-unread">{unread}</span>}
       </button>
     );
@@ -50,6 +49,32 @@ export function ChatPanel() {
         ))}
       </ol>
     </section>
+  );
+}
+
+/** In the library: a crossed-out chat icon; pointing at it (or tapping it) says why. */
+function ChatClosed() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-closed">
+      <button
+        type="button"
+        className="chat-closed-icon"
+        aria-label={t('chat.closed')}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onBlur={() => setOpen(false)}
+      >
+        <span aria-hidden>💬</span>
+      </button>
+      {open && (
+        <p className="chat-closed-tip" role="tooltip">
+          {t('chat.closed')}
+        </p>
+      )}
+    </div>
   );
 }
 

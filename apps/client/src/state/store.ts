@@ -10,6 +10,7 @@ import {
   type StudyStatus,
 } from '@att/shared';
 import { create } from 'zustand';
+import { isMuted, setMuted as setSoundMuted } from '../audio/sound';
 import type { AreaConnection } from '../net/AreaConnection';
 import type { SocialConnection } from '../net/SocialConnection';
 import {
@@ -38,7 +39,12 @@ export type Notice =
   | 'dm'
   | 'dm_waiting'
   | 'phone_silent'
-  | 'not_friends';
+  | 'not_friends'
+  | 'seat_taken'
+  | 'desk_opened'
+  | 'no_dance'
+  | 'muted'
+  | 'unmuted';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -71,6 +77,18 @@ export type LocalTimer = { endsAt: number; totalMs: number };
 /** The questions asked after sitting down, in order. */
 export type SitStep = 'activity' | 'timer';
 
+/** Something found by looking closely: a shelf moment, a painting, the renovation. */
+export type Discovery = {
+  kind: 'shelf' | 'painting' | 'renovation';
+  /** Index into the content list for its kind. */
+  index: number;
+  /** Which moment of a shelf, or which note of the renovation. */
+  pick: number;
+};
+
+/** Where the ring of actions around the player opens, in screen pixels. */
+export type Radial = { x: number; y: number };
+
 /** State shared between the three.js world and the React UI. */
 type GameState = {
   session: GuestSession | null;
@@ -91,6 +109,17 @@ type GameState = {
   conversations: Record<string, DirectMessage[]>;
   connected: boolean;
   playersHere: number;
+  /** Everyone in the building and how many of them sit at a table, from the social socket. */
+  world: { online: number; studying: number } | null;
+  /** Renovation strips opened per room, as the server last said. */
+  opened: Partial<Record<AreaId, number>>;
+  radial: Radial | null;
+  discovery: Discovery | null;
+  /** The "what is Around the Table" note from the board, open over the game. */
+  introOpen: boolean;
+  /** The player dances (where the room allows it). */
+  dancing: boolean;
+  muted: boolean;
   /** People sitting at the table in this room right now, the player included. */
   studying: number;
   /** True while the chat input has focus, so the keyboard does not walk the character. */
@@ -136,6 +165,13 @@ type GameState = {
   addMessage: (friend: string, message: DirectMessage) => void;
   setConnected: (connected: boolean) => void;
   setPlayersHere: (count: number) => void;
+  setWorld: (world: { online: number; studying: number }) => void;
+  setOpened: (area: AreaId, opened: number) => void;
+  setRadial: (radial: Radial | null) => void;
+  setDiscovery: (discovery: Discovery | null) => void;
+  setIntroOpen: (open: boolean) => void;
+  setDancing: (dancing: boolean) => void;
+  setMuted: (muted: boolean) => void;
   setStudying: (count: number) => void;
   setTyping: (typing: boolean) => void;
   setNotice: (notice: Notice | null, value?: string) => void;
@@ -174,6 +210,13 @@ export const useGameStore = create<GameState>((set) => ({
   conversations: {},
   connected: false,
   playersHere: 1,
+  world: null,
+  opened: {},
+  radial: null,
+  discovery: null,
+  introOpen: false,
+  dancing: false,
+  muted: isMuted(),
   studying: 0,
   typing: false,
   notice: null,
@@ -199,7 +242,17 @@ export const useGameStore = create<GameState>((set) => ({
     set({ look });
   },
   // Each room has its own chat and people, so nothing carries over.
-  setArea: (area) => set({ area, chatLog: [], unread: 0, selected: null, boardOpen: false }),
+  setArea: (area) =>
+    set({
+      area,
+      chatLog: [],
+      unread: 0,
+      selected: null,
+      boardOpen: false,
+      radial: null,
+      discovery: null,
+      dancing: false,
+    }),
   setConnection: (connection) => set({ connection }),
   setSocial: (social) => set({ social }),
   setFriends: (friends) => set({ friends }),
@@ -222,6 +275,16 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   setConnected: (connected) => set({ connected }),
   setPlayersHere: (playersHere) => set({ playersHere }),
+  setWorld: (world) => set({ world }),
+  setOpened: (area, opened) => set((state) => ({ opened: { ...state.opened, [area]: opened } })),
+  setRadial: (radial) => set({ radial }),
+  setDiscovery: (discovery) => set({ discovery }),
+  setIntroOpen: (introOpen) => set({ introOpen }),
+  setDancing: (dancing) => set({ dancing }),
+  setMuted: (muted) => {
+    setSoundMuted(muted);
+    set({ muted });
+  },
   setStudying: (studying) => set((state) => (state.studying === studying ? {} : { studying })),
   setTyping: (typing) => set({ typing }),
   setNotice: (notice, value) => set({ notice, noticeValue: value ?? null }),
