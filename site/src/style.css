@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+@import 'rei-kit/web.css';
+@import '@fontsource/tiny5/400.css';
+
+/*
+ * The game's colours as rei-kit's roles: the library's green leads, the
+ * panels' parchment is the page, their wood is the ink, and the lamp's orange
+ * is the accent. Glass lets that warm page glow through every card.
+ */
+@theme {
+  --color-primary: #2f6b4a;
+  --color-on-primary: #fff6e6;
+  --color-accent: #c9672f;
+  --color-on-accent: #fff6e6;
+  --color-positive: #e0a83f;
+  --color-on-positive: #2b1a0c;
+  --color-warning: #d98c2e;
+  --color-negative: #c0392b;
+  --color-canvas: #f3e4c4;
+  --color-surface: #fff7e6;
+  --color-muted: #f1dcb0;
+  --color-ink: #3b1f0e;
+  --color-ink-soft: #7a5434;
+  --color-hair: #e3c99b;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-pixel: 'Tiny5', ui-monospace, monospace;
+  --measure-page: 72rem;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Headings in the game's pixel type (Chinese and Japanese fall back to the system's). */
+.pixel {
+  font-family: var(--font-pixel);
+  letter-spacing: 0.01em;
+}
+
+/* The warm room behind the glass: wood below, lamplight above. */
+body.canvas {
+  background-color: var(--color-canvas);
+}
+
+.hero-glow {
+  /* Lamplight and the library's green, fading down the whole page with no edge. */
+  background:
+    radial-gradient(70% 900px at 18% 0%, rgb(255 214 140 / 0.7), transparent 75%),
+    radial-gradient(55% 800px at 88% 6%, rgb(47 107 74 / 0.32), transparent 72%),
+    radial-gradient(60% 900px at 50% 100%, rgb(122 53 16 / 0.16), transparent 75%);
+}
+
+.shot {
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.store-soon {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
