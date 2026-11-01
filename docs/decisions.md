@@ -257,3 +257,7 @@ Non-obvious technical decisions, newest first.
 ## 2026-10-29: `@att/shared` is consumed as TypeScript source
 - **Decision:** `packages/shared` exports `src/index.ts` directly; there is no separate build output.
 - **Why:** both Vite and Wrangler bundle TypeScript, so a build step for shared code would only add friction.
+
+## Landing page motion (site)
+
+The landing page is a game's front door, so it moves: a lamp-dot cursor that leaves paw prints (mouse and trackpad only), cards that lean toward the pointer, sections that rise in on scroll, the five reasons as a self-advancing picker, the beta steps lit one after another, and a pets section where each pet greets you in its own way. Everything stops for visitors who ask their system for reduced motion. The language is a small dropdown instead of a four-way switch, so the bar stays one row on a phone; the links move into a menu sheet below the large-screen breakpoint. Pets are shown with the same emoji icons the game's creator uses, not renders.
