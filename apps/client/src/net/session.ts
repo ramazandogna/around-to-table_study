@@ -56,14 +56,23 @@ export function forgetCharacter(): void {
     });
 }
 
-export type GuestError = 'invalid_name' | 'server_misconfigured' | 'network';
+export type GuestError =
+  | 'invalid_name'
+  | 'server_misconfigured'
+  | 'network'
+  /** The early beta's access password was wrong, or tried too often. */
+  | 'wrong_password'
+  | 'too_many_tries';
 
-export async function createGuest(name: string): Promise<GuestSession | GuestError> {
+export async function createGuest(
+  name: string,
+  password: string,
+): Promise<GuestSession | GuestError> {
   try {
     const response = await fetch('/api/guest', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, password }),
     });
     const body = (await response.json()) as Partial<GuestSession> & { error?: GuestError };
     if (!response.ok || !body.token || !body.id || !body.name) return body.error ?? 'network';
@@ -109,4 +118,22 @@ export function loadLines(): StatusLines {
 
 export function saveLines(lines: StatusLines): void {
   writeJson(LINES_KEY, lines);
+}
+
+/**
+ * Whether the door needs the access password, and whether the session kept
+ * here still opens it. A new password (every deploy) ends old sessions; the
+ * look is kept, so only the name and the password are asked again.
+ */
+export async function checkAccess(
+  token: string | null,
+): Promise<{ required: boolean; valid: boolean }> {
+  try {
+    const response = await fetch(`/api/access?token=${encodeURIComponent(token ?? '')}`);
+    const body = (await response.json()) as { required?: boolean; valid?: boolean };
+    return { required: !!body.required, valid: !!body.valid };
+  } catch {
+    // Offline: let the game try with what it has.
+    return { required: false, valid: true };
+  }
 }

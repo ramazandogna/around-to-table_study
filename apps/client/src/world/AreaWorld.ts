@@ -68,7 +68,7 @@ const BLOCK_MESSAGE_COOLDOWN_MS = 2500;
 const CAMERA_LERP = 0.12;
 /** Heights checked when a tap misses the floor, up to the top of the tallest door. */
 const DOOR_PICK_HEIGHTS = [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1];
-const FADE_MS = 220;
+const FADE_MS = 120;
 /** How often name tags and bubbles are checked for crowding. */
 const CROWD_CHECK_SECONDS = 0.2;
 /** More people than this on screen fold everyone's status lines into icons. */
@@ -818,7 +818,25 @@ export class AreaWorld {
     const store = useGameStore.getState();
     if (!player.isAtChair) {
       if (!player.isSeated) this.chairAsked = false;
-      if (!player.isAtChair && !player.isSeated && !player.isMoving) player.chairAllowed = false;
+      if (!player.isAtChair && !player.isSeated && !player.isMoving) {
+        player.chairAllowed = false;
+        player.sofaAllowed = false;
+      }
+      return;
+    }
+    // A sofa: just a question, and a little jump onto it.
+    if (player.waitingKind === 'sofa') {
+      if (this.chairAsked) return;
+      this.chairAsked = true;
+      store.ask({
+        kind: 'sofa',
+        answer: (choice) => {
+          store.ask(null);
+          if (choice === 'end') player.sofaAllowed = true;
+          else this.stepOffSeat();
+          this.chairAsked = false;
+        },
+      });
       return;
     }
     if (!this.chairAsked) {
@@ -914,11 +932,11 @@ export class AreaWorld {
         this.view.add(this.decor.root);
       }
     }
-    // A song on the jukebox takes the place of the event's own music.
-    const { musicOn, jukebox, jukeboxOn } = useGameStore.getState();
-    const jukeboxPlaying = jukebox.now !== null && jukeboxOn;
-    if (live && musicOn && !jukeboxPlaying) playMusic(EVENT_THEMES[themeOf(live.event)].music);
-    else stopMusic();
+    // The smoking room always has its own music (see RoomMusic); elsewhere an event brings some.
+    const { musicOn } = useGameStore.getState();
+    if (live && musicOn && this.areaId !== 'smoking') {
+      playMusic(EVENT_THEMES[themeOf(live.event)].music);
+    } else stopMusic();
   }
 
   /**
@@ -1743,14 +1761,21 @@ export class AreaWorld {
   private handleKeyboard(player: Avatar): void {
     let right = 0;
     let down = 0;
-    if (!useGameStore.getState().typing) {
+    const { typing, stick } = useGameStore.getState();
+    if (!typing) {
       for (const code of this.heldKeys) {
         const [r, d] = KEY_DIRECTIONS[code] ?? [0, 0];
         right += r;
         down += d;
       }
     }
-    const direction = screenToFloor(Math.sign(right), Math.sign(down));
+    // Keys point in eight ways; the on-screen joystick in any.
+    const direction =
+      right || down
+        ? screenToFloor(Math.sign(right), Math.sign(down))
+        : stick
+          ? screenToFloor(stick.x, stick.y)
+          : null;
     if (!direction) {
       if (!this.steerDirection) return;
       this.steerDirection = null;

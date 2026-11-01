@@ -31,7 +31,9 @@ function own(mesh: Mesh): Mesh {
 }
 
 export function dressPet(model: Group, accessory: PetAccessory): void {
-  const body = (model.getObjectByName('body') ?? model) as Object3D & { geometry?: BufferGeometry };
+  // Most pets wear things on their body (head and body in one); a turtle on its head.
+  const anchor = (model.userData.gearOn as string | undefined) ?? 'body';
+  const body = (model.getObjectByName(anchor) ?? model) as Object3D & { geometry?: BufferGeometry };
   const geometry = body.geometry;
   if (!geometry) return;
   geometry.computeBoundingBox();

@@ -1949,6 +1949,9 @@ button:disabled {
 
 .map-frame {
   position: relative;
+  /* Small on purpose: it is there to look nice, not to find the way. */
+  width: 150px;
+  align-self: flex-end;
   padding: 14px 6px 6px;
   border: 4px solid var(--panel-edge);
   border-radius: 8px;
@@ -1974,7 +1977,7 @@ button:disabled {
 }
 
 .map-canvas-host {
-  height: 128px;
+  height: 84px;
 }
 
 .minimap-canvas {
@@ -2229,7 +2232,6 @@ button:disabled {
     align-items: flex-end;
   }
 
-  .map-corner .map-frame,
   .map-corner .world-stats {
     align-self: stretch;
   }
@@ -3412,53 +3414,6 @@ button:disabled {
   width: 140px;
 }
 
-/* YouTube asks for its player to stay visible, at least 200 by 200 pixels. */
-.jukebox-card {
-  position: fixed;
-  left: max(12px, env(safe-area-inset-left));
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 120px);
-  z-index: 3;
-  width: 224px;
-  padding: 6px;
-}
-
-.jukebox-card-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.jukebox-card-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--panel-ink);
-}
-
-.jukebox-card-head .icon-button {
-  width: 26px;
-  height: 26px;
-  font-size: 12px;
-}
-
-.jukebox-video,
-.jukebox-video iframe {
-  display: block;
-  width: 200px;
-  height: 200px;
-  border: 0;
-}
-
-@media (max-width: 640px) {
-  .jukebox-card {
-    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 150px);
-  }
-}
-
 /* ---------- The clock's calendar, and the calendar's next event ---------- */
 
 .world-clock-row {
@@ -3803,8 +3758,8 @@ button:disabled {
 }
 
 .loader-logo {
-  width: 96px;
-  height: 96px;
+  width: 132px;
+  height: 132px;
   border-radius: 6px;
   image-rendering: auto;
   animation: loader-bounce ease-in-out infinite;
@@ -3881,4 +3836,264 @@ button:disabled {
   margin-right: 6px;
   border-radius: 3px;
   vertical-align: -4px;
+}
+
+/* ---------- The smoking room's music card ---------- */
+
+.music-card {
+  position: fixed;
+  left: 50%;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 120px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 236px;
+  padding: 8px;
+  border: 4px solid var(--panel-edge);
+  border-radius: 10px;
+  background: var(--panel-face);
+  box-shadow:
+    inset 0 0 0 2px var(--panel-edge-light),
+    0 6px 0 rgb(0 0 0 / 0.3);
+  color: var(--panel-ink);
+  translate: -50% 0;
+  transition:
+    left 0.25s ease,
+    bottom 0.25s ease,
+    translate 0.25s ease;
+}
+
+/* Tucked away: down in the corner, still playing. A YouTube song keeps its player visible. */
+.music-card--docked {
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 96px);
+  translate: 0 0;
+  width: 220px;
+  padding: 4px 6px;
+}
+
+.music-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.music-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* The close button is the one to find at a glance. */
+.music-button--close {
+  border-color: #8c1d12;
+  background: #d6371f;
+  color: #fff6e6;
+  font-size: 15px;
+}
+
+.music-cozy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.music-record {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #3a2a20 0 22%, #1b1411 23% 100%);
+  box-shadow: inset 0 0 0 3px #4a3524;
+  animation: record-spin 6s linear infinite;
+}
+
+.music-record img {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+@keyframes record-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .music-record {
+    animation: none;
+  }
+}
+
+.music-now {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.music-now b {
+  overflow: hidden;
+  font-weight: normal;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-now span {
+  color: var(--panel-ink-soft);
+  font-size: 11px;
+}
+
+.music-video,
+.music-video iframe {
+  display: block;
+  width: 200px;
+  height: 200px;
+  margin: 0 auto;
+  border: 0;
+}
+
+.music-tap {
+  padding: 8px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel-ok);
+  color: #fff6e6;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  animation: music-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes music-pulse {
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+.music-queue {
+  border: 0;
+  background: none;
+  color: var(--panel-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.music-on {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 96px);
+  z-index: 6;
+  padding: 6px 10px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel-face);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---------- The joystick, on touch screens ---------- */
+
+.joystick {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .joystick {
+    position: fixed;
+    left: max(14px, env(safe-area-inset-left));
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 70px);
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 112px;
+    height: 112px;
+    border: 3px solid rgb(122 53 16 / 0.65);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgb(244 207 138 / 0.35), rgb(43 33 24 / 0.35));
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .joystick-knob {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--panel-edge);
+    border-radius: 50%;
+    background: var(--panel-face);
+    box-shadow:
+      inset 0 0 0 2px var(--panel-edge-light),
+      0 3px 0 rgb(0 0 0 / 0.3);
+    pointer-events: none;
+  }
+
+  /* With a joystick there, the walking hint and the long chat line move aside. */
+  .hud-hint--touch {
+    display: none;
+  }
+
+  .chat-row {
+    box-sizing: border-box;
+    width: auto;
+    max-width: calc(100% - 124px);
+    margin-left: 124px;
+  }
+
+  /* Beside the joystick the line is narrow: everything in it may shrink, and Send is a short arrow. */
+  .chat-row .chat-bar,
+  .chat-row .chat-field {
+    min-width: 0;
+  }
+
+  .chat-row .chat-bar button {
+    min-width: 46px;
+    padding: 0 8px;
+  }
+
+  .chat-row .chat-bar input {
+    padding-right: 30px;
+  }
+
+  /* On a phone the music sits on the right, clear of the joystick; tucked away, lower. */
+  .music-card {
+    left: auto;
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 196px);
+    translate: 0 0;
+  }
+
+  .music-card--docked,
+  .music-on {
+    left: auto;
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 70px);
+  }
 }

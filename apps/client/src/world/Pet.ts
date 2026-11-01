@@ -42,8 +42,6 @@ const TURN_SPEED = 10;
 const SETTLE_SECONDS = 1.2;
 /** How far from its person it wanders. */
 const WANDER_RADIUS = 1.6;
-/** Chance that a pause ends in something clumsy rather than a stroll. */
-const CLUMSY_CHANCE = 0.3;
 const REST_SECONDS: readonly [number, number] = [1.5, 4.5];
 const WAIT_IDLE_SECONDS: readonly [number, number] = [6, 14];
 const LABEL_HEIGHT = 0.62;
@@ -56,6 +54,25 @@ const CHATTER_MS = 2600;
 const CHATTER_EVERY: readonly [number, number] = [14, 34];
 /** How long being petted lasts: it leans into the hand, purring. */
 const PETTED_SECONDS = 2.2;
+/**
+ * Each kind's own ways: how fast it goes, how often it does something silly,
+ * how much it chatters, whether it hops. A turtle takes its time (and pulls
+ * its head in now and then); a rabbit hops; small dogs scurry; a shiba keeps
+ * its dignity.
+ */
+const TRAITS: Record<
+  PetKind,
+  { speed: number; clumsy: number; chatter: number; hop?: boolean; turtle?: boolean }
+> = {
+  cat: { speed: 1, clumsy: 0.3, chatter: 1 },
+  dog: { speed: 1, clumsy: 0.3, chatter: 1 },
+  corgi: { speed: 1.15, clumsy: 0.38, chatter: 1.3 },
+  dachshund: { speed: 1.05, clumsy: 0.34, chatter: 1.1 },
+  shiba: { speed: 1, clumsy: 0.14, chatter: 0.5 },
+  rabbit: { speed: 1.1, clumsy: 0.25, chatter: 0.8, hop: true },
+  turtle: { speed: 0.32, clumsy: 0.35, chatter: 0.4, turtle: true },
+};
+
 /** Where on a pet a tap counts as on it, around its middle. */
 export const PET_PICK = { radius: 0.3, height: 0.5 } as const;
 
@@ -75,7 +92,9 @@ type Task =
   /** Up on its hind legs, front paws in the air, hopping a little. */
   | { kind: 'beg'; left: number }
   /** Rolls over onto its back and all the way round. */
-  | { kind: 'roll'; left: number };
+  | { kind: 'roll'; left: number }
+  /** A turtle pulls its head into its shell for a while, then peeks out again. */
+  | { kind: 'hide'; left: number };
 
 type FloorXZ = { x: number; z: number };
 
@@ -167,8 +186,11 @@ export class Pet {
     this.label.center.set(0.5, 1);
     this.label.position.set(0, LABEL_HEIGHT, 0);
     this.root.add(this.label);
-    this.chatterIn = this.between(CHATTER_EVERY);
+    this.traits = TRAITS[kind];
+    this.chatterIn = this.between(CHATTER_EVERY) / this.traits.chatter;
   }
+
+  private readonly traits: (typeof TRAITS)[PetKind];
 
   /** The pet's middle on the floor and its size, for telling a tap on it. */
   get pickBox(): { x: number; z: number; radius: number; bottom: number; top: number } {
@@ -246,7 +268,7 @@ export class Pet {
     this.clock += delta;
     this.chatterIn -= delta;
     if (this.chatterIn <= 0) {
-      this.chatterIn = this.between(CHATTER_EVERY);
+      this.chatterIn = this.between(CHATTER_EVERY) / this.traits.chatter;
       this.chatter();
     }
     this.rear = MathUtils.damp(this.rear, this.rearWanted, 9, delta);
@@ -260,6 +282,10 @@ export class Pet {
       this.speed = 0;
     } else if (this.mode === 'wait' || !owner) this.waitStep(delta);
     else this.followStep(delta, owner);
+    // A rabbit goes in little hops.
+    if (this.traits.hop && this.speed > 0.15) {
+      this.tilt.position.y += Math.abs(Math.sin(this.clock * 11)) * 0.06;
+    }
     this.animate();
     const turn =
       MathUtils.euclideanModulo(this.heading - this.root.rotation.y + Math.PI, Math.PI * 2) -
@@ -298,7 +324,8 @@ export class Pet {
     }
     const target = this.trail[0] ?? { x: owner.x, z: owner.z };
     const gap = Math.hypot(target.x - here.x, target.z - here.z);
-    const wanted = toOwner < PERSONAL_SPACE ? 0 : Math.min(RUN_SPEED, gap * 3.2);
+    const wanted =
+      toOwner < PERSONAL_SPACE ? 0 : Math.min(RUN_SPEED * this.traits.speed, gap * 3.2);
     this.speed = MathUtils.damp(this.speed, wanted, 8, delta);
     if (gap > 0.02 && this.speed > 0.05) this.moveTowards(target, this.speed * delta);
   }
@@ -395,6 +422,25 @@ export class Pet {
         }
         return;
       }
+      case 'hide': {
+        task.left -= delta;
+        this.speed = 0;
+        const head = this.tilt.getObjectByName('head');
+        if (head) {
+          // In for most of it, out again at the end.
+          const inside = task.left > 0.6 ? 1 : task.left / 0.6;
+          head.scale.setScalar(1 - inside * 0.65);
+          head.position.z = 0.5 - inside * 0.3;
+        }
+        if (task.left <= 0) {
+          if (head) {
+            head.scale.setScalar(1);
+            head.position.z = 0.5;
+          }
+          this.task = { kind: 'rest', left: this.between(REST_SECONDS) };
+        }
+        return;
+      }
       case 'roll': {
         task.left -= delta;
         this.speed = 0;
@@ -416,12 +462,18 @@ export class Pet {
   /** What to do after a rest: mostly a little stroll, sometimes something clumsy. */
   private nextTask(owner: Owner): Task {
     const spot = this.spotNear(owner);
-    if (this.random() >= CLUMSY_CHANCE || !spot) {
+    if (this.random() >= this.traits.clumsy || !spot) {
       return spot
-        ? { kind: 'stroll', to: spot, speed: STROLL_SPEED * this.between([0.7, 1.2]) }
+        ? {
+            kind: 'stroll',
+            to: spot,
+            speed: STROLL_SPEED * this.traits.speed * this.between([0.7, 1.2]),
+          }
         : { kind: 'rest', left: this.between(REST_SECONDS) };
     }
     const pick = this.random();
+    // A turtle's one trick, and a good one.
+    if (this.traits.turtle) return { kind: 'hide', left: this.between([2.5, 5]) };
     if (pick < 0.18) return { kind: 'tail', left: 1.4 };
     if (pick < 0.32) return { kind: 'stumble', phase: 'trot', to: spot, left: 1.2 };
     if (pick < 0.48) return { kind: 'beg', left: 1.8 };

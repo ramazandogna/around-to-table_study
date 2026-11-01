@@ -3,14 +3,16 @@ import { useEffect } from 'react';
 
 import { unlockAudio } from './audio/sound';
 import { t } from './i18n/t';
-import { useGameStore } from './state/store';
+import { layerIndex, useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { ChatPanel } from './ui/ChatPanel';
 import { Coach } from './ui/Coach';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Discovery } from './ui/Discovery';
 import { Games } from './ui/Games';
-import { JukeboxPanel, JukeboxPlayer } from './ui/Jukebox';
+import { JukeboxPanel } from './ui/Jukebox';
+import { RoomMusic } from './ui/RoomMusic';
+import { Joystick } from './ui/Joystick';
 import { Loader } from './ui/Loader';
 import { TableGames } from './ui/TableGames';
 import { AdminPanel, InboxPanel, PeoplePanel } from './ui/Inbox';
@@ -24,6 +26,7 @@ import { Notice } from './ui/Notice';
 import { RadialMenu } from './ui/RadialMenu';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
+import { checkAccess, forgetSession } from './net/session';
 import { startSocial } from './net/social';
 import { EmoteMenu } from './ui/EmoteMenu';
 import { FriendsPanel } from './ui/Friends';
@@ -34,6 +37,20 @@ import { WorldCanvas } from './world/WorldCanvas';
 export function App() {
   const session = useGameStore((s) => s.session);
   const look = useGameStore((s) => s.look);
+  const layers = useGameStore((s) => s.layers);
+
+  // The early beta's door: is the password needed, and does the session kept here still open it?
+  // A new password (each deploy) ends old sessions; the character's look stays.
+  useEffect(() => {
+    void checkAccess(useGameStore.getState().session?.token ?? null).then(({ required, valid }) => {
+      const store = useGameStore.getState();
+      store.setAccessRequired(required);
+      if (store.session && !valid) {
+        forgetSession();
+        store.setSession(null);
+      }
+    });
+  }, []);
 
   // Friends and presence follow the player across rooms, so they live outside the world.
   useEffect(() => (session && look ? startSocial(session) : undefined), [session, look]);
@@ -112,7 +129,8 @@ export function App() {
         <InboxPanel />
         <PlayerCard />
       </aside>
-      <div className="hud-right">
+      {/* The map comes up over the timer when opened after it, and under it otherwise. */}
+      <div className="hud-right" style={{ zIndex: layerIndex(layers, 'map') }}>
         <MapCorner />
         <ChatPanel />
       </div>
@@ -121,13 +139,14 @@ export function App() {
       <Games />
       <TableGames />
       <JukeboxPanel />
-      <JukeboxPlayer />
+      <RoomMusic />
       <RoomsPanel />
       <RoomAdmin />
       <PeoplePanel />
       <AdminPanel />
       <InviteToast />
       <RadialMenu />
+      <Joystick />
       <footer className="hud-bottom">
         <RoomChip />
         <Coach />

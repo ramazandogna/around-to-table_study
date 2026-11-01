@@ -191,7 +191,7 @@ export type ConfirmChoice = 'break' | 'end' | 'stay';
  */
 export type Confirm = {
   /** Also asked before blocking someone and before closing a private room. */
-  kind: 'stand' | 'leave' | 'block' | 'closeRoom';
+  kind: 'stand' | 'leave' | 'block' | 'closeRoom' | 'sofa';
   /** Who or what it is about, for the question's text. */
   name?: string;
   answer: (choice: ConfirmChoice) => void;
@@ -263,6 +263,15 @@ function loadLinesUntil(): number | null {
   } catch {
     return null;
   }
+}
+
+/** The panels along the top of a phone's screen that can cover one another. */
+export type Layer = 'plate' | 'map' | 'timer';
+
+/** A top panel's z-index: the one that came up last is highest. */
+export function layerIndex(layers: Record<Layer, number>, layer: Layer): number {
+  const order = (Object.keys(layers) as Layer[]).sort((a, b) => layers[a] - layers[b]);
+  return 4 + order.indexOf(layer);
 }
 
 /** Where the ring of actions around the player opens, in screen pixels. */
@@ -373,6 +382,15 @@ type GameState = {
   eventFormOpen: boolean;
   /** Changing rooms: the loader shows while true. */
   loading: boolean;
+  /** The early beta asks for the access password when making a character. */
+  accessRequired: boolean;
+  /**
+   * When each of the top panels last came up (the plate, the map, the timer),
+   * so the one opened last sits on top of the others on a small screen.
+   */
+  layers: Record<Layer, number>;
+  /** The on-screen joystick's push, in screen directions (right, down), up to 1; null at rest. */
+  stick: { x: number; y: number } | null;
   muted: boolean;
   /** People sitting at the table in this room right now, the player included. */
   studying: number;
@@ -468,6 +486,9 @@ type GameState = {
   setPeopleOpen: (open: boolean) => void;
   setEventFormOpen: (open: boolean) => void;
   setLoading: (loading: boolean) => void;
+  setAccessRequired: (required: boolean) => void;
+  raise: (layer: Layer) => void;
+  setStick: (stick: { x: number; y: number } | null) => void;
   setMuted: (muted: boolean) => void;
   setStudying: (count: number) => void;
   setTyping: (typing: boolean) => void;
@@ -570,6 +591,9 @@ export const useGameStore = create<GameState>((set) => ({
   peopleOpen: false,
   eventFormOpen: false,
   loading: true,
+  accessRequired: false,
+  layers: { plate: 0, map: 0, timer: 0 },
+  stick: null,
   muted: isMuted(),
   studying: 0,
   typing: false,
@@ -640,7 +664,10 @@ export const useGameStore = create<GameState>((set) => ({
   setConnected: (connected) => set({ connected }),
   setPlayersHere: (playersHere) => set({ playersHere }),
   setWorld: (world, waitingPets) => set({ world, waitingPets }),
-  setPlateOpen: (plateOpen) => set({ plateOpen }),
+  setPlateOpen: (plateOpen) => {
+    set({ plateOpen });
+    if (plateOpen) useGameStore.getState().raise('plate');
+  },
   setCalendarOpen: (calendarOpen) => set({ calendarOpen }),
   setGame: (game) => set({ game }),
   setRoom: (room) => set({ room }),
@@ -651,7 +678,10 @@ export const useGameStore = create<GameState>((set) => ({
     setMusicOn(musicOn);
     set({ musicOn });
   },
-  setMapOpen: (mapOpen) => set({ mapOpen }),
+  setMapOpen: (mapOpen) => {
+    set({ mapOpen });
+    if (mapOpen) useGameStore.getState().raise('map');
+  },
   setOpened: (area, opened) => set((state) => ({ opened: { ...state.opened, [area]: opened } })),
   setRadial: (radial) => set({ radial }),
   setDiscovery: (discovery) => set({ discovery }),
@@ -734,6 +764,12 @@ export const useGameStore = create<GameState>((set) => ({
   setPeopleOpen: (peopleOpen) => set({ peopleOpen }),
   setEventFormOpen: (eventFormOpen) => set({ eventFormOpen }),
   setLoading: (loading) => set({ loading }),
+  setAccessRequired: (accessRequired) => set({ accessRequired }),
+  setStick: (stick) => set({ stick }),
+  raise: (layer) =>
+    set((state) => ({
+      layers: { ...state.layers, [layer]: Math.max(...Object.values(state.layers)) + 1 },
+    })),
   setSeen: (friend, upTo) =>
     set((state) =>
       (state.seen[friend] ?? 0) >= upTo ? {} : { seen: { ...state.seen, [friend]: upTo } },

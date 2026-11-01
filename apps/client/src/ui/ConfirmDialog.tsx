@@ -4,7 +4,7 @@ import { useGameStore, type ConfirmChoice } from '../state/store';
 import { Choice, Dialog, Panel } from './Panel';
 
 const OPTIONS: Record<
-  'stand' | 'leave' | 'block' | 'closeRoom',
+  'stand' | 'leave' | 'block' | 'closeRoom' | 'sofa',
   { choice: ConfirmChoice; icon: string; key: string }[]
 > = {
   stand: [
@@ -19,6 +19,10 @@ const OPTIONS: Record<
   block: [
     { choice: 'end', icon: '🚫', key: 'confirm.block' },
     { choice: 'stay', icon: '↩️', key: 'confirm.cancel' },
+  ],
+  sofa: [
+    { choice: 'end', icon: '🛋️', key: 'confirm.sofa.yes' },
+    { choice: 'stay', icon: '🚶', key: 'confirm.sofa.no' },
   ],
   closeRoom: [
     { choice: 'end', icon: '🗝️', key: 'confirm.closeRoom' },

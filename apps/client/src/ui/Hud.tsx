@@ -1,7 +1,7 @@
 import { APP_NAME, isRoomArea, type AreaId } from '@att/shared';
 import { useEffect, useRef } from 'react';
 import { t } from '../i18n/t';
-import { useGameStore } from '../state/store';
+import { layerIndex, useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
 import { WorldClock } from './Calendar';
 import { FriendsLink } from './Friends';
@@ -27,11 +27,15 @@ export function HudPlate() {
   const playersHere = useGameStore((s) => s.playersHere);
   const studying = useGameStore((s) => s.studying);
   const open = useGameStore((s) => s.plateOpen);
+  const layers = useGameStore((s) => s.layers);
   // In a private room the plate shows its name.
   const roomName = useGameStore((s) => (isRoomArea(s.area) ? s.room?.room.name : undefined));
   const areaName = roomName ?? t(`area.${area}`);
   return (
-    <header className={`hud-title panel panel--compact${open ? '' : ' hud-title--folded'}`}>
+    <header
+      className={`hud-title panel panel--compact${open ? '' : ' hud-title--folded'}`}
+      style={{ zIndex: layerIndex(layers, 'plate') }}
+    >
       {/* On phones the plate starts folded to one small button; desktops never see it. */}
       <button
         type="button"
@@ -48,7 +52,7 @@ export function HudPlate() {
       </button>
       <div className="hud-heading">
         <span className="hud-name">
-          <img className="hud-logo" src="/logo.png" alt="" />
+          <img className="hud-logo" src="/favicon-64.png" alt="" />
           {APP_NAME}
         </span>
         <span className="hud-area">

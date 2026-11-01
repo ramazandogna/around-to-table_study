@@ -2,7 +2,7 @@ import { quartersDone } from '@att/shared';
 import { useEffect, useRef, useState } from 'react';
 import { play } from '../audio/sound';
 import { t } from '../i18n/t';
-import { useGameStore } from '../state/store';
+import { layerIndex, useGameStore } from '../state/store';
 import { formatDuration, recordFocus, todayStats } from '../state/stats';
 import { formatClock } from '../state/study';
 
@@ -16,6 +16,7 @@ import { formatClock } from '../state/study';
  * smoking room; the next round only starts when the player says so.
  */
 export function TimerHud() {
+  const layers = useGameStore((s) => s.layers);
   const timer = useGameStore((s) => s.timer);
   const session = useGameStore((s) => s.study);
   const dnd = useGameStore((s) => s.dnd);
@@ -69,6 +70,11 @@ export function TimerHud() {
     play('quarter');
     useGameStore.getState().breakOver();
   }, [session?.phase, breakLeft]);
+
+  // A timer that starts comes up on top of the plate and the map.
+  useEffect(() => {
+    if (running) useGameStore.getState().raise('timer');
+  }, [running]);
 
   if (!running) return null;
   const store = useGameStore.getState();
@@ -186,7 +192,11 @@ export function TimerHud() {
   }
 
   return (
-    <section className="panel panel--compact timer-hud" aria-label={t('timer.title')}>
+    <section
+      className="panel panel--compact timer-hud"
+      style={{ zIndex: layerIndex(layers, 'timer') }}
+      aria-label={t('timer.title')}
+    >
       {body}
     </section>
   );

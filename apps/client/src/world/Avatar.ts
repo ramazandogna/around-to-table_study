@@ -177,6 +177,8 @@ export class Avatar {
    * else sits once their status says what they work on (see `mayTakeChair`).
    */
   chairAllowed = true;
+  /** The player's own sofa: true once they said yes to sitting on it. */
+  sofaAllowed = true;
   private readonly cigarette = new Cigarette();
   private readonly puffs = new SmokePuffs();
   private smokeTime = 0;
@@ -352,9 +354,15 @@ export class Avatar {
     return this.smoking;
   }
 
-  /** Whether this body may sit down on a chair at a table now. */
-  private mayTakeChair(): boolean {
+  /** Whether this body may sit down on a seat now. */
+  private mayTake(seat: Seat): boolean {
+    if (seat.kind === 'sofa') return !this.isSelf || this.sofaAllowed;
     return this.isSelf ? this.chairAllowed : this.status.activity !== null;
+  }
+
+  /** What the body stands at without sitting yet. */
+  get waitingKind(): Seat['kind'] | null {
+    return this.waitingAt?.kind ?? null;
   }
 
   /** Standing at a chair, waiting to sit (it is pulled out for them). */
@@ -709,8 +717,10 @@ export class Avatar {
       }
     } else if (this.stillFor >= SETTLE_SECONDS) {
       const seat = this.context.seats(this.tile);
-      // At a table the chair is pulled out first; sitting waits for a choice of what to do.
-      this.waitingAt = seat?.kind === 'chair' && !this.mayTakeChair() ? seat : null;
+      // At a table the chair is pulled out first and sitting waits for a choice of what to do;
+      // the player's own sofa asks first too.
+      this.waitingAt = seat && !this.mayTake(seat) ? seat : null;
+      const sitting = this.pose === 'sit';
       this.seat = this.waitingAt ? null : seat;
       const facingSeat = this.seat ?? this.waitingAt;
       if (facingSeat) this.face(facingSeat.facing.x, facingSeat.facing.y);
@@ -719,6 +729,8 @@ export class Avatar {
         if (this.smoking) this.setSmoking(false);
       }
       this.pose = this.seat ? 'sit' : 'idle';
+      // A little jump onto a sofa.
+      if (!sitting && this.seat?.kind === 'sofa') this.hopFor = HOP_SECONDS;
     }
     const seat = this.pose === 'sit' ? this.seat : null;
     this.animate(delta);
@@ -912,10 +924,11 @@ export class Avatar {
       this.settleTarget.set(x + seat.facing.x * inset, y, z + seat.facing.y * inset);
       position.lerp(this.settleTarget, ease);
     } else if (this.waitingAt && !this.isMoving) {
-      // Standing behind the pulled-out chair, not in it.
+      // Behind a pulled-out chair (not in it), or in front of a sofa.
       const { x, z } = tileCenter(this.tile);
-      const back = this.waitingAt.facing;
-      this.settleTarget.set(x - back.x * STAND_BEHIND, FLOOR_Y, z - back.y * STAND_BEHIND);
+      const toward = this.waitingAt.facing;
+      const step = this.waitingAt.kind === 'chair' ? -STAND_BEHIND : STAND_BEHIND;
+      this.settleTarget.set(x + toward.x * step, FLOOR_Y, z + toward.y * step);
       position.lerp(this.settleTarget, ease);
     } else {
       position.y = MathUtils.lerp(position.y, FLOOR_Y, ease);

@@ -23,3 +23,19 @@ export function remove(key: string): void {
     // Nothing to clean up.
   }
 }
+
+/**
+ * A new data epoch starts every browser over too: everything the game kept
+ * here (the character, the session, preferences) is forgotten once.
+ */
+export function startOverIfNeeded(epoch: number): void {
+  try {
+    if (Number(localStorage.getItem('att.epoch')) === epoch) return;
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('att.')) localStorage.removeItem(key);
+    }
+    localStorage.setItem('att.epoch', String(epoch));
+  } catch {
+    // No storage: nothing kept, nothing to forget.
+  }
+}

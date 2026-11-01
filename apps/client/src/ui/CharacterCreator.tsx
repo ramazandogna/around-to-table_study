@@ -44,7 +44,15 @@ const bodyOf = (look: Appearance): Body =>
 type Tab = 'look' | 'colours' | 'extras';
 const TABS: readonly Tab[] = ['look', 'colours', 'extras'];
 
-const PET_ICON: Record<PetKind, string> = { cat: '🐱', dog: '🐶', rabbit: '🐰' };
+const PET_ICON: Record<PetKind, string> = {
+  cat: '🐱',
+  dog: '🐶',
+  corgi: '🦊',
+  dachshund: '🌭',
+  shiba: '🐕',
+  rabbit: '🐰',
+  turtle: '🐢',
+};
 
 /** A look with one part's colour set, or put back to the character's own. */
 function withColour(look: Appearance, part: OutfitPart, index: number | undefined): Appearance {
@@ -88,6 +96,8 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
   );
   const [yaw, setYaw] = useState(0);
   const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const accessRequired = useGameStore((s) => s.accessRequired);
   const [error, setError] = useState<GuestError | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('look');
@@ -119,7 +129,7 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
     }
     if (!normalizeName(name)) return setError('invalid_name');
     setBusy(true);
-    const result = await createGuest(name);
+    const result = await createGuest(name, password);
     setBusy(false);
     if (typeof result === 'string') return setError(result);
     store.setLook(look);
@@ -178,6 +188,23 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                   placeholder={t('gate.placeholder')}
                   onChange={(e) => {
                     setName(e.target.value);
+                    setError(null);
+                  }}
+                />
+              </label>
+            )}
+            {mode === 'new' && accessRequired && (
+              <label className="field">
+                <span className="field-label">🔑 {t('gate.password')}</span>
+                <input
+                  value={password}
+                  maxLength={16}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder={t('gate.password.placeholder')}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
                     setError(null);
                   }}
                 />

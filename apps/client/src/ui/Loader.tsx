@@ -3,18 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 
-/** One bounce of the logo, in milliseconds; the loader always ends on a whole one. */
-export const LOADER_CYCLE_MS = 1200;
-/** It never shows for less than this, so a quick change does not flash. */
-const MIN_MS = LOADER_CYCLE_MS * 2;
-/** A room that never answers does not keep the loader up forever. */
-const MAX_MS = 8000;
+/** One bounce of the logo, in milliseconds. */
+export const LOADER_CYCLE_MS = 900;
+/** Just long enough that a quick change does not flash. */
+const MIN_MS = 300;
+/** A room that never answers does not keep the loader up for long. */
+const MAX_MS = 4000;
 
 /**
  * Between rooms, and while the building first loads: the logo bouncing on a
- * wooden card, with a little line of what is happening. However long the wait
- * really is, the loader runs to the end of a bounce, so it always looks the
- * same and never flickers.
+ * wooden card. It goes the moment the room is ready, kept up only long enough
+ * not to flash.
  */
 export function Loader() {
   const loading = useGameStore((s) => s.loading);
@@ -31,10 +30,9 @@ export function Loader() {
         window.clearTimeout(giveUp);
       };
     }
-    // Round the wait up to whole bounces, and to the least wait.
+    // Gone as soon as the room is there, after the least wait.
     const elapsed = performance.now() - startedAt.current;
-    const total = Math.max(MIN_MS, Math.ceil(elapsed / LOADER_CYCLE_MS) * LOADER_CYCLE_MS);
-    const timer = window.setTimeout(() => setShown(false), total - elapsed);
+    const timer = window.setTimeout(() => setShown(false), Math.max(0, MIN_MS - elapsed));
     return () => window.clearTimeout(timer);
   }, [loading]);
 
@@ -45,10 +43,9 @@ export function Loader() {
         <img
           className="loader-logo"
           src="/logo.png"
-          alt=""
+          alt={APP_NAME}
           style={{ animationDuration: `${LOADER_CYCLE_MS}ms` }}
         />
-        <p className="loader-name">{APP_NAME}</p>
         <p className="loader-line">{t('loader.line')}</p>
         <span className="loader-dots" aria-hidden>
           <i />

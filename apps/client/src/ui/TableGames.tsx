@@ -1,6 +1,7 @@
 import {
   DARTS_PER_TURN,
   isRoomArea,
+  minPlayers,
   PIG_GOAL,
   TABLE_GAMES,
   TABLE_PLAYERS,
@@ -172,13 +173,17 @@ function Seats({ table, myId }: { table: Table; myId: string }) {
 }
 
 function Lobby({ kind, table, seated }: { kind: TableKind; table: Table; seated: boolean }) {
-  const missing = Math.max(0, TABLE_PLAYERS.min - table.players.length);
+  const missing = Math.max(0, minPlayers(kind) - table.players.length);
   const full = table.players.length >= TABLE_PLAYERS.max;
   return (
     <>
       <p className="panel-text">{t(`table.${kind}.rules`)}</p>
       <p className="game-status">
-        {missing > 0 ? t('table.waiting', { n: missing }) : t('table.ready')}
+        {missing > 0
+          ? t('table.waiting', { n: missing })
+          : kind === 'darts' && table.players.length === 1
+            ? t('table.solo')
+            : t('table.ready')}
       </p>
       <div className="tags">
         {!seated && (
@@ -233,7 +238,11 @@ function Over({ kind, table }: { kind: TableKind; table: Table }) {
     .join(' & ');
   return (
     <>
-      <p className="game-status table-winner">🏆 {t('table.won', { name: names || '—' })}</p>
+      <p className="game-status table-winner">
+        {table.players.length === 1
+          ? `🎯 ${t('table.score', { n: table.scores[0] ?? 0 })}`
+          : `🏆 ${t('table.won', { name: names || '—' })}`}
+      </p>
       <button
         type="button"
         className="panel-ok game-button"
@@ -250,6 +259,7 @@ function useWinnerCheer(kind: TableKind, table: Table | undefined, myId: string)
   const told = useRef<string | null>(null);
   useEffect(() => {
     if (!table || table.phase !== 'over' || !table.winners.includes(myId)) return;
+    if (table.players.length < 2) return;
     const key = `${table.turnStartedAt}:${table.winners.join(',')}`;
     if (told.current === key) return;
     told.current = key;
