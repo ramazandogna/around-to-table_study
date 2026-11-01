@@ -2,6 +2,34 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-11-01: Private rooms behind a pass
+- **Decision:** Anyone can open a private room for 3, 5 or 9 people from the reception or the elevator. Rooms live in the social hub's SQLite (name, size, salted password hash, owner) and are forgotten after 24 hours empty; each room runs in its own Durable Object (`room:CODE`). Joining checks the password once over HTTPS and returns a signed pass for that guest and that room (12 hours), so passwords never travel in socket URLs. Invites go three ways: a link (`?room=CODE`), a phone message whose marker becomes a "join" button, and the player card.
+- **Why:** Group study and private talk are the third pillar of the app. One registry and one pass check keep rooms on the free plan without a new resource.
+- **Later:** Bigger and decorated rooms are shown as coming later (likely premium); owners cannot kick or change passwords yet.
+
+## 2026-11-01: Events run on the clock, dressed by themes
+- **Decision:** `shared/events.ts` holds the calendar as weekly events in their own time zone (a fixed UTC offset; Japan has no daylight saving). Every screen works out on its own whether an event is on; the smoking room then hangs bunting, string lights and a banner, and plays procedural lo-fi music with its own switch. A theme (colours, lights, music) dresses the room, so special days (a Turkish, Thai or Chinese day) only need a theme and a calendar entry.
+- **Why:** No server state, no wake-ups, and everyone sees the same thing. Only the Thursday 21:00 (Japan) meetup is on the calendar for now.
+
+## 2026-11-01: Studying has plans, breaks and company
+- **Decision:** Sitting down opens a ring of plans (pomodoro, deep focus, marathon, your own, stopwatch, together). Each is explained in the middle and only starts after a yes. Breaks follow focus blocks on their own and suggest the smoking room; the next round waits for the player. "Together" joins someone's running block so both finish at once. Time focused, blocks and a day streak are kept on the device only.
+- **Why:** The app's promise is studying with others and meeting people between blocks; the rhythm leads from the library to the smoking room and back. No rankings: the numbers are there to feel good, not to compete.
+
+## 2026-11-01: Things to do in the smoking room
+- **Decision:** Kenney's Mini Arcade (CC0) puts an arcade cabinet, a claw machine and a coffee machine in the smoking room. The games are one-tap (playable on a phone); coins are free. A good score or a prize is said in the room's chat, and a coffee shows over your head. Topic jars on the side tables (hall and smoking room) make your character ask the room a light question.
+- **Why:** People need a reason to stay and something to talk about; a shared moment ("won a 🦊!") or a question breaks the ice better than an empty room.
+
+## 2026-11-01: A pet can be dressed
+- **Decision:** The look carries the pet's sex, fur colour (recoloured per vertex like the characters, on the pets' own atlas) and one thing to wear (collar, bell, bow, scarf, party hat, glasses), built from simple shapes on the pet's body. The hall's library door shows waiting pets as they look.
+
+## 2026-11-01: Chairs are picked by their whole shape
+- **Decision:** A tap is matched against every free chair's and sofa's upright box on screen before the floor, like people. The renovation's tall shade no longer catches taps; only its floor does.
+- **Why:** Picking the floor alone sent half of the taps on a chair to the tile behind it (often the desk), and the desk next to the renovation could hardly be chosen at all (0 of 27 sample taps).
+
+## 2026-11-01: Dialogs are drawn into the page, not where they are opened
+- **Decision:** `Dialog` renders through a portal into `document.body`.
+- **Why:** The wardrobe and status dialogs live in the HUD plate, which folds on phones; opened from the ring of actions they were hidden inside it and all appeared at once when the plate opened.
+
 ## 2026-11-01: Presence is kept honest with a heartbeat
 - **Decision:** Both sockets send `ping` every 25 s. The Durable Objects answer it with `setWebSocketAutoResponse`, so they never wake up for it, and an alarm every 30 s drops any socket that has been quiet for more than 100 s (`isStale` in `shared`). "Start over" also calls `POST /api/leave` with this device's token, which closes that guest's sockets everywhere at once.
 - **Why:** The building counted "4 here" while nobody could be seen. Hibernated sockets of phones put to sleep or tabs that vanished without a close frame stayed open for a long time, and starting over only forgot the guest on the device.

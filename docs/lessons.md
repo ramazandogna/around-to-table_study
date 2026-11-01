@@ -12,6 +12,8 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Test on a slow frame, not only a fast one.** The seated "running" legs came from a blend that slipped back towards standing on every other frame; at 60 fps that was an 8 % shiver, on a phone at low frame rate it was half the pose. Logging the blend frame by frame found it, where screenshots on a fast machine never would.
 - **Reproduce a mobile bug on a phone engine before fixing it.** Empty emote buttons could not be reproduced in Chromium or WebKit; the icons that really looked empty were the HUD's 🏷️ and 📜.
 - **A presence count needs a heartbeat.** Hibernated WebSockets stay "open" long after a phone sleeps; test the sweep with a socket that never pings and wait the full timeout.
+- **Measure taps over a thing's whole shape.** Sampling 27 points on every chair showed that only half of a chair could be tapped, everywhere, not just at the "hard" desk; the centre alone looked fine.
+- **Fake the clock to test events.** Shifting `Date` in the page showed the Thursday meetup, the calendar in two time zones and the dressed room without waiting a week.
 
 ## 3D and art
 - **Learn a model's texture layout by rendering it.** Put a labeled grid (and then labeled bands) on the model and look at it from four sides; guessing from the shipped skins was wrong about the torso and arms.
@@ -40,6 +42,8 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Ask before throwing away someone's progress.** Standing up or leaving with a timer running asks first, and "stay" is always one of the answers.
 - **Make doors read as doors without labels:** frame, leaves, doormat and a sign, and let them open as people approach.
 - **Rooms should fit their content.** Big empty floors look unfinished; shrink the room before adding filler.
+- **A dialog must not live inside something that can fold.** A hidden parent hides its fixed children too; overlays belong in a portal.
+- **Keep things that open a board away from things you walk to.** A topic jar beside the notice board opened the board every time.
 
 ## Process
 - **One cycle = one roadmap step + the top 3–5 issues**, then commit, deploy and try it on a phone.
