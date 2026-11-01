@@ -1,6 +1,23 @@
 import {
   AREA_RULES,
+  blockKind,
+  checkProposal,
   cleanDm,
+  cleanOffset,
+  cleanRoomRules,
+  DEFAULT_ROOM_RULES,
+  EVENT_LIMITS,
+  longestStreak,
+  periodStarts,
+  SHOUT_HISTORY,
+  SHOUT_MAX_CHARS,
+  BLOCK_KINDS,
+  type BlockKind,
+  type Profile,
+  type ProposedEvent,
+  type Role,
+  type RoomRules,
+  type Shout,
   DM_HISTORY,
   friendPair,
   HEARTBEAT,
@@ -42,6 +59,8 @@ type Member = {
   room?: string | undefined;
   /** Their status lines in short, for friends' phones. */
   lines?: Pick<Friend, 'vibe' | 'mood' | 'doing' | 'note'>;
+  /** Minutes their clock is ahead of UTC. */
+  tz?: number;
   changes: RateWindow;
   messages: RateWindow;
 };
@@ -75,7 +94,27 @@ type RoomRow = {
   password: string | null;
   owner: string;
   used_at: number;
+  rules: string | null;
 };
+
+const ROOM_COLUMNS = 'code, name, size, password, owner, used_at, rules';
+
+type EventRow = {
+  id: string;
+  title: string;
+  description: string;
+  area: string;
+  start: number;
+  minutes: number;
+  by: string;
+  by_name: string;
+  status: ProposedEvent['status'];
+};
+
+/** Approved events stay listed this long after they ended. */
+const EVENT_KEEP_MS = 24 * 60 * 60 * 1000;
+/** How many focus blocks are read for someone's best streak. */
+const STREAK_ROWS = 3000;
 
 /** Passwords are kept only as a salted hash. */
 async function hashPassword(code: string, password: string): Promise<string> {
@@ -138,7 +177,58 @@ export class SocialHub extends DurableObject<Env> {
         created_at INTEGER NOT NULL,
         used_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS admins (id TEXT PRIMARY KEY, granted_by TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS blocks (
+        blocker TEXT NOT NULL,
+        blocked TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (blocker, blocked)
+      );
+      CREATE INDEX IF NOT EXISTS blocks_by_blocked ON blocks (blocked);
+      CREATE TABLE IF NOT EXISTS focus_blocks (
+        user TEXT NOT NULL,
+        minutes INTEGER NOT NULL,
+        at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS focus_by_user ON focus_blocks (user, at);
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        area TEXT NOT NULL,
+        start INTEGER NOT NULL,
+        minutes INTEGER NOT NULL,
+        by TEXT NOT NULL,
+        by_name TEXT NOT NULL,
+        status TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS shouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender TEXT NOT NULL,
+        name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS room_bans (
+        code TEXT NOT NULL,
+        user TEXT NOT NULL,
+        PRIMARY KEY (code, user)
+      );
     `);
+    // Columns added after the first tables were made; adding one twice fails, which is fine.
+    for (const column of [
+      'ALTER TABLE users ADD COLUMN created_at INTEGER',
+      'ALTER TABLE users ADD COLUMN time_ms INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE users ADD COLUMN messages_sent INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE users ADD COLUMN tz INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE rooms ADD COLUMN rules TEXT',
+    ]) {
+      try {
+        this.sql.exec(column);
+      } catch {
+        // Already there.
+      }
+    }
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -161,10 +251,12 @@ export class SocialHub extends DurableObject<Env> {
     };
     server.serializeAttachment(member);
     this.sql.exec(
-      `INSERT INTO users (id, name, seen_at) VALUES (?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET name = excluded.name, seen_at = excluded.seen_at`,
+      `INSERT INTO users (id, name, seen_at, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET name = excluded.name, seen_at = excluded.seen_at,
+         created_at = COALESCE(users.created_at, excluded.created_at)`,
       id,
       member.name,
+      Date.now(),
       Date.now(),
     );
     await this.armSweep();
@@ -224,6 +316,7 @@ export class SocialHub extends DurableObject<Env> {
     name: string,
     size: RoomSize,
     password: string | null,
+    rules: RoomRules = DEFAULT_ROOM_RULES,
   ): Promise<RoomInfo | null> {
     const now = Date.now();
     const recent = this.sql
@@ -241,7 +334,7 @@ export class SocialHub extends DurableObject<Env> {
     }
     const hash = password ? await hashPassword(code, password) : null;
     this.sql.exec(
-      'INSERT INTO rooms (code, name, size, password, owner, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO rooms (code, name, size, password, owner, created_at, used_at, rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       code,
       name,
       size,
@@ -249,8 +342,9 @@ export class SocialHub extends DurableObject<Env> {
       owner,
       now,
       now,
+      JSON.stringify(rules),
     );
-    return { code, name, size, locked: hash !== null, people: 0 };
+    return { code, name, size, locked: hash !== null, people: 0, owner, rules };
   }
 
   /** A room by its code, with how many people are inside; null when there is none. */
@@ -263,9 +357,14 @@ export class SocialHub extends DurableObject<Env> {
    * Whether someone may come into a room: 'ok', 'unknown' (no such room or
    * forgotten) or 'password' (missing or wrong). Coming in keeps it alive.
    */
-  async checkRoom(code: string, password: string | null): Promise<'ok' | 'unknown' | 'password'> {
+  async checkRoom(
+    code: string,
+    password: string | null,
+    user: string,
+  ): Promise<'ok' | 'unknown' | 'password' | 'banned'> {
     const row = this.roomRow(code);
     if (!row) return 'unknown';
+    if (this.isBanned(code, user)) return 'banned';
     if (row.password && (!password || (await hashPassword(code, password)) !== row.password)) {
       return 'password';
     }
@@ -277,7 +376,7 @@ export class SocialHub extends DurableObject<Env> {
   async openRooms(): Promise<RoomInfo[]> {
     const rows = this.sql
       .exec<RoomRow>(
-        'SELECT code, name, size, password, owner, used_at FROM rooms WHERE password IS NULL AND used_at > ? ORDER BY used_at DESC LIMIT 40',
+        `SELECT ${ROOM_COLUMNS} FROM rooms WHERE password IS NULL AND used_at > ? ORDER BY used_at DESC LIMIT 40`,
         Date.now() - ROOM_IDLE_MS,
       )
       .toArray();
@@ -288,7 +387,7 @@ export class SocialHub extends DurableObject<Env> {
     return (
       this.sql
         .exec<RoomRow>(
-          'SELECT code, name, size, password, owner, used_at FROM rooms WHERE code = ? AND used_at > ?',
+          `SELECT ${ROOM_COLUMNS} FROM rooms WHERE code = ? AND used_at > ?`,
           code,
           Date.now() - ROOM_IDLE_MS,
         )
@@ -310,6 +409,8 @@ export class SocialHub extends DurableObject<Env> {
       size: row.size as RoomSize,
       locked: row.password !== null,
       people: people.size,
+      owner: row.owner,
+      rules: cleanRoomRules(row.rules ? JSON.parse(row.rules) : null),
     };
   }
 
@@ -339,8 +440,18 @@ export class SocialHub extends DurableObject<Env> {
           petAccessory: message.petAccessory,
         },
         lines,
+        tz: cleanOffset(message.tz),
       };
       ws.serializeAttachment(next);
+      if (message.tz !== undefined) {
+        this.sql.exec('UPDATE users SET tz = ? WHERE id = ?', next.tz ?? 0, me.id);
+      }
+      // The first "where" of a socket: who the player is, the building's chat and the calendar.
+      if (!me.area) {
+        this.sendMe(me.id);
+        send(ws, { t: 'shouts', lines: this.recentShouts(me.id) });
+        send(ws, { t: 'events', events: this.eventsFor(me.id) });
+      }
       this.tellWorld();
       const moved = me.area !== message.area;
       // Friends' phones show where they are, whether they study and how they are.
@@ -357,15 +468,49 @@ export class SocialHub extends DurableObject<Env> {
       return this.sendList(me.id);
     }
     if (message.t === 'buzz') return this.buzz(ws, me, message.to);
+    if (message.t === 'shout') return this.shout(ws, me, message.text);
+    if (message.t === 'profile') {
+      const profile = this.profile(message.id);
+      return profile
+        ? send(ws, { t: 'profile', profile })
+        : send(ws, { t: 'error', code: 'unknown_user' });
+    }
+    if (message.t === 'propose') return this.propose(ws, me, message);
+    if (message.t === 'review') return this.review(ws, me, message.id, message.verdict);
+    if (message.t === 'role') return this.setRole(ws, me, message.id, message.admin);
+    if (message.t === 'admins') {
+      if (!this.isAdmin(me.id)) return send(ws, { t: 'error', code: 'forbidden' });
+      return send(ws, { t: 'admins', admins: this.adminList() });
+    }
+    if (message.t === 'roomRules')
+      return void this.setRoomRules(ws, me, message.code, message.rules);
+    if (message.t === 'roomOut')
+      return void this.sendOut(ws, me, message.code, message.id, message.ban);
+    if (message.t === 'roomUnban') {
+      if (!this.ownsRoom(me.id, message.code)) return send(ws, { t: 'error', code: 'forbidden' });
+      this.sql.exec('DELETE FROM room_bans WHERE code = ? AND user = ?', message.code, message.id);
+      return send(ws, { t: 'roomBans', code: message.code, banned: this.bannedFrom(message.code) });
+    }
+    if (message.t === 'roomBans') {
+      if (!this.ownsRoom(me.id, message.code)) return send(ws, { t: 'error', code: 'forbidden' });
+      return send(ws, { t: 'roomBans', code: message.code, banned: this.bannedFrom(message.code) });
+    }
+    if (message.t === 'roomClose') return void this.closeRoom(ws, me, message.code);
     const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
     if (!changes) return send(ws, { t: 'error', code: 'rate_limited' });
     ws.serializeAttachment({ ...me, changes });
     if (message.t === 'befriend') this.befriend(ws, me, message.to);
     else if (message.t === 'unfriend') this.unfriend(me.id, message.id);
+    else if (message.t === 'block') this.block(me, message.to);
+    else if (message.t === 'unblock') {
+      this.sql.exec('DELETE FROM blocks WHERE blocker = ? AND blocked = ?', me.id, message.id);
+      this.sendMe(me.id);
+    }
   }
 
   private befriend(ws: WebSocket, me: Member, to: string): void {
     if (to === me.id) return;
+    if (this.blockedBetween(me.id, to)) return send(ws, { t: 'error', code: 'blocked' });
     const them = this.sql
       .exec<{ name: string }>('SELECT name FROM users WHERE id = ?', to)
       .toArray()[0];
@@ -405,6 +550,7 @@ export class SocialHub extends DurableObject<Env> {
     if (me.area && !AREA_RULES[me.area].phone) {
       return send(ws, { t: 'error', code: 'phone_silent' });
     }
+    if (this.blockedBetween(me.id, to)) return send(ws, { t: 'error', code: 'blocked' });
     if (!this.areFriends(me.id, to)) return send(ws, { t: 'error', code: 'not_friends' });
     const messages = takeToken(me.messages, Date.now(), MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
     if (!messages) return send(ws, { t: 'error', code: 'rate_limited' });
@@ -438,6 +584,7 @@ export class SocialHub extends DurableObject<Env> {
       b,
       DM_HISTORY,
     );
+    this.sql.exec('UPDATE users SET messages_sent = messages_sent + 1 WHERE id = ?', me.id);
     const message: DirectMessage = { id: row.id, from: me.id, to, text: clean.text, at };
     this.sendTo(me.id, { t: 'dm', message });
     this.sendTo(to, { t: 'dm', message });
@@ -549,7 +696,15 @@ export class SocialHub extends DurableObject<Env> {
       // Already closed.
     }
     if (!me) return;
-    this.sql.exec('UPDATE users SET seen_at = ? WHERE id = ?', Date.now(), me.id);
+    const now = Date.now();
+    // Time in the building counts from when this socket came in.
+    const stayed = me.since ? Math.min(now - me.since, 24 * 60 * 60 * 1000) : 0;
+    this.sql.exec(
+      'UPDATE users SET seen_at = ?, time_ms = time_ms + ? WHERE id = ?',
+      now,
+      Math.max(0, stayed),
+      me.id,
+    );
     this.closing = ws;
     this.tellFriends(me.id);
     this.closing = null;
@@ -658,6 +813,424 @@ export class SocialHub extends DurableObject<Env> {
   /** Online friends get a fresh list when someone comes, goes or changes rooms. */
   private tellFriends(id: string): void {
     for (const row of this.rows(id)) if (row.accepted) this.sendList(row.other);
+  }
+
+  /* ---------- Roles ---------- */
+
+  private ownerIds(): string[] {
+    return (this.env.ADMIN_IDS ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }
+
+  private isAdmin(id: string): boolean {
+    return (
+      this.ownerIds().includes(id) ||
+      this.sql.exec('SELECT 1 FROM admins WHERE id = ?', id).toArray().length > 0
+    );
+  }
+
+  private roleOf(id: string): Role {
+    return this.isAdmin(id) ? 'admin' : 'user';
+  }
+
+  private adminList(): { id: string; name: string }[] {
+    const ids = [
+      ...new Set([
+        ...this.ownerIds(),
+        ...this.sql
+          .exec<{ id: string }>('SELECT id FROM admins')
+          .toArray()
+          .map((r) => r.id),
+      ]),
+    ];
+    return ids.map((id) => ({ id, name: this.nameOf(id) ?? id.slice(0, 8) }));
+  }
+
+  /** Admins make others admins; the owners set in ADMIN_IDS cannot be taken off. */
+  private setRole(ws: WebSocket, me: Member, id: string, admin: boolean): void {
+    if (!this.isAdmin(me.id)) return send(ws, { t: 'error', code: 'forbidden' });
+    if (!this.nameOf(id)) return send(ws, { t: 'error', code: 'unknown_user' });
+    if (admin) {
+      this.sql.exec(
+        'INSERT OR IGNORE INTO admins (id, granted_by, at) VALUES (?, ?, ?)',
+        id,
+        me.id,
+        Date.now(),
+      );
+    } else {
+      if (this.ownerIds().includes(id)) return send(ws, { t: 'error', code: 'forbidden' });
+      this.sql.exec('DELETE FROM admins WHERE id = ?', id);
+    }
+    this.sendMe(id);
+    this.sendTo(id, { t: 'events', events: this.eventsFor(id) });
+    send(ws, { t: 'admins', admins: this.adminList() });
+  }
+
+  private sendMe(id: string): void {
+    const blocked = this.sql
+      .exec<{ id: string; name: string }>(
+        `SELECT b.blocked AS id, COALESCE(u.name, '?') AS name
+         FROM blocks b LEFT JOIN users u ON u.id = b.blocked WHERE b.blocker = ?`,
+        id,
+      )
+      .toArray();
+    this.sendTo(id, { t: 'me', role: this.roleOf(id), blocked });
+  }
+
+  private nameOf(id: string): string | null {
+    return (
+      this.sql.exec<{ name: string }>('SELECT name FROM users WHERE id = ?', id).toArray()[0]
+        ?.name ?? null
+    );
+  }
+
+  /* ---------- Blocking ---------- */
+
+  /** Whether either of the two blocked the other. Also asked by the rooms, for pokes and invites. */
+  async isBlocked(a: string, b: string): Promise<boolean> {
+    return this.blockedBetween(a, b);
+  }
+
+  private blockedBetween(a: string, b: string): boolean {
+    return (
+      this.sql
+        .exec(
+          'SELECT 1 FROM blocks WHERE (blocker = ? AND blocked = ?) OR (blocker = ? AND blocked = ?)',
+          a,
+          b,
+          b,
+          a,
+        )
+        .toArray().length > 0
+    );
+  }
+
+  /** Everyone a person blocked or was blocked by. */
+  private blockSet(id: string): Set<string> {
+    const rows = this.sql
+      .exec<{ blocker: string; blocked: string }>(
+        'SELECT blocker, blocked FROM blocks WHERE blocker = ? OR blocked = ?',
+        id,
+        id,
+      )
+      .toArray();
+    return new Set(rows.map((r) => (r.blocker === id ? r.blocked : r.blocker)));
+  }
+
+  /** Blocking ends a friendship (and its conversation) and tells the other person. */
+  private block(me: Member, to: string): void {
+    if (to === me.id || !this.nameOf(to)) return;
+    this.sql.exec(
+      'INSERT OR IGNORE INTO blocks (blocker, blocked, at) VALUES (?, ?, ?)',
+      me.id,
+      to,
+      Date.now(),
+    );
+    this.unfriend(me.id, to);
+    this.sendMe(me.id);
+    this.sendTo(to, { t: 'blockedBy', name: me.name });
+  }
+
+  /* ---------- Building-wide chat ---------- */
+
+  private recentShouts(id: string): Shout[] {
+    const hidden = this.blockSet(id);
+    return this.sql
+      .exec<{ id: number; sender: string; name: string; text: string; at: number }>(
+        'SELECT id, sender, name, text, at FROM (SELECT * FROM shouts ORDER BY id DESC LIMIT ?) ORDER BY id',
+        SHOUT_HISTORY,
+      )
+      .toArray()
+      .filter((row) => !hidden.has(row.sender))
+      .map((row) => ({ id: row.id, from: row.sender, name: row.name, text: row.text, at: row.at }));
+  }
+
+  /** A line for the whole building; the library listens but does not talk. */
+  private shout(ws: WebSocket, me: Member, raw: string): void {
+    if (me.area === 'library') return send(ws, { t: 'error', code: 'phone_silent' });
+    const messages = takeToken(me.messages, Date.now(), MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
+    if (!messages) return send(ws, { t: 'error', code: 'rate_limited' });
+    ws.serializeAttachment({ ...me, messages });
+    const clean = cleanDm(raw.slice(0, SHOUT_MAX_CHARS * 2));
+    if (!clean.ok) {
+      if (clean.reason === 'link') send(ws, { t: 'error', code: 'link_blocked' });
+      return;
+    }
+    const text = clean.text.slice(0, SHOUT_MAX_CHARS);
+    const at = Date.now();
+    const row = this.sql
+      .exec<{ id: number }>(
+        'INSERT INTO shouts (sender, name, text, at) VALUES (?, ?, ?, ?) RETURNING id',
+        me.id,
+        me.name,
+        text,
+        at,
+      )
+      .one();
+    this.sql.exec(
+      'DELETE FROM shouts WHERE id <= (SELECT id FROM shouts ORDER BY id DESC LIMIT 1 OFFSET ?)',
+      SHOUT_HISTORY,
+    );
+    this.sql.exec('UPDATE users SET messages_sent = messages_sent + 1 WHERE id = ?', me.id);
+    const hidden = this.blockSet(me.id);
+    const line: Shout = { id: row.id, from: me.id, name: me.name, text, at };
+    const data = JSON.stringify({ t: 'shouted', line } satisfies SocialServerMessage);
+    for (const socket of this.ctx.getWebSockets()) {
+      const member = socket.deserializeAttachment() as Member | null;
+      if (!member?.area || hidden.has(member.id)) continue;
+      try {
+        socket.send(data);
+      } catch {
+        // Closing.
+      }
+    }
+  }
+
+  /* ---------- Focus blocks and profiles ---------- */
+
+  /** A focus block that really ran out (the room checked its timer). */
+  async recordBlock(id: string, minutes: number): Promise<void> {
+    const clean = Math.round(minutes);
+    if (!Number.isFinite(clean) || clean < 1 || clean > 240) return;
+    this.sql.exec(
+      'INSERT INTO focus_blocks (user, minutes, at) VALUES (?, ?, ?)',
+      id,
+      clean,
+      Date.now(),
+    );
+  }
+
+  private profile(id: string): Profile | null {
+    const user = this.sql
+      .exec<{
+        name: string;
+        created_at: number | null;
+        seen_at: number;
+        time_ms: number;
+        messages_sent: number;
+        tz: number;
+      }>('SELECT name, created_at, seen_at, time_ms, messages_sent, tz FROM users WHERE id = ?', id)
+      .toArray()[0];
+    if (!user) return null;
+    const now = Date.now();
+    const starts = periodStarts(now, user.tz);
+    const count = (since: number) =>
+      this.sql
+        .exec<{ n: number }>(
+          'SELECT COUNT(*) AS n FROM focus_blocks WHERE user = ? AND at >= ?',
+          id,
+          since,
+        )
+        .one().n;
+    const kinds = Object.fromEntries(BLOCK_KINDS.map((k) => [k, 0])) as Record<BlockKind, number>;
+    let focusMs = 0;
+    let total = 0;
+    for (const row of this.sql
+      .exec<{ minutes: number; n: number }>(
+        'SELECT minutes, COUNT(*) AS n FROM focus_blocks WHERE user = ? GROUP BY minutes',
+        id,
+      )
+      .toArray()) {
+      kinds[blockKind(row.minutes)] += row.n;
+      focusMs += row.minutes * row.n * 60_000;
+      total += row.n;
+    }
+    const times = this.sql
+      .exec<{ at: number }>(
+        'SELECT at FROM focus_blocks WHERE user = ? ORDER BY at DESC LIMIT ?',
+        id,
+        STREAK_ROWS,
+      )
+      .toArray()
+      .map((r) => r.at);
+    // Time in the building so far, with the visit going on now.
+    let current = 0;
+    for (const ws of this.ctx.getWebSockets(id)) {
+      const member = ws.deserializeAttachment() as Member | null;
+      if (member?.since) current = Math.max(current, now - member.since);
+    }
+    return {
+      id,
+      name: user.name,
+      role: this.roleOf(id),
+      joinedAt: user.created_at ?? user.seen_at,
+      online: this.presenceOf(id) !== null,
+      blocks: {
+        today: count(starts.today),
+        week: count(starts.week),
+        month: count(starts.month),
+        year: count(starts.year),
+        total,
+      },
+      kinds,
+      focusMs,
+      timeMs: user.time_ms + current,
+      friends: this.rows(id).filter((r) => r.accepted).length,
+      messages: user.messages_sent,
+      bestStreak: longestStreak(times, user.tz),
+    };
+  }
+
+  /* ---------- Proposed events ---------- */
+
+  private eventRows(): EventRow[] {
+    return this.sql
+      .exec<EventRow>(
+        'SELECT id, title, description, area, start, minutes, by, by_name, status FROM events WHERE start + minutes * 60000 > ? ORDER BY start',
+        Date.now() - EVENT_KEEP_MS,
+      )
+      .toArray();
+  }
+
+  /** Approved events for everyone; waiting ones for admins, and each proposer's own. */
+  private eventsFor(id: string): ProposedEvent[] {
+    const admin = this.isAdmin(id);
+    return this.eventRows()
+      .filter(
+        (row) => row.status === 'approved' || admin || (row.by === id && row.status === 'pending'),
+      )
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        area: row.area as ProposedEvent['area'],
+        start: row.start,
+        minutes: row.minutes,
+        by: row.by,
+        byName: row.by_name,
+        status: row.status,
+      }));
+  }
+
+  /** Everyone online gets the calendar again, as they may see it. */
+  private tellEvents(): void {
+    const told = new Set<string>();
+    for (const ws of this.ctx.getWebSockets()) {
+      const member = ws.deserializeAttachment() as Member | null;
+      if (!member || told.has(member.id)) continue;
+      told.add(member.id);
+      this.sendTo(member.id, { t: 'events', events: this.eventsFor(member.id) });
+    }
+  }
+
+  private propose(
+    ws: WebSocket,
+    me: Member,
+    proposal: {
+      title: string;
+      description: string;
+      area: ProposedEvent['area'];
+      start: number;
+      minutes: number;
+    },
+  ): void {
+    const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
+    if (!changes) return send(ws, { t: 'error', code: 'rate_limited' });
+    ws.serializeAttachment({ ...me, changes });
+    const title = proposal.title.trim().replace(/\s+/g, ' ');
+    const description = proposal.description.trim().slice(0, EVENT_LIMITS.description);
+    const clean = { ...proposal, title, description };
+    if (
+      checkProposal(clean, Date.now()) ||
+      [title, description].some((text) => !cleanDm(text || 'x').ok)
+    ) {
+      return send(ws, { t: 'error', code: 'bad_event' });
+    }
+    const waiting = this.sql
+      .exec<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM events WHERE by = ? AND status = 'pending'",
+        me.id,
+      )
+      .one().n;
+    if (waiting >= EVENT_LIMITS.pendingPerPerson)
+      return send(ws, { t: 'error', code: 'too_many_events' });
+    this.sql.exec(
+      "INSERT INTO events (id, title, description, area, start, minutes, by, by_name, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+      crypto.randomUUID(),
+      title,
+      description,
+      clean.area,
+      clean.start,
+      clean.minutes,
+      me.id,
+      me.name,
+    );
+    this.tellEvents();
+  }
+
+  private review(
+    ws: WebSocket,
+    me: Member,
+    id: string,
+    verdict: 'approved' | 'rejected' | 'removed',
+  ): void {
+    if (!this.isAdmin(me.id)) return send(ws, { t: 'error', code: 'forbidden' });
+    const row = this.sql.exec<EventRow>('SELECT * FROM events WHERE id = ?', id).toArray()[0];
+    if (!row) return;
+    if (verdict === 'removed') this.sql.exec('DELETE FROM events WHERE id = ?', id);
+    else this.sql.exec('UPDATE events SET status = ? WHERE id = ?', verdict, id);
+    if (verdict !== 'removed' && row.status === 'pending') {
+      this.sendTo(row.by, { t: 'reviewed', title: row.title, verdict });
+    }
+    this.tellEvents();
+  }
+
+  /* ---------- Private rooms: the owner's controls ---------- */
+
+  private ownsRoom(id: string, code: string): boolean {
+    return this.roomRow(code)?.owner === id;
+  }
+
+  private isBanned(code: string, user: string): boolean {
+    return (
+      this.sql.exec('SELECT 1 FROM room_bans WHERE code = ? AND user = ?', code, user).toArray()
+        .length > 0
+    );
+  }
+
+  private bannedFrom(code: string): { id: string; name: string }[] {
+    return this.sql
+      .exec<{ id: string; name: string }>(
+        `SELECT b.user AS id, COALESCE(u.name, '?') AS name FROM room_bans b
+         LEFT JOIN users u ON u.id = b.user WHERE b.code = ?`,
+        code,
+      )
+      .toArray();
+  }
+
+  private async setRoomRules(
+    ws: WebSocket,
+    me: Member,
+    code: string,
+    rules: RoomRules,
+  ): Promise<void> {
+    if (!this.ownsRoom(me.id, code)) return send(ws, { t: 'error', code: 'forbidden' });
+    const clean = cleanRoomRules(rules);
+    this.sql.exec('UPDATE rooms SET rules = ? WHERE code = ?', JSON.stringify(clean), code);
+    await this.env.AREAS.getByName(`room:${code}`).setRules(clean);
+  }
+
+  private async sendOut(
+    ws: WebSocket,
+    me: Member,
+    code: string,
+    id: string,
+    ban: boolean,
+  ): Promise<void> {
+    if (!this.ownsRoom(me.id, code) || id === me.id)
+      return send(ws, { t: 'error', code: 'forbidden' });
+    if (ban) this.sql.exec('INSERT OR IGNORE INTO room_bans (code, user) VALUES (?, ?)', code, id);
+    await this.env.AREAS.getByName(`room:${code}`).sendOff([id], ban ? 'banned' : 'kicked');
+    send(ws, { t: 'roomBans', code, banned: this.bannedFrom(code) });
+  }
+
+  private async closeRoom(ws: WebSocket, me: Member, code: string): Promise<void> {
+    if (!this.ownsRoom(me.id, code)) return send(ws, { t: 'error', code: 'forbidden' });
+    this.sql.exec('DELETE FROM rooms WHERE code = ?', code);
+    this.sql.exec('DELETE FROM room_bans WHERE code = ?', code);
+    await this.env.AREAS.getByName(`room:${code}`).sendOff(null, 'room_closed');
   }
 
   private sendTo(id: string, message: SocialServerMessage): void {

@@ -33,6 +33,12 @@ export const TILE = {
   gameTable: 'D',
   /** The jukebox: people queue songs for the room. */
   jukebox: 'U',
+  /** An umbrella stand by the door, a few umbrellas in it. */
+  umbrellaStand: 'R',
+  /** The lost-and-found box: things members forgot. */
+  lostBox: 'Y',
+  /** A small round table with games on it, in private rooms that allow games. */
+  roomGameTable: 'Z',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];

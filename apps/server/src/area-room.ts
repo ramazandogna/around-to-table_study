@@ -1,7 +1,10 @@
 import {
   AREA_RULES,
   applyAreaRules,
+  cleanRoomRules,
   EMPTY_JUKEBOX,
+  isRoomArea,
+  type RoomRules,
   JUKEBOX,
   parseYouTubeId,
   skipsNeeded,
@@ -77,7 +80,16 @@ const TUNES_PER_MINUTE = 4;
 /** How often sockets that went quiet are looked for while anyone is connected. */
 const SWEEP_MS = 30_000;
 
-export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-area' } as const;
+export const AREA_HEADERS = {
+  id: 'x-user-id',
+  name: 'x-user-name',
+  area: 'x-area',
+  /** A private room's rules as JSON, set by the owner. */
+  rules: 'x-room-rules',
+} as const;
+const RULES_KEY = 'rules';
+/** Games a private room's table offers (darts needs the smoking room's cabinet). */
+const ROOM_TABLE_GAMES: readonly TableKind[] = ['pig', 'guess'];
 
 /**
  * One Durable Object per area (hall, library, smoking room). It owns who is
@@ -90,6 +102,8 @@ export class AreaRoom extends DurableObject<Env> {
   /** The game tables, loaded from storage on the first message (they outlive hibernation). */
   private tables: Map<TableKind, TableRecord> | null = null;
   private jukebox: JukeboxState | null = null;
+  /** A private room's rules; null in public rooms or until known. */
+  private rules: RoomRules | null = null;
   /** When each person last queued songs, for `TUNES_PER_MINUTE`. */
   private readonly tuneWindows = new Map<string, RateWindow>();
 
@@ -107,6 +121,12 @@ export class AreaRoom extends DurableObject<Env> {
     const name = request.headers.get(AREA_HEADERS.name);
     const area = request.headers.get(AREA_HEADERS.area) as AreaId | null;
     if (!id || !name || !area) return new Response('missing session', { status: 400 });
+
+    const rules = request.headers.get(AREA_HEADERS.rules);
+    if (rules && isRoomArea(area)) {
+      this.rules = cleanRoomRules(JSON.parse(rules));
+      await this.ctx.storage.put(RULES_KEY, this.rules);
+    }
 
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [id]);
@@ -134,6 +154,13 @@ export class AreaRoom extends DurableObject<Env> {
     const message = typeof raw === 'string' ? parseClientMessage(raw) : null;
     const me = this.load(ws);
     if (!message || !me) return this.send(ws, { t: 'error', code: 'bad_message' });
+    // Nothing personal passes between two people when one blocked the other.
+    if (
+      (message.t === 'poke' || message.t === 'whisper' || message.t === 'invite') &&
+      (await this.env.SOCIAL.getByName('hub').isBlocked(me.id, message.to))
+    ) {
+      return this.send(ws, { t: 'error', code: 'blocked' });
+    }
     this.opened ??= (await this.ctx.storage.get<number>(OPENED_KEY)) ?? 0;
     await this.loadPlay();
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
@@ -172,6 +199,44 @@ export class AreaRoom extends DurableObject<Env> {
       }
     }
     this.jukebox ??= (await this.ctx.storage.get<JukeboxState>(JUKEBOX_KEY)) ?? EMPTY_JUKEBOX;
+    this.rules ??= (await this.ctx.storage.get<RoomRules>(RULES_KEY)) ?? null;
+  }
+
+  /** The owner changed the room's rules: everyone inside is told. */
+  async setRules(rules: RoomRules): Promise<void> {
+    this.rules = cleanRoomRules(rules);
+    await this.ctx.storage.put(RULES_KEY, this.rules);
+    this.broadcast({ t: 'roomRules', rules: this.rules });
+    if (!this.rules.games) {
+      for (const kind of ROOM_TABLE_GAMES) {
+        this.tables?.delete(kind);
+        await this.ctx.storage.delete(tableKey(kind));
+        this.broadcast({ t: 'table', kind, table: null });
+      }
+    }
+  }
+
+  /**
+   * The owner sends people out (or everyone, when closing the room): they are
+   * told why, then their sockets close.
+   */
+  async sendOff(
+    ids: readonly string[] | null,
+    why: 'kicked' | 'banned' | 'room_closed',
+  ): Promise<void> {
+    const sockets = ids
+      ? ids.flatMap((id) => this.ctx.getWebSockets(id))
+      : this.ctx.getWebSockets();
+    for (const ws of sockets) {
+      this.send(ws, { t: 'error', code: why });
+      this.leave(ws);
+    }
+  }
+
+  /** Whether table games are played here: the smoking room, and private rooms that allow them. */
+  private gamesHere(area: AreaId, kind: TableKind): boolean {
+    if (area === 'smoking') return true;
+    return isRoomArea(area) && (this.rules?.games ?? true) && ROOM_TABLE_GAMES.includes(kind);
   }
 
   /** Someone started over: everyone they were before leaves the room at once. */
@@ -224,11 +289,16 @@ export class AreaRoom extends DurableObject<Env> {
         });
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
         this.grow(me.area);
-        if (me.area === 'smoking') {
-          this.advanceIfOver(now);
+        if (isRoomArea(me.area) && this.rules) {
+          this.send(ws, { t: 'roomRules', rules: this.rules });
+        }
+        if (me.area === 'smoking' || isRoomArea(me.area)) {
           for (const [kind, record] of this.tables ?? []) {
             this.send(ws, { t: 'table', kind, table: record.table });
           }
+        }
+        if (me.area === 'smoking') {
+          this.advanceIfOver(now);
           this.send(ws, { t: 'jukebox', state: this.jukebox ?? EMPTY_JUKEBOX });
         }
         return;
@@ -314,6 +384,14 @@ export class AreaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'danced', id: me.id, on: message.on });
         return;
       }
+      case 'chair': {
+        if (!me.joined) return;
+        const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
+        if (!statuses || !this.grid(me.area).seatFacing(message.tile)) return;
+        this.save(ws, { ...me, statuses });
+        this.broadcast({ t: 'chaired', tile: message.tile, pulled: message.pulled }, ws);
+        return;
+      }
       case 'smoke': {
         if (!me.joined || me.smoking === message.on) return;
         if (message.on && !AREA_RULES[me.area].smoke) {
@@ -332,7 +410,7 @@ export class AreaRoom extends DurableObject<Env> {
         return;
       }
       case 'table': {
-        if (!me.joined || me.area !== 'smoking' || !this.tables) return;
+        if (!me.joined || !this.tables || !this.gamesHere(me.area, message.kind)) return;
         this.playTable(ws, me, message.kind, message.action, now);
         return;
       }
@@ -367,6 +445,8 @@ export class AreaRoom extends DurableObject<Env> {
         const study = { ...me.study, timer: null };
         this.save(ws, { ...me, study });
         this.broadcast({ t: 'finished', id: me.id });
+        // It counts on the person's profile: the room saw the timer run out.
+        void this.env.SOCIAL.getByName('hub').recordBlock(me.id, timer.totalMs / 60_000);
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
         return;
       }
@@ -594,6 +674,8 @@ export class AreaRoom extends DurableObject<Env> {
   private storeStudy(grid: AreaGrid, tile: Point, status: StudyStatus, now: number): StoredStudy {
     return {
       activity: grid.seatFacing(tile) ? status.activity : null,
+      // Which block of a session it is travels too, for "2 of 4" by the name.
+      round: status.timer ? (status.round ?? null) : null,
       timer: status.timer
         ? { endsAt: now + status.timer.remainingMs, totalMs: status.timer.totalMs }
         : null,

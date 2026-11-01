@@ -18,6 +18,27 @@ export const ROOM_PASSWORD = { min: 4, max: 32 } as const;
 /** An empty room is forgotten after this long. */
 export const ROOM_IDLE_MS = 24 * 60 * 60_000;
 
+/** What the owner allows in a room; set when opening it, changed later from the room's settings. */
+export type RoomRules = {
+  /** Notification sounds and the chat's sounds. */
+  sound: boolean;
+  pets: boolean;
+  /** A game table in the room, for its people to play together. */
+  games: boolean;
+};
+
+export const DEFAULT_ROOM_RULES: RoomRules = { sound: true, pets: true, games: true };
+
+/** Rules from storage or a request, with anything missing or wrong taken from the defaults. */
+export function cleanRoomRules(raw: unknown): RoomRules {
+  const value = (raw && typeof raw === 'object' ? raw : {}) as Partial<
+    Record<keyof RoomRules, unknown>
+  >;
+  const pick = (key: keyof RoomRules) =>
+    typeof value[key] === 'boolean' ? (value[key] as boolean) : DEFAULT_ROOM_RULES[key];
+  return { sound: pick('sound'), pets: pick('pets'), games: pick('games') };
+}
+
 export type RoomInfo = {
   code: string;
   name: string;
@@ -26,6 +47,9 @@ export type RoomInfo = {
   locked: boolean;
   /** People inside right now. */
   people: number;
+  /** Who opened it: they can change its rules, send people out and close it. */
+  owner: string;
+  rules: RoomRules;
 };
 
 export function makeRoomCode(random: () => number = Math.random): string {

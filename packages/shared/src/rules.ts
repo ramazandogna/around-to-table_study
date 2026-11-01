@@ -1,5 +1,5 @@
 import { normalizeChat } from './text';
-import type { AreaId } from './world';
+import { isRoomArea, type AreaId } from './world';
 
 /** What each area allows. The server enforces these; clients only give early feedback. */
 export type AreaRules = {
@@ -95,6 +95,16 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     smoke: true,
   },
 };
+
+/**
+ * A room's rules with its owner's choices on top, for private rooms: the sound
+ * of notifications and whether pets may come in. Public rooms ignore them.
+ */
+export function rulesFor(area: AreaId, room?: { sound: boolean; pets: boolean } | null): AreaRules {
+  const base = AREA_RULES[area];
+  if (!room || !isRoomArea(area)) return base;
+  return { ...base, notifySound: room.sound, pets: room.pets };
+}
 
 const TURKISH_LETTERS = /[çğıöşüÇĞİÖŞÜ]/;
 

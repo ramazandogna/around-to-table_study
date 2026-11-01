@@ -20,6 +20,8 @@ export type StudyStatus = {
   timer: TimerStatus | null;
   /** Do not disturb: others see it, and the person's own screen hides chatter. */
   dnd: boolean;
+  /** Which focus block of a session this is ("2 of 4"), for others to see. */
+  round?: { n: number; of: number } | null | undefined;
 };
 
 export const IDLE_STATUS: StudyStatus = { activity: null, timer: null, dnd: false };

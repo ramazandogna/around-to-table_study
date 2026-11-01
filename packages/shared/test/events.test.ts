@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EVENTS, eventNow, upcoming } from '../src';
+import { checkProposal, EVENTS, eventNow, upcoming, type ProposedEvent } from '../src';
 
 // Thursday 2026-11-05, 21:00 in Japan is 12:00 UTC.
 const start = Date.UTC(2026, 10, 5, 12, 0);
@@ -34,5 +34,35 @@ describe('the Thursday meetup', () => {
 
   it('has no special days yet', () => {
     expect(EVENTS).toHaveLength(1);
+  });
+});
+
+describe('proposed events', () => {
+  const now = Date.UTC(2026, 10, 1, 12);
+  const proposal = {
+    title: 'Exam marathon',
+    description: '',
+    area: 'library' as const,
+    start: now + 60 * 60 * 1000,
+    minutes: 120,
+  };
+
+  it('checks a proposal', () => {
+    expect(checkProposal(proposal, now)).toBeNull();
+    expect(checkProposal({ ...proposal, title: 'x' }, now)).toBe('title');
+    expect(checkProposal({ ...proposal, start: now - 1 }, now)).toBe('time');
+    expect(checkProposal({ ...proposal, start: now + 90 * 24 * 60 * 60 * 1000 }, now)).toBe('time');
+    expect(checkProposal({ ...proposal, minutes: 5 }, now)).toBe('length');
+    expect(checkProposal({ ...proposal, area: 'room3' as never }, now)).toBe('area');
+  });
+
+  it('puts only approved ones on the calendar and in the room', () => {
+    const base: ProposedEvent = { ...proposal, id: 'e1', by: 'a', byName: 'A', status: 'approved' };
+    const pending: ProposedEvent = { ...base, id: 'e2', status: 'pending' };
+    const list = upcoming(now, 3, EVENTS, [base, pending]);
+    expect(list.some((o) => o.event === base)).toBe(true);
+    expect(list.some((o) => o.event === pending)).toBe(false);
+    expect(eventNow('library', base.start + 1000, EVENTS, [base])?.event).toBe(base);
+    expect(eventNow('library', base.start + 121 * 60 * 1000, EVENTS, [base])).toBeNull();
   });
 });

@@ -60,7 +60,85 @@ export const EVENTS: readonly WeeklyEvent[] = [
   },
 ];
 
-export type Occurrence = { event: WeeklyEvent; start: number; end: number };
+/**
+ * An event someone proposed for one date (a study marathon, a talk, a party).
+ * It waits for an admin's approval; only approved ones reach the calendar.
+ */
+export type ProposedEvent = {
+  id: string;
+  title: string;
+  description: string;
+  area: AreaId;
+  /** UTC milliseconds. */
+  start: number;
+  minutes: number;
+  by: string;
+  byName: string;
+  status: 'pending' | 'approved' | 'rejected';
+};
+
+export const EVENT_LIMITS = {
+  title: { min: 3, max: 48 },
+  description: 200,
+  minutes: { min: 15, max: 240 },
+  /** How far ahead an event may be proposed. */
+  aheadDays: 60,
+  /** Proposals one person may have waiting at once. */
+  pendingPerPerson: 3,
+} as const;
+
+/** Rooms an event can be held in: the shared ones. */
+export const EVENT_AREAS = ['smoking', 'hall', 'library'] as const satisfies readonly AreaId[];
+
+export type EventProposal = Pick<
+  ProposedEvent,
+  'title' | 'description' | 'area' | 'start' | 'minutes'
+>;
+
+/** Why a proposal cannot be taken, or null when it is fine. */
+export function checkProposal(
+  proposal: EventProposal,
+  now: number,
+): 'title' | 'area' | 'time' | 'length' | null {
+  const title = proposal.title.trim();
+  if (title.length < EVENT_LIMITS.title.min || title.length > EVENT_LIMITS.title.max)
+    return 'title';
+  if (!(EVENT_AREAS as readonly string[]).includes(proposal.area)) return 'area';
+  if (
+    !Number.isFinite(proposal.start) ||
+    proposal.start < now ||
+    proposal.start > now + EVENT_LIMITS.aheadDays * DAY
+  )
+    return 'time';
+  if (
+    !Number.isInteger(proposal.minutes) ||
+    proposal.minutes < EVENT_LIMITS.minutes.min ||
+    proposal.minutes > EVENT_LIMITS.minutes.max
+  )
+    return 'length';
+  return null;
+}
+
+/** A weekly event, or an approved proposal, at one time. */
+export type Occurrence = {
+  event: WeeklyEvent | ProposedEvent;
+  start: number;
+  end: number;
+};
+
+export const isWeekly = (event: WeeklyEvent | ProposedEvent): event is WeeklyEvent =>
+  'weekday' in event;
+
+/** How a room is dressed for an occurrence: weekly events have their theme, proposals the meetup's. */
+export function themeOf(event: WeeklyEvent | ProposedEvent): ThemeId {
+  return isWeekly(event) ? event.theme : 'meetup';
+}
+
+function oneOffs(proposed: readonly ProposedEvent[]): Occurrence[] {
+  return proposed
+    .filter((event) => event.status === 'approved')
+    .map((event) => ({ event, start: event.start, end: event.start + event.minutes * MINUTE }));
+}
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -76,20 +154,37 @@ function lastStart(event: WeeklyEvent, now: number): number {
   return start - event.utcOffset * MINUTE;
 }
 
-/** The event under way in a room right now, if any. */
-export function eventNow(area: AreaId, now: number, events = EVENTS): Occurrence | null {
+/** The event under way in a room right now, if any (weekly ones first). */
+export function eventNow(
+  area: AreaId,
+  now: number,
+  events = EVENTS,
+  proposed: readonly ProposedEvent[] = [],
+): Occurrence | null {
   for (const event of events) {
     if (event.area !== area) continue;
     const start = lastStart(event, now);
     const end = start + event.minutes * MINUTE;
     if (now >= start && now < end) return { event, start, end };
   }
-  return null;
+  return (
+    oneOffs(proposed).find((o) => o.event.area === area && now >= o.start && now < o.end) ?? null
+  );
 }
 
-/** Every occurrence that has not ended yet, from now until `days` ahead, soonest first. */
-export function upcoming(now: number, days = 14, events = EVENTS): Occurrence[] {
-  const found: Occurrence[] = [];
+/**
+ * Every occurrence that has not ended yet, from now until `days` ahead,
+ * soonest first: the weekly ones and the approved proposals.
+ */
+export function upcoming(
+  now: number,
+  days = 14,
+  events = EVENTS,
+  proposed: readonly ProposedEvent[] = [],
+): Occurrence[] {
+  const found: Occurrence[] = oneOffs(proposed).filter(
+    (o) => o.end > now && o.start < now + days * DAY,
+  );
   for (const event of events) {
     for (let start = lastStart(event, now); start < now + days * DAY; start += WEEK) {
       const end = start + event.minutes * MINUTE;

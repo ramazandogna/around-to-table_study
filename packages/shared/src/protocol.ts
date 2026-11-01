@@ -23,6 +23,7 @@ import {
 } from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import { TABLE_GAMES, type Table, type TableError, type TableKind } from './tables';
+import type { RoomRules } from './rooms';
 import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
@@ -52,6 +53,10 @@ const studyStatus = z.object({
     })
     .nullable(),
   dnd: z.boolean(),
+  round: z
+    .object({ n: z.number().int().min(1).max(12), of: z.number().int().min(1).max(12) })
+    .nullable()
+    .optional(),
 });
 
 export { normalizeChat } from './text';
@@ -124,6 +129,8 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   }),
   /** The sender's study timer ran out: everyone in the room sees them celebrate. */
   z.object({ t: z.literal('finished') }),
+  /** A chair pulled out from its table, or pushed back under it. */
+  z.object({ t: z.literal('chair'), tile: point, pulled: z.boolean() }),
   /** Asks someone in the same area to come to the sender's private room. */
   z.object({
     t: z.literal('invite'),
@@ -168,6 +175,12 @@ export type ErrorCode =
   | 'not_allowed'
   /** Someone else already sits there. */
   | 'seat_taken'
+  /** The room's owner sent the player out (they may come back). */
+  | 'kicked'
+  /** The room's owner banned the player: they cannot come back. */
+  | 'banned'
+  /** The owner closed the room. */
+  | 'room_closed'
   /** Not a YouTube link, or a video that cannot be played here. */
   | 'tune_bad'
   /** The queue is full, or the sender already has songs waiting. */
@@ -202,6 +215,10 @@ export type ServerMessage =
   | { t: 'poked'; from: string; to: string }
   | { t: 'danced'; id: string; on: boolean }
   | { t: 'smoked'; id: string; on: boolean }
+  /** Someone moved a chair: pulled out from the table, or pushed back under it. */
+  | { t: 'chaired'; tile: Point; pulled: boolean }
+  /** The owner changed the private room's rules. */
+  | { t: 'roomRules'; rules: RoomRules }
   /** Someone (`id`) petted the pet of `owner`. */
   | { t: 'patted'; id: string; owner: string }
   /** A game table changed (null: nobody sits at it any more). */

@@ -11,6 +11,8 @@ import {
 import { containsLink } from './rules';
 import { DOINGS, MOODS, STATUS_LIMITS, VIBES, type Doing, type Mood, type Vibe } from './status';
 import { normalizeChat } from './text';
+import { EVENT_AREAS, EVENT_LIMITS, type ProposedEvent } from './events';
+import type { Profile, Role } from './profile';
 import type { AreaId } from './world';
 
 /**
@@ -19,6 +21,12 @@ import type { AreaId } from './world';
  */
 const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
 const userId = z.string().min(1).max(64);
+const roomCode = z.string().regex(/^[A-Z2-9]{6}$/);
+
+/** Longest line in the building-wide chat. */
+export const SHOUT_MAX_CHARS = 200;
+/** Lines of the building-wide chat kept for people coming in. */
+export const SHOUT_HISTORY = 50;
 
 /** Most friends one person can have; plenty for a study place. */
 export const MAX_FRIENDS = 200;
@@ -61,6 +69,8 @@ export const socialClientSchema = z.discriminatedUnion('t', [
       .string()
       .max(STATUS_LIMITS.announcement * 2)
       .optional(),
+    /** The player's clock, minutes ahead of UTC: their "today" and "this week". */
+    tz: z.number().int().min(-720).max(840).optional(),
   }),
   /** Sends a request, or accepts theirs if they already asked. */
   z.object({ t: z.literal('befriend'), to: userId }),
@@ -81,6 +91,54 @@ export const socialClientSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('read'), with: userId }),
   /** Makes a friend's phone buzz wherever they are: "come say hi". */
   z.object({ t: z.literal('buzz'), to: userId }),
+  /** Says something to the whole building. */
+  z.object({
+    t: z.literal('shout'),
+    text: z
+      .string()
+      .min(1)
+      .max(SHOUT_MAX_CHARS * 2),
+  }),
+  /** Blocks someone: no messages, pokes or invites either way, and no friendship. */
+  z.object({ t: z.literal('block'), to: userId }),
+  z.object({ t: z.literal('unblock'), id: userId }),
+  /** Asks for someone's profile card. */
+  z.object({ t: z.literal('profile'), id: userId }),
+  /** Proposes an event; it waits for an admin. */
+  z.object({
+    t: z.literal('propose'),
+    title: z
+      .string()
+      .min(1)
+      .max(EVENT_LIMITS.title.max * 2),
+    description: z.string().max(EVENT_LIMITS.description * 2),
+    area: z.enum(EVENT_AREAS),
+    start: z.number().int(),
+    minutes: z.number().int(),
+  }),
+  /** Admins: approves or turns down a proposed event, or takes an approved one off. */
+  z.object({
+    t: z.literal('review'),
+    id: z.string().min(1).max(40),
+    verdict: z.enum(['approved', 'rejected', 'removed']),
+  }),
+  /** Admins: makes someone an admin, or takes it back. */
+  z.object({ t: z.literal('role'), id: userId, admin: z.boolean() }),
+  /** Admins: who the admins are. */
+  z.object({ t: z.literal('admins') }),
+  /** A room's owner changes its rules. */
+  z.object({
+    t: z.literal('roomRules'),
+    code: roomCode,
+    rules: z.object({ sound: z.boolean(), pets: z.boolean(), games: z.boolean() }),
+  }),
+  /** A room's owner sends someone out; with `ban` they cannot come back. */
+  z.object({ t: z.literal('roomOut'), code: roomCode, id: userId, ban: z.boolean() }),
+  z.object({ t: z.literal('roomUnban'), code: roomCode, id: userId }),
+  /** A room's owner closes it for good. */
+  z.object({ t: z.literal('roomClose'), code: roomCode }),
+  /** A room's owner asks who is banned. */
+  z.object({ t: z.literal('roomBans'), code: roomCode }),
 ]);
 
 export type SocialClientMessage = z.infer<typeof socialClientSchema>;
@@ -108,6 +166,8 @@ export type Friend = {
   /** When they were last online, for friends who are not. */
   seenAt?: number | null;
 };
+
+export type Shout = { id: number; from: string; name: string; text: string; at: number };
 
 export type DirectMessage = {
   id: number;
@@ -137,7 +197,15 @@ export type SocialErrorCode =
   | 'too_many'
   | 'not_friends'
   | 'link_blocked'
-  | 'phone_silent';
+  | 'phone_silent'
+  /** One of the two blocked the other. */
+  | 'blocked'
+  /** Only admins may do that. */
+  | 'forbidden'
+  /** A proposal that cannot be taken (the detail says why). */
+  | 'bad_event'
+  /** Too many proposals waiting already. */
+  | 'too_many_events';
 
 export type SocialServerMessage =
   /** The whole list, sent on connect and after every change. */
@@ -155,6 +223,24 @@ export type SocialServerMessage =
   | { t: 'seen'; by: string; upTo: number }
   /** A friend buzzed the player's phone. */
   | { t: 'buzzed'; from: string; name: string }
+  /** Who the player is to the building: their role and the people they blocked. */
+  | { t: 'me'; role: Role; blocked: { id: string; name: string }[] }
+  /** Building-wide chat: one new line, or the latest ones on connect. */
+  | { t: 'shouted'; line: Shout }
+  | { t: 'shouts'; lines: Shout[] }
+  | { t: 'profile'; profile: Profile }
+  /**
+   * The calendar's proposed events: approved ones for everyone, and also those
+   * waiting (admins see all, others their own).
+   */
+  | { t: 'events'; events: ProposedEvent[] }
+  /** An admin decided on the player's proposal. */
+  | { t: 'reviewed'; title: string; verdict: 'approved' | 'rejected' }
+  /** Someone blocked the player. */
+  | { t: 'blockedBy'; name: string }
+  | { t: 'admins'; admins: { id: string; name: string }[] }
+  /** Who is banned from the owner's room. */
+  | { t: 'roomBans'; code: string; banned: { id: string; name: string }[] }
   /**
    * How lively the building is: everyone online, how many sit at a table, and
    * the pets waiting at the library door for their people.

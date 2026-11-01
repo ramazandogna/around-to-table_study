@@ -7,6 +7,7 @@ import {
   normalizeName,
   normalizeRoomCode,
   PUBLIC_AREAS,
+  cleanRoomRules,
   roomArea,
   ROOM_SIZES,
   type AreaId,
@@ -118,6 +119,7 @@ async function rooms(request: Request, env: Env, pathname: string): Promise<Resp
       name?: unknown;
       size?: unknown;
       password?: unknown;
+      rules?: unknown;
     } | null;
     const session = await sessionFromBody(body, env);
     if (session instanceof Response) return session;
@@ -127,7 +129,13 @@ async function rooms(request: Request, env: Env, pathname: string): Promise<Resp
     if (!name) return error('invalid_name', 400);
     if (!size) return error('invalid_size', 400);
     if (password !== null && !isValidRoomPassword(password)) return error('invalid_password', 400);
-    const room = await hub.createRoom(session.id, name, size, password);
+    const room = await hub.createRoom(
+      session.id,
+      name,
+      size,
+      password,
+      cleanRoomRules(body?.rules),
+    );
     return room ? Response.json({ room }) : error('too_many_rooms', 429);
   }
   const match = ROOM_PATH.exec(pathname);
@@ -147,8 +155,9 @@ async function rooms(request: Request, env: Env, pathname: string): Promise<Resp
   const session = await sessionFromBody(body, env);
   if (session instanceof Response) return session;
   const password = typeof body?.password === 'string' ? body.password : null;
-  const check = await hub.checkRoom(code, password);
+  const check = await hub.checkRoom(code, password, session.id);
   if (check === 'unknown') return error('unknown_room', 404);
+  if (check === 'banned') return error('banned', 403);
   if (check === 'password') return error('wrong_password', 403);
   const room = await hub.roomInfo(code);
   const secret = secretOf(env);
@@ -163,6 +172,7 @@ async function joinArea(request: Request, env: Env, area: string): Promise<Respo
 
   // A private room: only with a pass for this room, into that room's own object.
   let object = area;
+  let rules: string | null = null;
   if (isRoomArea(area)) {
     const params = new URL(request.url).searchParams;
     const code = normalizeRoomCode(params.get('room') ?? '');
@@ -179,12 +189,14 @@ async function joinArea(request: Request, env: Env, area: string): Promise<Respo
     const room = await env.SOCIAL.getByName('hub').roomInfo(code);
     if (!room || roomArea(room.size as RoomSize) !== area) return error('unknown_room', 404);
     object = `room:${code}`;
+    rules = JSON.stringify(room.rules);
   }
 
   const headers = new Headers(request.headers);
   headers.set(AREA_HEADERS.id, session.id);
   headers.set(AREA_HEADERS.name, encodeURIComponent(session.name));
   headers.set(AREA_HEADERS.area, area as AreaId);
+  if (rules) headers.set(AREA_HEADERS.rules, rules);
   return env.AREAS.getByName(object).fetch(new Request(request, { headers }));
 }
 

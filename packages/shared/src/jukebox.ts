@@ -12,8 +12,11 @@ export const JUKEBOX = {
   perPerson: 2,
   /** Longest song taken, in seconds: a long mix is fine, an all-day stream is not. */
   maxSeconds: 3 * 60 * 60,
-  /** Loudest the room's music gets (YouTube's 0–100 scale); it stays in the background. */
-  maxVolume: 30,
+  /**
+   * The room's volume (YouTube's 0–100 scale), the same for everyone and low,
+   * in the background. Each person may only turn it down, on their own screen.
+   */
+  maxVolume: 12,
   defaultVolume: 12,
   /** Share of the room that must ask before a song is skipped. */
   skipShare: 0.5,
