@@ -1,3 +1,4 @@
+import { normalizeRoomCode } from '@att/shared';
 import { useEffect } from 'react';
 
 import { unlockAudio } from './audio/sound';
@@ -8,6 +9,8 @@ import { ChatPanel } from './ui/ChatPanel';
 import { Coach } from './ui/Coach';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Discovery } from './ui/Discovery';
+import { Games } from './ui/Games';
+import { InviteToast, RoomChip, RoomsPanel } from './ui/Rooms';
 import { NoticeBoard } from './ui/NoticeBoard';
 import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
@@ -30,6 +33,15 @@ export function App() {
 
   // Friends and presence follow the player across rooms, so they live outside the world.
   useEffect(() => (session && look ? startSocial(session) : undefined), [session, look]);
+
+  // A link to a private room (…/?room=ABC123) opens the reception with its code filled in.
+  useEffect(() => {
+    if (!session || !look) return;
+    const code = normalizeRoomCode(new URLSearchParams(location.search).get('room') ?? '');
+    if (!code) return;
+    history.replaceState(null, '', location.pathname);
+    useGameStore.getState().openRooms(code);
+  }, [session, look]);
 
   // Browsers keep sound off until the first touch or key press.
   useEffect(() => {
@@ -66,8 +78,12 @@ export function App() {
       </div>
       <NoticeBoard />
       <Discovery />
+      <Games />
+      <RoomsPanel />
+      <InviteToast />
       <RadialMenu />
       <footer className="hud-bottom">
+        <RoomChip />
         <Coach />
         <Notice />
         <SeatBar />

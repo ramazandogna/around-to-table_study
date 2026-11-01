@@ -23,6 +23,7 @@ function Card({ id, name, lines }: Selected) {
   const area = useGameStore((s) => s.area);
   const connection = useGameStore((s) => s.connection);
   const social = useGameStore((s) => s.social);
+  const room = useGameStore((s) => s.room);
   const friendship = useGameStore((s) => s.friends.find((f) => f.id === id)?.state ?? null);
   const cooldownUntil = useGameStore((s) => s.cooldownUntil[s.area] ?? 0);
   const store = useGameStore.getState();
@@ -113,13 +114,18 @@ function Card({ id, name, lines }: Selected) {
               close();
             }}
           />
-          <Choice
-            icon="👥"
-            label={t('card.group')}
-            hint={t('card.soon')}
-            disabled
-            onSelect={close}
-          />
+          {room && (
+            <Choice
+              icon="🔑"
+              label={t('card.invite')}
+              hint={t('card.invite.hint', { room: room.room.name })}
+              onSelect={() => {
+                connection?.invite(id, room.room.code, room.room.name);
+                store.setNotice('room_invited', name);
+                close();
+              }}
+            />
+          )}
         </div>
       )}
     </Panel>

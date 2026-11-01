@@ -5,6 +5,7 @@ import { loadCharacterKit } from './characters';
 import { IsoView } from './IsoView';
 import { loadFurniture } from './models';
 import { loadPetKit } from './pets';
+import { loadArcadeKit } from './arcade';
 
 type Status = 'loading' | 'ready' | 'failed';
 
@@ -23,10 +24,10 @@ export function WorldCanvas() {
     let world: AreaWorld | null = null;
     let cancelled = false;
 
-    Promise.all([loadFurniture(), loadCharacterKit(), loadPetKit()])
-      .then(([furniture, characters, pets]) => {
+    Promise.all([loadFurniture(), loadCharacterKit(), loadPetKit(), loadArcadeKit()])
+      .then(([furniture, characters, pets, arcade]) => {
         if (cancelled) return;
-        world = new AreaWorld(view, { furniture, characters, pets }, fade);
+        world = new AreaWorld(view, { furniture, characters, pets, arcade }, fade);
         world.enter('hall');
         setStatus('ready');
       })

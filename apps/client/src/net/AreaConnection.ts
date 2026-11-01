@@ -15,6 +15,8 @@ type Options = {
   area: AreaId;
   from: AreaId | undefined;
   token: string;
+  /** A private room's code and the pass to it. */
+  room?: { code: string; pass: string } | undefined;
   /** Read on every (re)connect, like the status. */
   look: () => Appearance;
   /** Read on every (re)connect, so the server always has the current status. */
@@ -30,10 +32,13 @@ export class AreaConnection {
   private readonly stopBeating: () => void;
 
   constructor(private readonly options: Options) {
-    const { area, token } = options;
+    const { area, token, room } = options;
     const url = () => {
       const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-      return `${scheme}://${location.host}/api/areas/${area}/ws?token=${encodeURIComponent(token)}`;
+      const into = room
+        ? `&room=${encodeURIComponent(room.code)}&pass=${encodeURIComponent(room.pass)}`
+        : '';
+      return `${scheme}://${location.host}/api/areas/${area}/ws?token=${encodeURIComponent(token)}${into}`;
     };
     this.socket = new ReconnectingWebSocket(url, [], { maxRetries: Infinity });
     this.stopBeating = keepAlive(this.socket);
@@ -89,6 +94,11 @@ export class AreaConnection {
   /** The study timer ran out; the server checks it really did. */
   finished(): void {
     this.send({ t: 'finished' });
+  }
+
+  /** Asks someone here to come to the player's private room. */
+  invite(to: string, code: string, name: string): void {
+    this.send({ t: 'invite', to, code, name });
   }
 
   poke(to: string): void {

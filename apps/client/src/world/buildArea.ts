@@ -18,6 +18,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { FLAW_IDS, SHELF_TOPICS } from '../content/discoveries';
 import { t } from '../i18n/t';
 import { buildDoors, WALL_HEIGHT, type Person } from './doors';
+import { MACHINES, type ArcadeKit, type Machine } from './arcade';
 import { buildFlaws, type ShelfFront, type WindowSpot } from './flaws';
 import { floorTexture } from './floors';
 import { facing, instance, type Placement } from './instancing';
@@ -35,6 +36,10 @@ const AREA_STYLE: Record<AreaId, AreaStyle> = {
   // Warm oak, deep green and cream: an old reading room.
   library: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xeadcc0, carpet: [0x3f6b55, 0x2f5242] },
   smoking: { floor: 0x7a4f34, slab: 0x3b2a1e, wall: 0xd9c9ad, carpet: [0x6c5a86, 0x54456b] },
+  // Private rooms: a small warm study, honey walls and oak.
+  room3: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xf0dcb8, carpet: [0x9a5b3e, 0x7a4430] },
+  room5: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xf0dcb8, carpet: [0x9a5b3e, 0x7a4430] },
+  room9: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xf0dcb8, carpet: [0x9a5b3e, 0x7a4430] },
 };
 
 const WOOD = 0xd4a76c;
@@ -69,7 +74,7 @@ const noise = (x: number, y: number, salt = 0) => {
 /** Something to look at up close: a shelf of books, a painting, the renovation. */
 export type Examinable = {
   id: string;
-  kind: 'shelf' | 'painting' | 'renovation' | 'flaw';
+  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'game' | 'topic';
   /** Index into the content list for its kind. */
   index: number;
   /** Where to stand to look at it. */
@@ -90,7 +95,7 @@ export type BuiltArea = {
 };
 
 /** Builds the 3D room for an area from its ASCII layout and the Kenney furniture. */
-export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
+export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeKit): BuiltArea {
   const root = new Group();
   const style = AREA_STYLE[grid.area.id];
   const at = (x: number, y: number) => grid.tileAt({ x, y });
@@ -183,6 +188,26 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
       const c = at(x, y);
       const { x: cx, z: cz } = tileCenter(x, y);
       switch (c) {
+        case TILE.arcade:
+        case TILE.clawMachine:
+        case TILE.vendingMachine: {
+          const machine: Machine =
+            c === TILE.arcade ? 'arcade' : c === TILE.clawMachine ? 'claw' : 'vending';
+          const model = arcade?.create(machine);
+          if (!model) break;
+          // Against the north wall, facing into the room.
+          model.position.set(cx, FLOOR_Y, cz - 0.08);
+          model.userData.examine = `game:${machine}`;
+          root.add(model);
+          pickables.push(model);
+          examinables.set(`game:${machine}`, {
+            id: `game:${machine}`,
+            kind: 'game',
+            index: MACHINES.indexOf(machine),
+            stand: { x, y: y + 1 },
+          });
+          break;
+        }
         case TILE.staffChair: {
           // The librarian's chair, pulled up to the desk beside it.
           const desk = [
@@ -255,9 +280,30 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
         case TILE.noticeBoard:
           noticeBoards.push({ x, y });
           break;
-        case TILE.ashtray:
+        case TILE.ashtray: {
           sideTables.push({ x: cx, z: cz, y: FLOOR_Y, scale: [0.45, 1, 0.45] });
+          // A jar of conversation starters on it, where people stand and talk.
+          const stand = [
+            { x, y: y + 1 },
+            { x: x + 1, y },
+            { x: x - 1, y },
+            { x, y: y - 1 },
+          ].find((p) => grid.isWalkable(p) && !grid.isSeat(p));
+          if (stand) {
+            const jar = topicJar(materials);
+            jar.position.set(cx, FLOOR_Y + furniture.tableRound.size.y, cz);
+            jar.userData.examine = `topic:${x},${y}`;
+            root.add(jar);
+            pickables.push(jar);
+            examinables.set(`topic:${x},${y}`, {
+              id: `topic:${x},${y}`,
+              kind: 'topic',
+              index: 0,
+              stand,
+            });
+          }
           break;
+        }
         case TILE.bookcase: {
           const [dx, dz] = awayFromWall(x, y, W, H, at);
           const depth = furniture.bookcaseClosedWide.size.z;
@@ -369,6 +415,33 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
       for (const texture of textures) texture.dispose();
     },
   };
+}
+
+/** A glass jar of folded paper slips, each a question to ask the room. */
+function topicJar(materials: Material[]): Group {
+  const jar = new Group();
+  const glass = new MeshStandardMaterial({
+    color: 0xdff2f5,
+    transparent: true,
+    opacity: 0.45,
+    roughness: 0.1,
+  });
+  const lid = new MeshStandardMaterial({ color: 0xc8603e, roughness: 0.6 });
+  materials.push(glass, lid);
+  const body = new Mesh(new CylinderGeometry(0.09, 0.09, 0.2, 14), glass);
+  body.position.y = 0.1;
+  const top = new Mesh(new CylinderGeometry(0.095, 0.095, 0.03, 14), lid);
+  top.position.y = 0.215;
+  jar.add(body, top);
+  ['#f7d154', '#e65f4f', '#5cc37c', '#4f7fd8', '#f3f0e8'].forEach((colour, i) => {
+    const slip = new MeshStandardMaterial({ color: colour, roughness: 0.9 });
+    materials.push(slip);
+    const paper = new Mesh(new BoxGeometry(0.06, 0.012, 0.03), slip);
+    paper.position.set(Math.cos(i * 1.3) * 0.04, 0.03 + i * 0.022, Math.sin(i * 1.3) * 0.04);
+    paper.rotation.set(0.3 * i, i, 0.2);
+    jar.add(paper);
+  });
+  return jar;
 }
 
 /** Only the back walls (north and west) are built, so the camera can look into the room. */

@@ -1,4 +1,4 @@
-import type { AreaId } from '@att/shared';
+import { isRoomArea, type AreaId } from '@att/shared';
 import { CanvasTexture, SRGBColorSpace } from 'three';
 
 /** Texture pixels per tile: enough for plank seams and grain to read up close. */
@@ -35,7 +35,7 @@ export function floorTexture(area: AreaId, width: number, depth: number): Canvas
   if (g) {
     const random = seeded(area.length * 7919 + width * 31 + depth);
     if (area === 'hall') stoneTiles(g, width, depth, random);
-    else if (area === 'library') planks(g, width, depth, random, OAK);
+    else if (area === 'library' || isRoomArea(area)) planks(g, width, depth, random, OAK);
     else planks(g, width, depth, random, WALNUT);
   }
   const texture = new CanvasTexture(canvas);

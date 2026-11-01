@@ -8,6 +8,7 @@ export function SeatBar() {
   const sitStep = useGameStore((s) => s.sitStep);
   const activity = useGameStore((s) => s.activity);
   const timer = useGameStore((s) => s.timer);
+  const study = useGameStore((s) => s.study);
   if (!seated || sitStep) return null;
   const ask = useGameStore.getState().setSitStep;
 
@@ -17,7 +18,7 @@ export function SeatBar() {
         {activity ? `${ACTIVITY_ICON[activity]} ${t(`activity.${activity}`)}` : '🪑'}
         <span className="chip-hint">{t('seat.change')}</span>
       </button>
-      {!timer && (
+      {!timer && !study && (
         <button type="button" className="chip" onClick={() => ask('timer')}>
           ⏱ {t('seat.timer')}
         </button>

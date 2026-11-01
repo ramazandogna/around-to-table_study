@@ -1,4 +1,11 @@
-import { AREA_RULES, DM_MAX_CHARS, type DirectMessage, type Friend } from '@att/shared';
+import {
+  AREA_RULES,
+  type DirectMessage,
+  DM_MAX_CHARS,
+  findRoomInvite,
+  type Friend,
+  roomInviteMark,
+} from '@att/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { t } from '../i18n/t';
 import { unreadMessages } from '../net/social';
@@ -166,9 +173,24 @@ function Conversation({ friend }: { friend: Friend }) {
 
 function Bubble({ message, mine }: { message: DirectMessage; mine: boolean }) {
   const time = new Date(message.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // An invite to a private room shows as a button rather than its code.
+  const invite = findRoomInvite(message.text);
   return (
     <li className={`phone-bubble${mine ? ' phone-bubble--mine' : ''}`}>
-      {message.text}
+      {invite ? message.text.replace(roomInviteMark(invite), '').trim() : message.text}
+      {invite && !mine && (
+        <button
+          type="button"
+          className="mini-button phone-join"
+          onClick={() => {
+            const store = useGameStore.getState();
+            store.closePhone();
+            store.openRooms(invite);
+          }}
+        >
+          🔑 {t('room.join')}
+        </button>
+      )}
       <time className="phone-time" dateTime={new Date(message.at).toISOString()}>
         {time}
       </time>

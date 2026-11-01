@@ -58,6 +58,11 @@ function audio(): { ctx: AudioContext; out: GainNode } | null {
   return master ? { ctx: context, out: master } : null;
 }
 
+/** The shared output, for the event music; null while all sound is off. */
+export function audioOut(): { ctx: AudioContext; out: GainNode } | null {
+  return audio();
+}
+
 export function isMuted(): boolean {
   return muted;
 }

@@ -113,8 +113,14 @@ export function buildRenovation(
   const volume = new Mesh(new BoxGeometry(closed.w, 1.7, closed.h), shade);
   volume.position.set(closed.x + closed.w / 2, 0.85, closed.y + closed.h / 2);
   volume.renderOrder = 1;
-  volume.userData.examine = 'renovation';
   root.add(volume);
+  // Only the floor of the closed part can be pointed at: the tall shade reaches
+  // over the open desks beside it on screen, and their chairs must stay easy to tap.
+  const floor = new Mesh(new BoxGeometry(closed.w, 0.06, closed.h), shade);
+  floor.position.set(closed.x + closed.w / 2, FLOOR_Y + 0.03, closed.y + closed.h / 2);
+  floor.visible = false;
+  floor.userData.examine = 'renovation';
+  root.add(floor);
 
   tapeTexture.repeat.set(closed.h * 2, 1);
   add(
@@ -259,7 +265,7 @@ export function buildRenovation(
   sign.position.set(closed.x + 1.2, 2.1, closed.y + closed.h / 2);
   root.add(sign);
 
-  return { materials, pickable: volume, stand: standBy(grid, closed) };
+  return { materials, pickable: floor, stand: standBy(grid, closed) };
 }
 
 /** The walkable tile just outside the tape, closest to its middle. */

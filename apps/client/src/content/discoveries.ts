@@ -225,7 +225,41 @@ export const PAINTINGS: readonly Painting[] = [
     story:
       'Made of pressed flowers and embroidery thread by a grandmother of eight. Every grandchild has a flower of their own in it, somewhere.',
   },
+  // The hall's gallery: people who shaped history, and days the world remembers.
+  {
+    title: 'Mustafa Kemal Atatürk',
+    story:
+      'Founder of the Republic of Türkiye, proclaimed on 29 October 1923, and its first president until his death in 1938. In 1928 he brought in the Latin-based Turkish alphabet and toured the country with a chalkboard, teaching the new letters himself; people called him the Head Teacher.',
+  },
+  {
+    title: 'Napoléon Bonaparte',
+    story:
+      'Emperor of the French from 1804. The Civil Code he brought in that year still shapes the law of many countries. A great reader, he took a travelling library of small books with him on campaign.',
+  },
+  {
+    title: 'Timur',
+    story:
+      'Timur (1336–1405) ruled a vast empire from Samarkand and filled the city with scholars, poets and builders. His tomb there, the Gur-e Amir, still stands under its ribbed blue dome. A larger variant of chess is named after him.',
+  },
+  {
+    title: '17 August 1999',
+    story:
+      'At 3:02 in the morning a magnitude 7.6 earthquake struck near İzmit, and more than 17,000 people lost their lives. Strangers dug through the rubble side by side for days, and rescue teams came from many countries, Greece among the first. The lamps are theirs.',
+  },
+  {
+    title: '1 September 1923',
+    story:
+      'Just before noon a magnitude 7.9 earthquake struck the Kantō plain, and fires swept through Tokyo and Yokohama; more than 100,000 people died. Both cities were rebuilt, and Japan keeps 1 September as Disaster Prevention Day.',
+  },
+  {
+    title: 'Pompeii, AD 79',
+    story:
+      'When Vesuvius erupted in AD 79, ash buried the town of Pompeii. Dug out again from the 18th century on, it shows Roman life stopped in an instant: loaves still in a bakery oven, and notes scratched on the walls.',
+  },
 ];
+
+/** The gallery in the hall, as indexes into PAINTINGS. */
+export const HALL_GALLERY = [8, 9, 10, 11, 12, 13] as const;
 
 /** What the renovation hides, found by peering past the tape. */
 export const RENOVATION_NOTES: readonly string[] = [

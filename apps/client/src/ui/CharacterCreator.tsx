@@ -3,6 +3,9 @@ import {
   normalizeName,
   OUTFIT_PARTS,
   PALETTES,
+  PET_ACCESSORIES,
+  PET_COLORS,
+  PET_SEXES,
   PETS,
   PETS_AVAILABLE,
   randomAppearance,
@@ -51,12 +54,33 @@ function withColour(look: Appearance, part: OutfitPart, index: number | undefine
   return index === undefined ? rest : { ...rest, [part]: index };
 }
 
+/** A look with a pet, or without one (and then without its colour and things to wear). */
 function withPet(look: Appearance, pet: PetKind | null): Appearance {
-  const next = { ...look };
-  if (pet) next.pet = pet;
-  else delete next.pet;
-  return next;
+  const { pet: _pet, petSex, petColor, petAccessory, ...rest } = look;
+  void _pet;
+  return pet ? { ...rest, pet, petSex, petColor, petAccessory } : rest;
 }
+
+/** One pet field set, or put back to nothing. */
+function withPetField<K extends 'petSex' | 'petColor' | 'petAccessory'>(
+  look: Appearance,
+  key: K,
+  value: Appearance[K] | undefined,
+): Appearance {
+  const rest = Object.fromEntries(
+    Object.entries(look).filter(([field]) => field !== key),
+  ) as Appearance;
+  return value === undefined ? rest : { ...rest, [key]: value };
+}
+
+const ACCESSORY_ICON = {
+  collar: '⭕',
+  bell: '🔔',
+  bow: '🎀',
+  scarf: '🧣',
+  hat: '🥳',
+  glasses: '👓',
+} as const;
 
 export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose?: () => void }) {
   const [look, setLook] = useState<Appearance>(
@@ -255,6 +279,75 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                     })}
                   </div>
                 </div>
+                {look.pet && (
+                  <>
+                    <div className="option-row">
+                      <span className="option-label">{t('look.part.petSex')}</span>
+                      <div
+                        className="body-choice"
+                        role="radiogroup"
+                        aria-label={t('look.part.petSex')}
+                      >
+                        {PET_SEXES.map((sex) => (
+                          <button
+                            key={sex}
+                            type="button"
+                            role="radio"
+                            className="tag"
+                            aria-checked={look.petSex === sex}
+                            aria-pressed={look.petSex === sex}
+                            onClick={() =>
+                              setLook(
+                                withPetField(look, 'petSex', look.petSex === sex ? undefined : sex),
+                              )
+                            }
+                          >
+                            {t(`pet.sex.${sex}`)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <Swatches
+                      label={t('look.part.petColor')}
+                      colors={PET_COLORS}
+                      value={look.petColor}
+                      original={t('look.original')}
+                      onChange={(index) => setLook(withPetField(look, 'petColor', index))}
+                    />
+                    <div className="option-row option-row--top">
+                      <span className="option-label">{t('look.part.petAccessory')}</span>
+                      <div
+                        className="tags"
+                        role="radiogroup"
+                        aria-label={t('look.part.petAccessory')}
+                      >
+                        <button
+                          type="button"
+                          role="radio"
+                          className="tag"
+                          aria-checked={!look.petAccessory}
+                          aria-pressed={!look.petAccessory}
+                          onClick={() => setLook(withPetField(look, 'petAccessory', undefined))}
+                        >
+                          {t('pet.none')}
+                        </button>
+                        {PET_ACCESSORIES.map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            role="radio"
+                            className="tag"
+                            aria-checked={look.petAccessory === item}
+                            aria-pressed={look.petAccessory === item}
+                            onClick={() => setLook(withPetField(look, 'petAccessory', item))}
+                          >
+                            {ACCESSORY_ICON[item]} {t(`pet.gear.${item}`)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="option-row">
                   <span className="option-label">{t('look.part.steps')}</span>
                   <div className="body-choice" role="radiogroup" aria-label={t('look.part.steps')}>

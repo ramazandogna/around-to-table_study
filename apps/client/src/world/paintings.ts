@@ -9,10 +9,23 @@ import {
   SRGBColorSpace,
   type Object3D,
 } from 'three';
-import { PAINTINGS } from '../content/discoveries';
+import { HALL_GALLERY } from '../content/discoveries';
 
-/** Where paintings hang: on the north wall (x along it) or the west wall (z along it), and how high. */
-type Spot = { wall: 'north' | 'west'; at: number; height: number; width: number };
+/**
+ * Where paintings hang: on the north wall (x along it) or the west wall (z
+ * along it), and how high. A spot may name its painting; otherwise the room
+ * takes the next one from its place in the list.
+ */
+type Spot = {
+  wall: 'north' | 'west';
+  at: number;
+  height: number;
+  width: number;
+  painting?: number;
+};
+
+/** Portraits hang upright; everything else is landscape. */
+const PORTRAITS: ReadonlySet<number> = new Set([HALL_GALLERY[0], HALL_GALLERY[1], HALL_GALLERY[2]]);
 
 const SPOTS: Record<AreaId, readonly Spot[]> = {
   // Above the wall shelves and along the quiet west wall.
@@ -23,20 +36,37 @@ const SPOTS: Record<AreaId, readonly Spot[]> = {
     { wall: 'west', at: 6.5, height: 1.45, width: 0.8 },
     { wall: 'west', at: 9.2, height: 1.5, width: 0.6 },
   ],
+  // A small gallery between the doors: three portraits, and three days the world remembers.
   hall: [
-    { wall: 'north', at: 3.5, height: 1.5, width: 0.9 },
-    { wall: 'north', at: 14.2, height: 1.5, width: 0.7 },
-    { wall: 'west', at: 2.5, height: 1.5, width: 0.8 },
+    { wall: 'north', at: 2.6, height: 1.5, width: 0.62, painting: HALL_GALLERY[0] },
+    { wall: 'north', at: 4.6, height: 1.5, width: 0.62, painting: HALL_GALLERY[1] },
+    { wall: 'north', at: 12.4, height: 1.5, width: 0.62, painting: HALL_GALLERY[2] },
+    { wall: 'north', at: 14.6, height: 1.45, width: 0.85, painting: HALL_GALLERY[5] },
+    { wall: 'west', at: 2.6, height: 1.45, width: 0.9, painting: HALL_GALLERY[3] },
+    { wall: 'west', at: 7.6, height: 1.45, width: 0.9, painting: HALL_GALLERY[4] },
   ],
   smoking: [
     { wall: 'north', at: 5.5, height: 1.5, width: 0.8 },
     { wall: 'north', at: 11, height: 1.55, width: 0.6 },
     { wall: 'west', at: 6.5, height: 1.5, width: 0.7 },
   ],
+  room3: [{ wall: 'west', at: 3.5, height: 1.5, width: 0.7, painting: 6 }],
+  room5: [{ wall: 'west', at: 3.5, height: 1.5, width: 0.7, painting: 6 }],
+  room9: [
+    { wall: 'west', at: 3.5, height: 1.5, width: 0.7, painting: 6 },
+    { wall: 'north', at: 3, height: 1.5, width: 0.6, painting: 7 },
+  ],
 };
 
 /** Each room starts at its own place in the list, so no painting hangs twice. */
-const FIRST: Record<AreaId, number> = { library: 0, hall: 5, smoking: 2 };
+const FIRST: Record<AreaId, number> = {
+  library: 0,
+  hall: 5,
+  smoking: 5,
+  room3: 6,
+  room5: 6,
+  room9: 6,
+};
 
 export type HungPainting = {
   /** Index into PAINTINGS. */
@@ -56,8 +86,8 @@ export function hangPaintings(
   const materials = [frame, gilt];
   const paintings: HungPainting[] = [];
   SPOTS[area].forEach((spot, i) => {
-    const painting = (FIRST[area] + i) % PAINTINGS.length;
-    const ratio = 0.75;
+    const painting = spot.painting ?? (FIRST[area] + i) % HALL_GALLERY[0];
+    const ratio = PORTRAITS.has(painting) ? 1.3 : 0.75;
     const w = spot.width;
     const h = w * ratio;
     const group = new Group();
@@ -87,11 +117,11 @@ export function hangPaintings(
 const W = 160;
 const H = 120;
 
-/** A small canvas painting that matches its story. */
+/** A small canvas painting that matches its story; portraits are upright. */
 function paint(index: number): CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = PORTRAITS.has(index) ? H : W;
+  canvas.height = PORTRAITS.has(index) ? W : H;
   const g = canvas.getContext('2d');
   if (g) (ART[index] ?? abstractBlue)(g);
   const texture = new CanvasTexture(canvas);
@@ -311,6 +341,204 @@ function garden(g: CanvasRenderingContext2D): void {
   });
 }
 
+/* ---------- The hall's gallery. Portraits are 120 x 160, drawn as dignified silhouettes. ---------- */
+
+const PW = H;
+const PH = W;
+
+/** A painted bust: dark background with a soft light, shoulders in a coat, an oval face. */
+function bust(
+  g: CanvasRenderingContext2D,
+  background: [string, string],
+  coat: string,
+  skin = '#d9a07a',
+) {
+  const light = g.createRadialGradient(PW / 2, PH * 0.38, 10, PW / 2, PH * 0.45, PH * 0.7);
+  light.addColorStop(0, background[0]);
+  light.addColorStop(1, background[1]);
+  g.fillStyle = light;
+  g.fillRect(0, 0, PW, PH);
+  fill(g, coat, () => {
+    g.moveTo(8, PH);
+    g.quadraticCurveTo(14, PH * 0.66, PW / 2, PH * 0.62);
+    g.quadraticCurveTo(PW - 14, PH * 0.66, PW - 8, PH);
+  });
+  fill(g, skin, () => g.rect(PW / 2 - 9, PH * 0.5, 18, 22));
+  fill(g, skin, () => g.ellipse(PW / 2, PH * 0.42, 22, 28, 0, 0, Math.PI * 2));
+  // A soft shadow on one side of the face, as in an oil portrait.
+  fill(g, 'rgba(60, 30, 20, 0.22)', () =>
+    g.ellipse(PW / 2 + 9, PH * 0.44, 12, 26, 0, 0, Math.PI * 2),
+  );
+}
+
+/** In a dark suit and white collar, with the kalpak fur hat of the 1920s. */
+function ataturk(g: CanvasRenderingContext2D): void {
+  bust(g, ['#8a8f99', '#2a2d33'], '#1f2226', '#e2b896');
+  fill(g, '#f3f1ea', () => {
+    g.moveTo(PW / 2 - 14, PH * 0.62);
+    g.lineTo(PW / 2, PH * 0.75);
+    g.lineTo(PW / 2 + 14, PH * 0.62);
+  });
+  fill(g, '#3a3f46', () => {
+    g.moveTo(PW / 2 - 3, PH * 0.64);
+    g.lineTo(PW / 2 + 3, PH * 0.64);
+    g.lineTo(PW / 2, PH * 0.82);
+  });
+  // The kalpak: a tall, slightly tapered fur hat.
+  fill(g, '#2b2622', () => {
+    g.moveTo(PW / 2 - 24, PH * 0.33);
+    g.lineTo(PW / 2 - 20, PH * 0.12);
+    g.quadraticCurveTo(PW / 2, PH * 0.08, PW / 2 + 20, PH * 0.12);
+    g.lineTo(PW / 2 + 24, PH * 0.33);
+  });
+  g.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  for (let y = PH * 0.14; y < PH * 0.32; y += 4) {
+    g.beginPath();
+    g.moveTo(PW / 2 - 20, y);
+    g.lineTo(PW / 2 + 20, y);
+    g.stroke();
+  }
+  fill(g, '#5a4a3c', () => {
+    g.rect(PW / 2 - 18, PH * 0.36, 12, 3);
+    g.rect(PW / 2 + 6, PH * 0.36, 12, 3);
+  });
+}
+
+/** In the blue coat with gold epaulettes, under the famous bicorne worn sideways. */
+function napoleon(g: CanvasRenderingContext2D): void {
+  bust(g, ['#9c7a52', '#3b2a1c'], '#24325e');
+  fill(g, '#f3efe3', () => g.rect(PW / 2 - 12, PH * 0.6, 24, 16));
+  for (const side of [-1, 1]) {
+    fill(g, '#d8b04c', () => g.ellipse(PW / 2 + side * 38, PH * 0.7, 14, 6, 0, 0, Math.PI * 2));
+  }
+  fill(g, '#c8a04a', () => {
+    g.rect(PW / 2 - 2, PH * 0.78, 4, 4);
+    g.rect(PW / 2 - 2, PH * 0.86, 4, 4);
+  });
+  // The bicorne, worn side-on.
+  fill(g, '#16161a', () => {
+    g.moveTo(PW / 2 - 40, PH * 0.29);
+    g.quadraticCurveTo(PW / 2, PH * 0.02, PW / 2 + 40, PH * 0.29);
+    g.quadraticCurveTo(PW / 2, PH * 0.22, PW / 2 - 40, PH * 0.29);
+  });
+  fill(g, '#c0392b', () => g.arc(PW / 2 + 22, PH * 0.2, 4, 0, Math.PI * 2));
+}
+
+/** In a green and gold robe and a pointed helmet, before the blue domes of Samarkand. */
+function timur(g: CanvasRenderingContext2D): void {
+  bust(g, ['#e8c98f', '#7a5a34'], '#2f6b4a', '#c99070');
+  // A dome and a minaret far behind.
+  fill(g, '#2f7fc1', () => g.ellipse(22, PH * 0.42, 16, 20, 0, Math.PI, 0));
+  fill(g, '#d9c08a', () => g.rect(6, PH * 0.42, 32, 30));
+  fill(g, '#d9c08a', () => g.rect(PW - 20, PH * 0.2, 8, 60));
+  // The robe's gold edge.
+  g.strokeStyle = '#d8b04c';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(PW / 2 - 8, PH * 0.63);
+  g.lineTo(PW / 2 + 6, PH);
+  g.stroke();
+  // Beard and helmet.
+  fill(g, '#3a2a20', () => g.ellipse(PW / 2, PH * 0.53, 15, 12, 0, 0, Math.PI));
+  fill(g, '#9aa1a8', () => {
+    g.moveTo(PW / 2 - 24, PH * 0.33);
+    g.quadraticCurveTo(PW / 2 - 22, PH * 0.16, PW / 2, PH * 0.06);
+    g.quadraticCurveTo(PW / 2 + 22, PH * 0.16, PW / 2 + 24, PH * 0.33);
+  });
+  fill(g, '#d8b04c', () => g.rect(PW / 2 - 24, PH * 0.31, 48, 4));
+}
+
+/** Night after the earthquake: rubble, and the lamps of the people digging. */
+function marmara(g: CanvasRenderingContext2D): void {
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#0f1424');
+  sky.addColorStop(1, '#2a2a3a');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, W, H);
+  // Broken buildings against the sky.
+  g.fillStyle = '#1b1d26';
+  for (const [x, w, h, tilt] of [
+    [10, 26, 50, -0.12],
+    [44, 30, 38, 0.18],
+    [86, 24, 56, 0],
+    [118, 34, 30, -0.2],
+  ] as const) {
+    g.save();
+    g.translate(x + w / 2, H - 40);
+    g.rotate(tilt);
+    g.fillRect(-w / 2, -h, w, h);
+    g.restore();
+  }
+  fill(g, '#3a3530', () => {
+    g.moveTo(0, H);
+    g.lineTo(0, H - 34);
+    for (let x = 0; x <= W; x += 16) g.lineTo(x, H - 30 - ((x * 7) % 13));
+    g.lineTo(W, H);
+  });
+  // Warm lamps: the volunteers, many of them.
+  for (let i = 0; i < 26; i++) {
+    const x = (i * 37) % W;
+    const y = H - 18 - ((i * 13) % 20);
+    const glow = g.createRadialGradient(x, y, 0, x, y, 10);
+    glow.addColorStop(0, 'rgba(255, 214, 140, 0.9)');
+    glow.addColorStop(1, 'rgba(255, 214, 140, 0)');
+    g.fillStyle = glow;
+    g.fillRect(x - 10, y - 10, 20, 20);
+  }
+}
+
+/** Tokyo rising again after the 1923 earthquake: a calm dawn over the rebuilt city. */
+function kanto(g: CanvasRenderingContext2D): void {
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#f2b880');
+  sky.addColorStop(1, '#f6e2c6');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, W, H);
+  fill(g, '#e8604c', () => g.arc(112, 40, 16, 0, Math.PI * 2));
+  // Rooftops, some new and some still in scaffolding.
+  g.fillStyle = '#4a3a34';
+  for (let x = 0; x < W; x += 20) {
+    const h = 24 + ((x * 3) % 22);
+    g.fillRect(x, H - h, 18, h);
+    fill(g, '#5a4a42', () => {
+      g.moveTo(x - 3, H - h);
+      g.lineTo(x + 9, H - h - 8);
+      g.lineTo(x + 21, H - h);
+    });
+    g.fillStyle = '#4a3a34';
+  }
+  g.strokeStyle = '#8a6a4a';
+  g.lineWidth = 1;
+  for (let y = H - 60; y < H - 30; y += 6) {
+    g.beginPath();
+    g.moveTo(60, y);
+    g.lineTo(78, y);
+    g.stroke();
+  }
+}
+
+/** Vesuvius smoking over the columns of Pompeii. */
+function pompeii(g: CanvasRenderingContext2D): void {
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#6b5a6e');
+  sky.addColorStop(1, '#e0a77a');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, W, H);
+  fill(g, '#5a4636', () => {
+    g.moveTo(30, H - 30);
+    g.lineTo(80, 36);
+    g.lineTo(96, 36);
+    g.lineTo(150, H - 30);
+  });
+  // The plume, rising like a pine tree as Pliny described it.
+  fill(g, 'rgba(70, 60, 60, 0.85)', () => g.rect(84, 6, 8, 32));
+  fill(g, 'rgba(80, 70, 70, 0.85)', () => g.ellipse(88, 10, 40, 12, 0, 0, Math.PI * 2));
+  fill(g, '#d9c8a8', () => g.rect(0, H - 32, W, 32));
+  g.fillStyle = '#efe4cc';
+  for (let x = 12; x < W; x += 22) g.fillRect(x, H - 58, 6, 30);
+  g.fillRect(6, H - 62, W - 12, 5);
+}
+
 /** In the order of PAINTINGS. */
 const ART: readonly ((g: CanvasRenderingContext2D) => void)[] = [
   kiteDay,
@@ -321,4 +549,10 @@ const ART: readonly ((g: CanvasRenderingContext2D) => void)[] = [
   firstSnow,
   longTable,
   garden,
+  ataturk,
+  napoleon,
+  timur,
+  marmara,
+  kanto,
+  pompeii,
 ];

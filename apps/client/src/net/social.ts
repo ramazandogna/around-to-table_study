@@ -13,7 +13,8 @@ export function startSocial(session: GuestSession): () => void {
     token: session.token,
     area: () => useGameStore.getState().area,
     studying: () => useGameStore.getState().seated,
-    pet: () => useGameStore.getState().look?.pet ?? null,
+    look: () => useGameStore.getState().look,
+    room: () => useGameStore.getState().room?.room.code ?? null,
     onMessage: (message) => {
       const store = useGameStore.getState();
       switch (message.t) {
@@ -72,13 +73,16 @@ export function startSocial(session: GuestSession): () => void {
   });
   useGameStore.getState().setSocial(connection);
   const unsubscribe = useGameStore.subscribe((state, before) => {
-    const pet = state.look?.pet ?? null;
-    const petChanged = pet !== (before.look?.pet ?? null);
-    if ((state.seated !== before.seated || petChanged) && state.area === before.area) {
-      connection.where(state.area, state.seated, pet);
+    const petChanged = state.look !== before.look;
+    const roomChanged = state.room?.room.code !== before.room?.room.code;
+    if (
+      (state.seated !== before.seated || petChanged || roomChanged) &&
+      state.area === before.area
+    ) {
+      connection.where(state.area, state.seated, state.look, state.room?.room.code ?? null);
     }
     if (state.area === before.area) return;
-    connection.where(state.area, state.seated, pet);
+    connection.where(state.area, state.seated, state.look, state.room?.room.code ?? null);
     if (!AREA_RULES[state.area].dmAllowed) {
       state.closePhone();
     } else if (!AREA_RULES[before.area].dmAllowed) {

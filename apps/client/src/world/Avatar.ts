@@ -412,6 +412,11 @@ export class Avatar {
     this.updateLinesFold();
   }
 
+  /** The focus block this person is in, on this device's clock; null when none. */
+  get runningTimer(): { endsAt: number; totalMs: number } | null {
+    return this.status.timer;
+  }
+
   get statusLines(): StatusLines {
     return this.lines;
   }

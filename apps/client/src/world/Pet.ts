@@ -1,9 +1,17 @@
 import type { Emote, PetKind, Point } from '@att/shared';
-import { AnimationMixer, Group, LoopOnce, MathUtils, type AnimationAction } from 'three';
+import {
+  AnimationMixer,
+  Group,
+  LoopOnce,
+  MathUtils,
+  type AnimationAction,
+  type Material,
+  type Mesh,
+} from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { FLOOR_Y } from './buildArea';
 import { showEmote } from './emotes';
-import type { PetClips, PetKit } from './pets';
+import type { PetClips, PetDress, PetKit } from './pets';
 
 /**
  * A pet that walks along with its person. Every kind shares this behaviour;
@@ -101,9 +109,11 @@ export class Pet {
     start: FloorXZ,
     seed: string,
     private readonly context: PetContext,
+    /** Colour and accessory; a key of them tells when the pet must be made again. */
+    readonly dress: PetDress = {},
   ) {
     this.random = seeded(seed);
-    const { model, clips } = kit.create(kind);
+    const { model, clips } = kit.create(kind, dress);
     this.clips = clips;
     this.tilt.add(model);
     this.root.add(this.tilt);
@@ -424,7 +434,14 @@ export class Pet {
     this.stopEmote?.();
     this.mixer.stopAllAction();
     this.label.element.remove();
-    // The geometry and materials belong to the kit and are shared by every pet.
+    // Each pet has its own geometry (for its colour); materials are the kit's,
+    // except those of what it wears.
+    this.tilt.traverse((child) => {
+      const mesh = child as Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry.dispose();
+      if (mesh.userData.ownGear) (mesh.material as Material).dispose();
+    });
     this.root.removeFromParent();
   }
 }

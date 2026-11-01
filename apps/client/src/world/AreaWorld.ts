@@ -1,6 +1,10 @@
 import {
   AREA_RULES,
+  EVENT_THEMES,
+  isRoomArea,
+  roomArea,
   TILE,
+  eventNow,
   createAreaGrid,
   findPath,
   resolveWalkTarget,
@@ -9,24 +13,28 @@ import {
   type AreaId,
   type BlockReason,
   type PlayerSnapshot,
-  type PetKind,
+  type Appearance,
   type Point,
   type ServerMessage,
   type WaitingPet,
 } from '@att/shared';
+import { playMusic, stopMusic } from '../audio/music';
 import { play, unlockAudio } from '../audio/sound';
 import { RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
+import { TOPICS } from '../content/topics';
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
 import { mayRing } from '../net/social';
-import { studyStatus, useGameStore, type ConfirmChoice } from '../state/store';
+import { studyStatus, useGameStore, type ConfirmChoice, type RunningBlock } from '../state/store';
 import { Avatar, type AvatarContext, type FloorPoint } from './Avatar';
-import { buildArea, FLOOR_Y, type BuiltArea, type Examinable } from './buildArea';
+import { buildArea, CHAIR_INSET, FLOOR_Y, type BuiltArea, type Examinable } from './buildArea';
 import type { CharacterKit } from './characters';
+import { MACHINES, type ArcadeKit } from './arcade';
 import { cursorFor, type CursorKind } from './cursors';
+import { buildEventDecor, type EventDecor } from './eventDecor';
 import { Librarian } from './Librarian';
 import { Pet, type PetContext } from './Pet';
-import type { PetKit } from './pets';
+import type { PetDress, PetKit } from './pets';
 import type { IsoView } from './IsoView';
 import { minimap, type MapPerson } from './minimap';
 import type { Furniture } from './models';
@@ -84,11 +92,17 @@ function screenToFloor(right: number, down: number): FloorPoint | null {
 }
 
 const sameTile = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
+/** Whether two pets would look the same: same fur colour and the same thing worn. */
+const sameDress = (a: PetDress, b: PetDress) =>
+  a.petColor === b.petColor && a.petAccessory === b.petAccessory;
 /** Tiles apart, counting diagonal steps as one. */
 const reach = (a: Point, b: Point) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
-type Assets = { furniture: Furniture; characters: CharacterKit; pets: PetKit };
+type Assets = { furniture: Furniture; characters: CharacterKit; pets: PetKit; arcade: ArcadeKit };
 
+/** A chair's back reaches about this high, and it is about this wide, for tapping it. */
+const SEAT_PICK_HEIGHT = 0.82;
+const SEAT_PICK_RADIUS = 0.3;
 /** Pets sit this far apart beside the library door. */
 const PET_SPACING = 0.42;
 
@@ -96,7 +110,9 @@ const PET_SPACING = 0.42;
 type Pending =
   | { kind: 'person'; id: string }
   | { kind: 'examine'; examinable: Examinable }
-  | { kind: 'desk'; tile: Point };
+  | { kind: 'desk'; tile: Point }
+  /** The elevator up to the private rooms. */
+  | { kind: 'elevator' };
 
 /** What the mouse is over: a person, something to look at, or a tile. */
 type Target =
@@ -143,6 +159,12 @@ export class AreaWorld {
   /** In the hall: pets sitting at the library door while their people study, by person. */
   private readonly waiting = new Map<string, Pet>();
   private librarian: Librarian | null = null;
+  /** The room dressed up while an event is on, and which event that is. */
+  private decor: EventDecor | null = null;
+  private eventId: string | null = null;
+  private eventTimer = 0;
+  /** Every chair and sofa that is open, for tapping them by any part. */
+  private seatTiles: Point[] = [];
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -162,9 +184,17 @@ export class AreaWorld {
       if (state.look && state.look !== before.look) {
         this.player?.setLook(state.look);
         this.connection?.changeLook(state.look);
-        if (state.look.pet !== before.look?.pet) this.walkPet('self', this.player, state.look.pet);
+        this.walkPet('self', this.player, state.look);
       }
       if (state.waitingPets !== before.waitingPets) this.seatWaitingPets(state.waitingPets);
+      // A ticket to a private room: take the elevator up.
+      if (
+        state.room &&
+        state.room !== before.room &&
+        this.areaId !== roomArea(state.room.room.size)
+      ) {
+        this.goThrough(roomArea(state.room.room.size));
+      }
       if (state.friends !== before.friends) this.markFriends();
       if (state.dancing !== before.dancing) this.dance(state.dancing);
       if (state.lines !== before.lines) {
@@ -199,6 +229,9 @@ export class AreaWorld {
     const session = useGameStore.getState().session;
     if (!session) throw new Error('AreaWorld needs a guest session');
 
+    // A private room needs its ticket to come in; it is kept on the way out, to go back or invite.
+    const ticket = isRoomArea(area) ? useGameStore.getState().room : null;
+    if (isRoomArea(area) && !ticket) area = 'hall';
     this.areaId = area;
     this.buildRoom(useGameStore.getState().opened[area] ?? 0);
     this.view.setBounds(this.grid.width, this.grid.height);
@@ -222,7 +255,7 @@ export class AreaWorld {
     // Pets wait outside the library; coming back out, yours is right there at the door.
     const pet = look.pet;
     if (pet && AREA_RULES[area].pets) {
-      const own = this.walkPet('self', this.player, pet);
+      const own = this.walkPet('self', this.player, look);
       const door = from === 'library' ? this.doorSpots()[0] : undefined;
       if (own && door) own.wait(door.spot, door.facing);
       own?.follow();
@@ -241,6 +274,7 @@ export class AreaWorld {
       area,
       from,
       token: session.token,
+      room: ticket ? { code: ticket.room.code, pass: ticket.pass } : undefined,
       look: () => useGameStore.getState().look ?? look,
       status: () => studyStatus(),
       lines: () => useGameStore.getState().lines,
@@ -272,9 +306,16 @@ export class AreaWorld {
   private buildRoom(opened: number): void {
     this.removeRoom();
     this.grid = createAreaGrid(this.areaId, opened);
-    this.built = buildArea(this.grid, this.assets.furniture);
+    this.built = buildArea(this.grid, this.assets.furniture, this.assets.arcade);
     this.view.add(this.built.root);
     this.seatMarkers = createSeatMarkers(this.grid.openChairs(), FLOOR_Y);
+    this.seatTiles = [];
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((_, x) => {
+        const tile = { x, y };
+        if (this.grid.isSeat(tile) && this.grid.isWalkable(tile)) this.seatTiles.push(tile);
+      }),
+    );
     this.view.add(this.seatMarkers.root);
     minimap.setGrid(this.grid);
   }
@@ -313,6 +354,11 @@ export class AreaWorld {
     this.waiting.clear();
     this.librarian?.dispose();
     this.librarian = null;
+    this.decor?.dispose();
+    this.decor = null;
+    this.eventId = null;
+    this.eventTimer = 0;
+    stopMusic();
     this.player?.dispose();
     this.player = null;
     this.highlighted = null;
@@ -351,6 +397,7 @@ export class AreaWorld {
     for (const other of this.others.values()) other.update(delta);
     this.librarian?.update(delta);
     this.updatePets(delta);
+    this.updateEvent(delta);
     this.arrangeCrowd(delta);
     this.mapTimer -= delta;
     if (this.mapTimer <= 0) {
@@ -371,7 +418,7 @@ export class AreaWorld {
     const nameOf = (id: string) => (id === selfId ? self?.name : this.others.get(id)?.name) ?? '?';
     switch (message.t) {
       case 'welcome':
-        for (const id of this.others.keys()) this.walkPet(id, null, undefined);
+        for (const id of this.others.keys()) this.walkPet(id, null, null);
         for (const other of this.others.values()) other.dispose();
         this.others.clear();
         this.regrow(message.opened, false);
@@ -392,7 +439,7 @@ export class AreaWorld {
         const other = this.others.get(message.id);
         if (!other) break;
         store.addChatLine({ kind: 'left', name: other.name, self: false });
-        this.walkPet(message.id, null, undefined);
+        this.walkPet(message.id, null, null);
         other.dispose();
         this.others.delete(message.id);
         if (store.selected?.id === message.id) store.setSelected(null);
@@ -432,7 +479,7 @@ export class AreaWorld {
       case 'looked': {
         const other = this.others.get(message.id);
         other?.setLook(message.look);
-        if (other) this.walkPet(message.id, other, message.look.pet);
+        if (other) this.walkPet(message.id, other, message.look);
         break;
       }
       case 'finished':
@@ -469,6 +516,12 @@ export class AreaWorld {
         });
         if (message.from !== selfId) store.setChatOpen(true);
         break;
+      case 'invited': {
+        if (store.dnd) break;
+        store.setInvite({ from: nameOf(message.from), code: message.code, name: message.name });
+        if (mayRing()) play('clink');
+        break;
+      }
       case 'poked': {
         // Only the two of them see it: the poker reaches out, the poked one jumps.
         const poker = message.from === selfId ? this.player : this.others.get(message.from);
@@ -516,7 +569,32 @@ export class AreaWorld {
     avatar.onTap = () => this.approach(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
-    this.walkPet(player.id, avatar, player.look.pet);
+    this.walkPet(player.id, avatar, player.look);
+  }
+
+  /**
+   * Checks the clock once a second: when an event starts in this room it
+   * dresses up and its music plays; when it ends, both go away again.
+   */
+  private updateEvent(delta: number): void {
+    this.decor?.update(delta);
+    this.eventTimer -= delta;
+    if (this.eventTimer > 0) return;
+    this.eventTimer = 1;
+    const live = eventNow(this.areaId, Date.now());
+    const id = live?.event.id ?? null;
+    if (id !== this.eventId) {
+      this.eventId = id;
+      this.decor?.dispose();
+      this.decor = null;
+      if (live) {
+        const title = t(`event.${live.event.id}.title` as MessageKey);
+        this.decor = buildEventDecor(this.grid, EVENT_THEMES[live.event.theme], title);
+        this.view.add(this.decor.root);
+      }
+    }
+    if (live && useGameStore.getState().musicOn) playMusic(EVENT_THEMES[live.event.theme].music);
+    else stopMusic();
   }
 
   /**
@@ -524,14 +602,20 @@ export class AreaWorld {
    * away (no pet, or no owner). Rooms that keep pets out (the library) get
    * none. Returns the pet walking with them, if any.
    */
-  private walkPet(id: string, owner: Avatar | null, kind: PetKind | undefined): Pet | null {
+  private walkPet(id: string, owner: Avatar | null, look: Appearance | null): Pet | null {
+    const kind = look?.pet;
+    const dress: PetDress = {
+      ...(look?.petColor !== undefined ? { petColor: look.petColor } : {}),
+      ...(look?.petAccessory ? { petAccessory: look.petAccessory } : {}),
+    };
     const current = this.pets.get(id);
-    if (current && owner && current.kind === kind) return current;
+    if (current && owner && current.kind === kind && sameDress(current.dress, dress))
+      return current;
     current?.dispose();
     this.pets.delete(id);
     if (!owner || !kind || !AREA_RULES[this.areaId].pets) return null;
     const { x, z } = owner.position;
-    const pet = new Pet(this.assets.pets, kind, { x, z }, `${id}:${kind}`, this.petContext);
+    const pet = new Pet(this.assets.pets, kind, { x, z }, `${id}:${kind}`, this.petContext, dress);
     pet.placeBy({ x, z });
     this.pets.set(id, pet);
     this.view.add(pet.root);
@@ -556,7 +640,7 @@ export class AreaWorld {
     const selfId = useGameStore.getState().session?.id;
     const here = this.areaId === 'hall' ? waiting.filter((w) => w.id !== selfId) : [];
     for (const [id, pet] of this.waiting) {
-      if (here.some((w) => w.id === id && w.pet === pet.kind)) continue;
+      if (here.some((w) => w.id === id && w.pet === pet.kind && sameDress(pet.dress, w))) continue;
       pet.dispose();
       this.waiting.delete(id);
     }
@@ -566,8 +650,20 @@ export class AreaWorld {
       if (!spot) return;
       let pet = this.waiting.get(w.id);
       if (!pet) {
-        pet = new Pet(this.assets.pets, w.pet, spot.spot, `${w.id}:${w.pet}`, this.petContext);
-        pet.setTag(t('pet.waiting', { name: w.name, pet: t(`pet.kind.${w.pet}`) }));
+        const dress: PetDress = {
+          ...(w.petColor !== undefined ? { petColor: w.petColor } : {}),
+          ...(w.petAccessory ? { petAccessory: w.petAccessory } : {}),
+        };
+        pet = new Pet(
+          this.assets.pets,
+          w.pet,
+          spot.spot,
+          `${w.id}:${w.pet}`,
+          this.petContext,
+          dress,
+        );
+        const sex = w.petSex === 'female' ? ' ♀' : w.petSex === 'male' ? ' ♂' : '';
+        pet.setTag(`${t('pet.waiting', { name: w.name, pet: t(`pet.kind.${w.pet}`) })}${sex}`);
         this.waiting.set(w.id, pet);
         this.view.add(pet.root);
       }
@@ -646,6 +742,12 @@ export class AreaWorld {
           this.goTo(tile, { kind: 'desk', tile });
           return;
         }
+        // The elevator goes up to the private rooms.
+        if (this.grid.tileAt(tile) === TILE.elevator) {
+          const front = this.grid.arrivalPoint('room3');
+          this.goTo(front, { kind: 'elevator' });
+          return;
+        }
         this.walkTo(tile);
       }
     }
@@ -664,9 +766,11 @@ export class AreaWorld {
     const person = this.avatarAt(clientX, clientY);
     if (person === 'self') return { kind: 'self' };
     if (person) return { kind: 'person', id: person };
-    const examinable = this.examinableAt(clientX, clientY);
+    // A chair or sofa anywhere on it, back and seat alike, before what stands behind it.
+    const seat = this.seatOnScreen(clientX, clientY);
+    const examinable = seat ? null : this.examinableAt(clientX, clientY);
     if (examinable) return { kind: 'examine', examinable };
-    const tile = this.pickTile(clientX, clientY);
+    const tile = seat ?? this.pickTile(clientX, clientY);
     if (!tile) return null;
     // A tap on the floor under someone still means them.
     const someone = this.personAt(tile);
@@ -681,27 +785,59 @@ export class AreaWorld {
     let best: { id: string | 'self'; depth: number } | null = null;
     const check = (id: string | 'self', avatar: Avatar) => {
       const box = avatar.bodyBox;
-      const foot = this.view.project(box.x, box.bottom, box.z);
-      const head = this.view.project(box.x, box.top, box.z);
-      const side = this.view.project(
-        box.x + box.radius * 0.7,
-        box.bottom,
-        box.z - box.radius * 0.7,
-      );
-      const half = Math.abs(side.x - foot.x);
-      const inside =
-        clientX >= foot.x - half &&
-        clientX <= foot.x + half &&
-        clientY >= head.y - half * 0.3 &&
-        clientY <= foot.y + half * 0.4;
       // Nearer the camera (south-east) is in front. Where someone overlaps the
       // player, they win: the player can open their own ring from anywhere else on them.
       const depth = box.x + box.z - (id === 'self' ? 0.6 : 0);
-      if (inside && (!best || depth > best.depth)) best = { id, depth };
+      if (this.onScreen(box, clientX, clientY) && (!best || depth > best.depth)) {
+        best = { id, depth };
+      }
     };
     if (this.player) check('self', this.player);
     for (const [id, other] of this.others) check(id, other);
     return (best as { id: string | 'self' } | null)?.id ?? null;
+  }
+
+  /** Whether a screen point falls on an upright box in the world (a body, a chair). */
+  private onScreen(
+    box: { x: number; z: number; radius: number; bottom: number; top: number },
+    clientX: number,
+    clientY: number,
+  ): boolean {
+    const foot = this.view.project(box.x, box.bottom, box.z);
+    const head = this.view.project(box.x, box.top, box.z);
+    const side = this.view.project(box.x + box.radius * 0.7, box.bottom, box.z - box.radius * 0.7);
+    const half = Math.abs(side.x - foot.x);
+    return (
+      clientX >= foot.x - half &&
+      clientX <= foot.x + half &&
+      clientY >= head.y - half * 0.3 &&
+      clientY <= foot.y + half * 0.4
+    );
+  }
+
+  /**
+   * The free chair or sofa drawn under a screen point, the front-most if
+   * several overlap. Picking the floor alone missed half of every chair: a tap
+   * on its back landed on the tile behind it, often the desk.
+   */
+  private seatOnScreen(clientX: number, clientY: number): Point | null {
+    let best: { tile: Point; depth: number } | null = null;
+    for (const tile of this.seatTiles) {
+      const seat = this.grid.seatAt(tile);
+      const toward = seat?.kind === 'chair' ? seat.facing : { x: 0, y: 0 };
+      const box = {
+        x: tile.x + 0.5 + toward.x * CHAIR_INSET,
+        z: tile.y + 0.5 + toward.y * CHAIR_INSET,
+        radius: SEAT_PICK_RADIUS,
+        bottom: FLOOR_Y,
+        top: FLOOR_Y + SEAT_PICK_HEIGHT,
+      };
+      const depth = box.x + box.z;
+      if (this.onScreen(box, clientX, clientY) && (!best || depth > best.depth)) {
+        best = { tile, depth };
+      }
+    }
+    return best?.tile ?? null;
   }
 
   private examinableAt(clientX: number, clientY: number): Examinable | null {
@@ -817,6 +953,26 @@ export class AreaWorld {
       }
       case 'examine': {
         const { examinable } = pending;
+        if (examinable.kind === 'topic') {
+          // A slip from the jar: the player asks the room a question.
+          const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
+          if (topic) this.connection?.say(`💬 ${topic}`);
+          play('pop');
+          return;
+        }
+        if (examinable.kind === 'game') {
+          const machine = MACHINES[examinable.index];
+          lookAt({ x: examinable.stand.x, y: examinable.stand.y - 1 });
+          if (machine === 'vending') {
+            // A coffee from the machine: everyone in the room sees you holding one.
+            this.connection?.emote('coffee');
+            store.setNotice('vending');
+            play('pop');
+          } else if (machine) {
+            store.setGame(machine);
+          }
+          return;
+        }
         const pick =
           examinable.kind === 'shelf'
             ? Math.floor(Math.random() * (SHELF_TOPICS[examinable.index]?.moments.length ?? 1))
@@ -828,9 +984,12 @@ export class AreaWorld {
       }
       case 'desk':
         lookAt(pending.tile);
-        // The reception hands out the welcome note; the librarian points to the notices.
-        if (this.areaId === 'hall') store.setIntroOpen(true);
+        // The reception looks after the private rooms (and explains the place); the librarian points to the notices.
+        if (this.areaId === 'hall') store.openRooms();
         else store.setBoardOpen(true);
+        return;
+      case 'elevator':
+        store.openRooms();
         return;
     }
   }
@@ -897,6 +1056,7 @@ export class AreaWorld {
     const everyone = [this.player, ...this.others.values()];
     const seated = everyone.filter((a) => a.seatKind === 'chair').length;
     useGameStore.getState().setStudying(seated);
+    this.shareBlocks();
     this.spreadOut(everyone);
     // The player first, so their own bubble keeps its place.
     const avatars = [this.player, ...this.others.values()];
@@ -945,6 +1105,24 @@ export class AreaWorld {
       avatar.placeBubble(folded ? 0 : shift, folded);
       if (!folded) placed.push(new DOMRect(rect.x, rect.y - shift, rect.width, rect.height));
     }
+  }
+
+  /**
+   * Tells the study ring whose focus blocks in this room could be joined:
+   * people with more than a minute left, so joining is worth it.
+   */
+  private shareBlocks(): void {
+    const now = Date.now();
+    const blocks: RunningBlock[] = [];
+    for (const [id, other] of this.others) {
+      const timer = other.runningTimer;
+      if (timer && timer.endsAt - now > 60_000) {
+        blocks.push({ id, name: other.name, endsAt: timer.endsAt, totalMs: timer.totalMs });
+      }
+    }
+    const store = useGameStore.getState();
+    const key = (list: readonly RunningBlock[]) => list.map((b) => `${b.id}:${b.endsAt}`).join();
+    if (key(blocks) !== key(store.blocksHere)) store.setBlocksHere(blocks);
   }
 
   /**
@@ -1032,7 +1210,8 @@ export class AreaWorld {
   private cursorKind(tile: Point): CursorKind | null {
     if (this.grid.doorTarget(tile)) return 'door';
     const block = this.grid.blockReason(tile);
-    if (block === 'renovation' || block === 'elevator') return 'closed';
+    if (block === 'elevator') return 'door';
+    if (block === 'renovation') return 'closed';
     const c = this.grid.tileAt(tile);
     if (c === TILE.noticeBoard || c === TILE.receptionDesk) return 'read';
     if (this.grid.isSeat(tile)) {
@@ -1055,6 +1234,9 @@ export class AreaWorld {
           return t('tip.shelf', { topic: SHELF_TOPICS[examinable.index]?.name ?? '' });
         }
         if (examinable.kind === 'flaw') return t('tip.flaw');
+        if (examinable.kind === 'topic') return t('tip.topic');
+        if (examinable.kind === 'game')
+          return t(`tip.game.${MACHINES[examinable.index] ?? 'arcade'}`);
         return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
       }
       case 'tile':

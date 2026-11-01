@@ -7,12 +7,16 @@ import {
   type DirectMessage,
   type Friend,
   type StatusLines,
+  type StudyPlanId,
+  type StudyRhythm,
   type StudyStatus,
   type WaitingPet,
 } from '@att/shared';
 import { create } from 'zustand';
+import { isMusicOn, setMusicOn } from '../audio/music';
 import { isMuted, setMuted as setSoundMuted } from '../audio/sound';
 import type { AreaConnection } from '../net/AreaConnection';
+import type { RoomTicket } from '../net/rooms';
 import type { SocialConnection } from '../net/SocialConnection';
 import {
   loadLines,
@@ -49,7 +53,19 @@ export type Notice =
   /** The player's pet stays at the library door. */
   | 'pet_waits'
   /** A study timer ran out. */
-  | 'finished';
+  | 'finished'
+  /** An event just started (the value is its room). */
+  | 'event_started'
+  /** A coffee from the vending machine. */
+  | 'vending'
+  /** A prize from the claw machine (the value is the prize). */
+  | 'prize'
+  /** A score at the arcade worth telling about (the value is the score). */
+  | 'highscore'
+  /** Someone's invite to a private room could not be sent or used. */
+  | 'room_gone'
+  /** An invite to the player's room went out (the value is who to). */
+  | 'room_invited';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -80,6 +96,27 @@ export type Confirm = { kind: 'stand' | 'leave'; answer: (choice: ConfirmChoice)
 
 /** A running timer on this device's clock. */
 export type LocalTimer = { endsAt: number; totalMs: number };
+
+/**
+ * A study session at the table: focus blocks with breaks between them.
+ * `timer` in the store is the focus block running now (others see it); breaks
+ * and the free stopwatch stay on this device.
+ */
+export type StudySession = {
+  plan: StudyPlanId;
+  /** Null for the free stopwatch and for joining someone's block. */
+  rhythm: StudyRhythm | null;
+  /** 1-based. */
+  round: number;
+  /** 'between': a break ended and the next round waits for a yes. */
+  phase: 'work' | 'break' | 'between' | 'free' | 'done';
+  breakEndsAt: number | null;
+  /** When the free stopwatch started. */
+  startedAt: number;
+};
+
+/** Someone else in the room in the middle of a focus block, to join. */
+export type RunningBlock = { id: string; name: string; endsAt: number; totalMs: number };
 
 /** The questions asked after sitting down, in order. */
 export type SitStep = 'activity' | 'timer';
@@ -123,6 +160,19 @@ type GameState = {
   /** On phones the title plate and the map fold into small buttons; these open them. */
   plateOpen: boolean;
   mapOpen: boolean;
+  /** The event calendar, opened from the clock. */
+  calendarOpen: boolean;
+  /** A machine in the smoking room being played. */
+  game: 'arcade' | 'claw' | null;
+  /** The private room the player is in or going into. */
+  room: RoomTicket | null;
+  /** The rooms panel (reception or elevator), and a code to fill in from a link or invite. */
+  roomsOpen: boolean;
+  roomCode: string | null;
+  /** Someone in the room invited the player to theirs. */
+  invite: { from: string; code: string; name: string } | null;
+  /** Event music on or off (all sound has its own switch too). */
+  musicOn: boolean;
   /** Renovation strips opened per room, as the server last said. */
   opened: Partial<Record<AreaId, number>>;
   radial: Radial | null;
@@ -158,6 +208,9 @@ type GameState = {
   wardrobeOpen: boolean;
   activity: Activity | null;
   timer: LocalTimer | null;
+  study: StudySession | null;
+  /** Focus blocks running in the room that could be joined. */
+  blocksHere: RunningBlock[];
   dnd: boolean;
   /** When the player may talk again, per area (the library waits much longer). */
   cooldownUntil: Partial<Record<AreaId, number>>;
@@ -179,6 +232,13 @@ type GameState = {
   setPlayersHere: (count: number) => void;
   setWorld: (world: { online: number; studying: number }, waiting: WaitingPet[]) => void;
   setPlateOpen: (open: boolean) => void;
+  setCalendarOpen: (open: boolean) => void;
+  setGame: (game: 'arcade' | 'claw' | null) => void;
+  setRoom: (room: RoomTicket | null) => void;
+  openRooms: (code?: string | null) => void;
+  closeRooms: () => void;
+  setInvite: (invite: { from: string; code: string; name: string } | null) => void;
+  setMusicOn: (on: boolean) => void;
   setMapOpen: (open: boolean) => void;
   setOpened: (area: AreaId, opened: number) => void;
   setRadial: (radial: Radial | null) => void;
@@ -204,6 +264,21 @@ type GameState = {
   setActivity: (activity: Activity | null) => void;
   startTimer: (minutes: number, dnd: boolean) => void;
   stopTimer: () => void;
+  /** Starts a plan: the first focus block (or the stopwatch, or someone else's block). */
+  startSession: (
+    plan: StudyPlanId,
+    rhythm: StudyRhythm | null,
+    dnd: boolean,
+    join?: LocalTimer,
+  ) => void;
+  /** A focus block ended with rounds left: the break begins. */
+  beginBreak: (minutes: number) => void;
+  /** The break ended; waiting for the player. */
+  breakOver: () => void;
+  nextRound: () => void;
+  /** The last focus block of the session ended. */
+  finishStudy: () => void;
+  setBlocksHere: (blocks: RunningBlock[]) => void;
   setDnd: (dnd: boolean) => void;
   setCooldown: (area: AreaId, until: number) => void;
   /** Back to the name screen with nothing carried over. */
@@ -228,6 +303,13 @@ export const useGameStore = create<GameState>((set) => ({
   waitingPets: [],
   plateOpen: false,
   mapOpen: false,
+  calendarOpen: false,
+  game: null,
+  room: null,
+  roomsOpen: false,
+  roomCode: null,
+  invite: null,
+  musicOn: isMusicOn(),
   opened: {},
   radial: null,
   discovery: null,
@@ -251,6 +333,8 @@ export const useGameStore = create<GameState>((set) => ({
   wardrobeOpen: false,
   activity: null,
   timer: null,
+  study: null,
+  blocksHere: [],
   dnd: false,
   cooldownUntil: {},
   setSession: (session) => set({ session }),
@@ -269,6 +353,7 @@ export const useGameStore = create<GameState>((set) => ({
       radial: null,
       discovery: null,
       dancing: false,
+      game: null,
     }),
   setConnection: (connection) => set({ connection }),
   setSocial: (social) => set({ social }),
@@ -294,6 +379,16 @@ export const useGameStore = create<GameState>((set) => ({
   setPlayersHere: (playersHere) => set({ playersHere }),
   setWorld: (world, waitingPets) => set({ world, waitingPets }),
   setPlateOpen: (plateOpen) => set({ plateOpen }),
+  setCalendarOpen: (calendarOpen) => set({ calendarOpen }),
+  setGame: (game) => set({ game }),
+  setRoom: (room) => set({ room }),
+  openRooms: (roomCode = null) => set({ roomsOpen: true, roomCode }),
+  closeRooms: () => set({ roomsOpen: false, roomCode: null }),
+  setInvite: (invite) => set({ invite }),
+  setMusicOn: (musicOn) => {
+    setMusicOn(musicOn);
+    set({ musicOn });
+  },
   setMapOpen: (mapOpen) => set({ mapOpen }),
   setOpened: (area, opened) => set((state) => ({ opened: { ...state.opened, [area]: opened } })),
   setRadial: (radial) => set({ radial }),
@@ -336,7 +431,49 @@ export const useGameStore = create<GameState>((set) => ({
   startTimer: (minutes, dnd) =>
     set({ timer: { endsAt: Date.now() + minutes * 60_000, totalMs: minutes * 60_000 }, dnd }),
   // Do not disturb belongs to the timer, so it ends with it.
-  stopTimer: () => set({ timer: null, dnd: false }),
+  stopTimer: () => set({ timer: null, study: null, dnd: false }),
+  startSession: (plan, rhythm, dnd, join) => {
+    const now = Date.now();
+    const block = rhythm ? rhythm.workMinutes * 60_000 : 0;
+    set({
+      study: {
+        plan,
+        rhythm,
+        round: 1,
+        phase: plan === 'free' ? 'free' : 'work',
+        breakEndsAt: null,
+        startedAt: now,
+      },
+      timer: join ?? (block > 0 ? { endsAt: now + block, totalMs: block } : null),
+      dnd,
+    });
+  },
+  beginBreak: (minutes) =>
+    set((state) =>
+      state.study
+        ? {
+            timer: null,
+            study: { ...state.study, phase: 'break', breakEndsAt: Date.now() + minutes * 60_000 },
+          }
+        : {},
+    ),
+  breakOver: () =>
+    set((state) =>
+      state.study ? { study: { ...state.study, phase: 'between', breakEndsAt: null } } : {},
+    ),
+  nextRound: () =>
+    set((state) => {
+      const study = state.study;
+      if (!study?.rhythm) return {};
+      const block = study.rhythm.workMinutes * 60_000;
+      return {
+        study: { ...study, phase: 'work', round: study.round + 1, breakEndsAt: null },
+        timer: { endsAt: Date.now() + block, totalMs: block },
+      };
+    }),
+  setBlocksHere: (blocksHere) => set({ blocksHere }),
+  finishStudy: () =>
+    set((state) => (state.study ? { study: { ...state.study, phase: 'done' }, dnd: false } : {})),
   setDnd: (dnd) => set({ dnd }),
   setCooldown: (area, until) =>
     set((state) => ({ cooldownUntil: { ...state.cooldownUntil, [area]: until } })),
@@ -354,6 +491,7 @@ export const useGameStore = create<GameState>((set) => ({
       sitStep: null,
       activity: null,
       timer: null,
+      study: null,
       dnd: false,
     }),
 }));

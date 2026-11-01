@@ -1,4 +1,4 @@
-import type { AreaId, PetKind, SocialClientMessage, SocialServerMessage } from '@att/shared';
+import type { Appearance, AreaId, SocialClientMessage, SocialServerMessage } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
 import { isPong, keepAlive } from './heartbeat';
 
@@ -8,8 +8,10 @@ type Options = {
   area: () => AreaId;
   /** Whether the player sits at a table, for the building's "studying" count. */
   studying: () => boolean;
-  /** The pet walking along, so it can wait at the library door. */
-  pet: () => PetKind | null;
+  /** The player's look, for the pet waiting at the library door. */
+  look: () => Appearance | null;
+  /** The private room's code, when in one. */
+  room: () => string | null;
   onMessage: (message: SocialServerMessage) => void;
 };
 
@@ -26,7 +28,7 @@ export class SocialConnection {
     this.socket = new ReconnectingWebSocket(url, [], { maxRetries: Infinity });
     this.stopBeating = keepAlive(this.socket);
     this.socket.addEventListener('open', () =>
-      this.where(options.area(), options.studying(), options.pet()),
+      this.where(options.area(), options.studying(), options.look(), options.room()),
     );
     this.socket.addEventListener('message', (event) => {
       if (typeof event.data !== 'string' || isPong(event.data)) return;
@@ -38,8 +40,18 @@ export class SocialConnection {
     });
   }
 
-  where(area: AreaId, studying: boolean, pet: PetKind | null): void {
-    this.send({ t: 'where', area, studying, pet });
+  where(area: AreaId, studying: boolean, look: Appearance | null, room: string | null): void {
+    const pet = look?.pet;
+    this.send({
+      t: 'where',
+      area,
+      studying,
+      ...(room ? { room } : {}),
+      pet: pet ?? null,
+      ...(pet && look.petColor !== undefined ? { petColor: look.petColor } : {}),
+      ...(pet && look.petSex ? { petSex: look.petSex } : {}),
+      ...(pet && look.petAccessory ? { petAccessory: look.petAccessory } : {}),
+    });
   }
 
   befriend(to: string): void {

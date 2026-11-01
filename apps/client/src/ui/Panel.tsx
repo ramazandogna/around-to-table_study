@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * The one look for every screen from naming yourself to sitting at the table:
@@ -23,11 +24,17 @@ export function Panel({
 }
 
 /** A dimmed layer that centers a panel and keeps taps from reaching the world. */
+/**
+ * A dialog over the whole game. It is drawn straight into the page, not where
+ * it is opened from, so a folded menu (phones) or a hidden button can never
+ * hide it.
+ */
 export function Dialog({ children }: { children: ReactNode }) {
-  return (
+  return createPortal(
     <div className="dialog" role="dialog" aria-modal="true">
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

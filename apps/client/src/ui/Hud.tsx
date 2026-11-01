@@ -1,15 +1,23 @@
-import { APP_NAME } from '@att/shared';
+import { APP_NAME, isRoomArea, type AreaId } from '@att/shared';
 import { useEffect, useRef } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
+import { WorldClock } from './Calendar';
 import { FriendsLink } from './Friends';
 import { PhoneLink } from './Phone';
 import { StartOver } from './StartOver';
 import { StatusDialog } from './StatusDialog';
 import { Wardrobe } from './Wardrobe';
 
-const AREA_ICON = { hall: '🚪', library: '📚', smoking: '☕' } as const;
+const AREA_ICON: Record<AreaId, string> = {
+  hall: '🚪',
+  library: '📚',
+  smoking: '☕',
+  room3: '🔑',
+  room5: '🔑',
+  room9: '🔑',
+};
 
 /** The wooden plate in the top left: where you are, who is here, and everything you can open. */
 export function HudPlate() {
@@ -18,6 +26,9 @@ export function HudPlate() {
   const playersHere = useGameStore((s) => s.playersHere);
   const studying = useGameStore((s) => s.studying);
   const open = useGameStore((s) => s.plateOpen);
+  // In a private room the plate shows its name.
+  const roomName = useGameStore((s) => (isRoomArea(s.area) ? s.room?.room.name : undefined));
+  const areaName = roomName ?? t(`area.${area}`);
   return (
     <header className={`hud-title panel panel--compact${open ? '' : ' hud-title--folded'}`}>
       {/* On phones the plate starts folded to one small button; desktops never see it. */}
@@ -37,7 +48,7 @@ export function HudPlate() {
       <div className="hud-heading">
         <span className="hud-name">{APP_NAME}</span>
         <span className="hud-area">
-          <span aria-hidden>{AREA_ICON[area]}</span> {t(`area.${area}`)}
+          <span aria-hidden>{AREA_ICON[area]}</span> {areaName}
           <span className="hud-count">
             {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
             {connected && area === 'library' && ` · ${t('hud.studying', { count: studying })}`}
@@ -140,6 +151,7 @@ export function MapCorner() {
           </span>
         </p>
       )}
+      <WorldClock />
     </aside>
   );
 }

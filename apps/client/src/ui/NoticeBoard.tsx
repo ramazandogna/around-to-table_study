@@ -1,8 +1,9 @@
-import { AREA_RULES, createAreaGrid } from '@att/shared';
+import { AREA_RULES, createAreaGrid, upcoming } from '@att/shared';
 import type { ReactNode } from 'react';
 import { HALL_EVENTS, LIBRARY_SESSIONS, type Pinned } from '../content/boards';
-import { t } from '../i18n/t';
+import { t, type MessageKey } from '../i18n/t';
 import { useGameStore } from '../state/store';
+import { useNow } from './Calendar';
 
 /**
  * The board you stand next to, drawn like the real thing. The hall has a cork
@@ -52,7 +53,7 @@ function HallFlyers() {
       </Note>
       {HALL_EVENTS.length === 0 ? (
         <Note tone="yellow" pin="blue" tilt={2} icon="📅" title={t('board.events.title')}>
-          <p>{t('board.events.none')}</p>
+          <NextEvent />
         </Note>
       ) : (
         HALL_EVENTS.map((event, i) => (
@@ -201,5 +202,38 @@ function Notice({
       <h3>{heading}</h3>
       {children}
     </article>
+  );
+}
+
+/** The next event from the calendar, or that nothing is planned. */
+function NextEvent() {
+  const now = useNow(60_000);
+  const next = upcoming(now, 7)[0];
+  if (!next) return <p>{t('board.events.none')}</p>;
+  const live = now >= next.start;
+  return (
+    <>
+      <p>
+        <b>{t(`event.${next.event.id}.title` as MessageKey)}</b>
+        {' · '}
+        {live
+          ? t('board.events.now', { area: t(`area.${next.event.area}`) })
+          : t('board.events.when', {
+              when: new Date(next.start).toLocaleString([], {
+                weekday: 'long',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              area: t(`area.${next.event.area}`),
+            })}
+      </p>
+      <button
+        type="button"
+        className="mini-button note-button"
+        onClick={() => useGameStore.getState().setCalendarOpen(true)}
+      >
+        {t('board.events.calendar')}
+      </button>
+    </>
   );
 }

@@ -91,7 +91,10 @@ export class PreviewStage {
     this.petMixer = null;
     model.position.x = look.pet ? WITH_PET_SHIFT : 0;
     if (look.pet && this.petKit) {
-      const pet = this.petKit.create(look.pet);
+      const pet = this.petKit.create(look.pet, {
+        ...(look.petColor !== undefined ? { petColor: look.petColor } : {}),
+        ...(look.petAccessory ? { petAccessory: look.petAccessory } : {}),
+      });
       pet.model.position.set(PET_SPOT.x, 0, PET_SPOT.z);
       pet.model.rotation.y = -0.4;
       this.pet = pet.model;
