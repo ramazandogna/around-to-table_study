@@ -25,3 +25,15 @@ export type StudyStatus = {
 };
 
 export const IDLE_STATUS: StudyStatus = { activity: null, timer: null, dnd: false };
+
+/**
+ * How many quarters of a timer are done (0 to 4), from its length and the
+ * time left. A small chime marks each one; the fourth is the finish.
+ */
+export function quartersDone(timer: TimerStatus): number {
+  const done = (timer.totalMs - timer.remainingMs) / timer.totalMs;
+  return Math.max(0, Math.min(4, Math.floor(done * 4 + 1e-9)));
+}
+
+/** A finish may be claimed this long before the server's clock says so (clocks and latency). */
+export const FINISH_GRACE_MS = 5_000;

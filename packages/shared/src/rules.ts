@@ -20,6 +20,8 @@ export type AreaRules = {
   chatLog: boolean;
   /** People may dance here. */
   dance: boolean;
+  /** Pets may come in; elsewhere they wait at the door. */
+  pets: boolean;
 };
 
 export const AREA_RULES: Record<AreaId, AreaRules> = {
@@ -34,6 +36,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     dmAllowed: false,
     chatLog: false,
     dance: false,
+    pets: false,
   },
   hall: {
     maxChars: 200,
@@ -45,6 +48,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     dmAllowed: true,
     chatLog: true,
     dance: true,
+    pets: true,
   },
   smoking: {
     maxChars: 300,
@@ -56,6 +60,7 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     dmAllowed: true,
     chatLog: true,
     dance: true,
+    pets: true,
   },
 };
 

@@ -1,17 +1,31 @@
 import { z } from 'zod';
-import { CHARACTERS, type Appearance } from './character';
+import {
+  CHARACTERS,
+  OUTFIT_PARTS,
+  PALETTES,
+  PETS_AVAILABLE,
+  type Appearance,
+  type OutfitPart,
+  type PetKind,
+} from './character';
 import { DOINGS, EMOTES, MOODS, STATUS_LIMITS, type Emote, type StatusLines } from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
-const appearance = z.object({
-  character: z
+const index = (length: number) =>
+  z
     .number()
     .int()
     .min(0)
-    .max(CHARACTERS.length - 1),
+    .max(length - 1);
+const appearance = z.object({
+  character: index(CHARACTERS.length),
+  ...(Object.fromEntries(
+    OUTFIT_PARTS.map((part) => [part, index(PALETTES[part].length).optional()]),
+  ) as Record<OutfitPart, z.ZodOptional<z.ZodNumber>>),
+  pet: z.enum(PETS_AVAILABLE as [PetKind, ...PetKind[]]).optional(),
 });
 const studyStatus = z.object({
   activity: z.enum(ACTIVITIES).nullable(),
@@ -58,6 +72,8 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('emote'), emote: z.enum(EMOTES) }),
   /** Starts or stops dancing, where the area allows it. Walking stops it too. */
   z.object({ t: z.literal('dance'), on: z.boolean() }),
+  /** The sender's study timer ran out: everyone in the room sees them celebrate. */
+  z.object({ t: z.literal('finished') }),
   /** A friendly nudge to someone in the same area. */
   z.object({ t: z.literal('poke'), to: z.string().min(1).max(64) }),
   /** A private message to someone in the same area; only where the area allows it. */
@@ -112,7 +128,8 @@ export type ServerMessage =
   | { t: 'moved'; id: string; to: Point }
   /** Puts a player back where the server knows they are (after a rejected move). */
   | { t: 'placed'; id: string; tile: Point }
-  | { t: 'said'; id: string; text: string }
+  /** `at` is the server's clock, for the time next to the line in the chat. */
+  | { t: 'said'; id: string; text: string; at: number }
   | { t: 'status'; id: string; status: StudyStatus }
   | { t: 'looked'; id: string; look: Appearance }
   | { t: 'lined'; id: string; lines: StatusLines }
@@ -121,7 +138,9 @@ export type ServerMessage =
   | { t: 'poked'; from: string; to: string }
   | { t: 'danced'; id: string; on: boolean }
   /** Sent to both the sender and the receiver. */
-  | { t: 'whispered'; from: string; to: string; text: string }
+  | { t: 'whispered'; from: string; to: string; text: string; at: number }
+  /** Someone's study timer ran out. */
+  | { t: 'finished'; id: string }
   | { t: 'error'; code: ErrorCode; retryInMs?: number };
 
 export function parseClientMessage(raw: string): ClientMessage | null {

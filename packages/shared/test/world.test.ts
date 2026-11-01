@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AREA_RULES,
   AREAS,
   TILE,
   createAreaGrid,
@@ -229,5 +230,22 @@ describe('smoothPath', () => {
       at = point;
     }
     expect(at).toEqual({ x: 8.5, y: 6.5 });
+  });
+});
+
+describe('the librarian and pets', () => {
+  it('keeps the chair behind the librarian desk for her alone', () => {
+    const grid = createAreaGrid('library');
+    const chair = { x: 11, y: 13 };
+    expect(grid.tileAt(chair)).toBe(TILE.staffChair);
+    expect(grid.isWalkable(chair)).toBe(false);
+    expect(grid.isSeat(chair)).toBe(false);
+    expect(grid.tileAt({ x: 11, y: 12 })).toBe(TILE.receptionDesk);
+  });
+
+  it('keeps pets out of the library only', () => {
+    expect(AREA_RULES.library.pets).toBe(false);
+    expect(AREA_RULES.hall.pets).toBe(true);
+    expect(AREA_RULES.smoking.pets).toBe(true);
   });
 });

@@ -21,6 +21,8 @@ export const TILE = {
   entrance: 'O',
   /** A notice board with the rules and this week's events; opens when someone stands next to it. */
   noticeBoard: 'N',
+  /** The chair behind the librarian's desk: hers, so nobody else walks or sits there. */
+  staffChair: 'Q',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];

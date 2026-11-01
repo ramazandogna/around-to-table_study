@@ -3,13 +3,18 @@ import {
   cleanDm,
   DM_HISTORY,
   friendPair,
+  HEARTBEAT,
+  isStale,
   MAX_FRIENDS,
+  MAX_WAITING_PETS,
   parseSocialMessage,
   type AreaId,
   type DirectMessage,
   type Friend,
+  type PetKind,
   type SocialClientMessage,
   type SocialServerMessage,
+  type WaitingPet,
 } from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
@@ -22,6 +27,10 @@ type Member = {
   area: AreaId | null;
   /** Sitting at a table, as told by the player. */
   studying?: boolean;
+  /** The pet walking along; it waits at the library door while its person studies. */
+  pet?: PetKind | null;
+  /** When the socket connected, for telling vanished ones apart (see `alarm`). */
+  since?: number;
   changes: RateWindow;
   messages: RateWindow;
 };
@@ -37,6 +46,8 @@ const MESSAGES_PER_WINDOW = 8;
 const MESSAGE_WINDOW_MS = 10_000;
 /** Building-wide counts go out at most this often, however busy it gets. */
 const WORLD_EVERY_MS = 1_500;
+/** How often sockets that went quiet are looked for while anyone is connected. */
+const SWEEP_MS = 30_000;
 
 export const SOCIAL_HEADERS = { id: 'x-user-id', name: 'x-user-name' } as const;
 
@@ -54,6 +65,8 @@ export class SocialHub extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    // Heartbeats are answered without waking the hub; their time tells live sockets from gone ones.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT.ping, HEARTBEAT.pong));
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -96,6 +109,7 @@ export class SocialHub extends DurableObject<Env> {
       id,
       name: decodeURIComponent(name),
       area: null,
+      since: Date.now(),
       changes: { start: 0, count: 0 },
       messages: { start: 0, count: 0 },
     };
@@ -107,6 +121,7 @@ export class SocialHub extends DurableObject<Env> {
       member.name,
       Date.now(),
     );
+    await this.armSweep();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -127,10 +142,40 @@ export class SocialHub extends DurableObject<Env> {
     this.leave(ws);
   }
 
+  /**
+   * Drops sockets that went quiet: a phone put to sleep or a tab that vanished
+   * without closing. They would otherwise count as "in the building" forever.
+   */
+  override async alarm(): Promise<void> {
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const me = ws.deserializeAttachment() as Member | null;
+      const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
+      if (!me || isStale(now, me.since ?? 0, ping)) this.leave(ws);
+    }
+    if (this.ctx.getWebSockets().length > 0) await this.armSweep();
+  }
+
+  /** Someone started over: everyone they were before goes offline at once. */
+  async kick(ids: readonly string[]): Promise<void> {
+    for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) this.leave(ws);
+  }
+
+  private async armSweep(): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + SWEEP_MS);
+    }
+  }
+
   private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void {
     if (message.t === 'where') {
       const moved = me.area !== message.area;
-      ws.serializeAttachment({ ...me, area: message.area, studying: message.studying ?? false });
+      ws.serializeAttachment({
+        ...me,
+        area: message.area,
+        studying: message.studying ?? false,
+        pet: message.pet ?? null,
+      });
       this.tellWorld();
       if (!moved && me.area) return;
       this.sendList(me.id);
@@ -322,17 +367,22 @@ export class SocialHub extends DurableObject<Env> {
       this.worldTimer = null;
       const online = new Set<string>();
       const studying = new Set<string>();
+      const waiting = new Map<string, WaitingPet>();
       const sockets = this.ctx.getWebSockets();
       for (const ws of sockets) {
         const member = ws.deserializeAttachment() as Member | null;
         if (!member?.area || ws.readyState !== WebSocket.OPEN) continue;
         online.add(member.id);
         if (member.studying) studying.add(member.id);
+        if (member.area === 'library' && member.pet && waiting.size < MAX_WAITING_PETS) {
+          waiting.set(member.id, { id: member.id, name: member.name, pet: member.pet });
+        }
       }
       const data = JSON.stringify({
         t: 'world',
         online: online.size,
         studying: studying.size,
+        waiting: [...waiting.values()],
       } satisfies SocialServerMessage);
       for (const ws of sockets) {
         try {

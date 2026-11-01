@@ -38,6 +38,32 @@ async function sessionFrom(request: Request, env: Env): Promise<Session | Respon
   return (await verifySession(token, secret)) ?? error('unauthorized', 401);
 }
 
+/** Tokens one "start over" may clear: this device's current and past guests. */
+const MAX_LEAVE_TOKENS = 10;
+
+/**
+ * Starting over: every guest this device has been leaves the building now,
+ * instead of lingering until their sockets time out. Only tokens the device
+ * holds count, so nobody can send anyone else away.
+ */
+async function leave(request: Request, env: Env): Promise<Response> {
+  const secret = secretOf(env);
+  if (!secret) return error('server_misconfigured', 500);
+  const body = (await request.json().catch(() => null)) as { tokens?: unknown } | null;
+  const tokens = Array.isArray(body?.tokens) ? body.tokens.slice(0, MAX_LEAVE_TOKENS) : [];
+  const sessions = await Promise.all(
+    tokens.map((token) => (typeof token === 'string' ? verifySession(token, secret) : null)),
+  );
+  const ids = [...new Set(sessions.flatMap((session) => (session ? [session.id] : [])))];
+  if (ids.length > 0) {
+    await Promise.all([
+      env.SOCIAL.getByName('hub').kick(ids),
+      ...Object.keys(AREAS).map((area) => env.AREAS.getByName(area).kick(ids)),
+    ]);
+  }
+  return Response.json({ left: ids.length });
+}
+
 async function joinSocial(request: Request, env: Env): Promise<Response> {
   const session = await sessionFrom(request, env);
   if (session instanceof Response) return session;
@@ -66,6 +92,7 @@ export default {
     if (pathname === '/api/health') return Response.json(createHealthResponse());
     if (pathname === '/api/guest' && request.method === 'POST') return createGuest(request, env);
 
+    if (pathname === '/api/leave' && request.method === 'POST') return leave(request, env);
     if (pathname === '/api/social/ws') return joinSocial(request, env);
     const socket = AREA_SOCKET.exec(pathname);
     if (socket?.[1]) return joinArea(request, env, socket[1]);

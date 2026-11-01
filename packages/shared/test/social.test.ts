@@ -7,6 +7,9 @@ describe('social messages', () => {
       t: 'where',
       area: 'library',
     });
+    const withPet = { t: 'where', area: 'library', studying: true, pet: 'cat' };
+    expect(parseSocialMessage(JSON.stringify(withPet))).toEqual(withPet);
+    expect(parseSocialMessage(JSON.stringify({ ...withPet, pet: 'dragon' }))).toBeNull();
     expect(parseSocialMessage(JSON.stringify({ t: 'befriend', to: 'abc' }))).not.toBeNull();
     expect(parseSocialMessage(JSON.stringify({ t: 'unfriend', id: 'abc' }))).not.toBeNull();
   });

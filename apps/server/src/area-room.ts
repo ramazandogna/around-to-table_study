@@ -3,7 +3,10 @@ import {
   applyAreaRules,
   cleanStatusLines,
   EMPTY_LINES,
+  FINISH_GRACE_MS,
+  HEARTBEAT,
   createAreaGrid,
+  isStale,
   findPath,
   isValidAppearance,
   stripsNeeded,
@@ -38,6 +41,8 @@ type Connection = {
   lines: StatusLines;
   lastEmoteAt: number;
   dancing: boolean;
+  /** When the socket connected, for telling vanished ones apart (see `sweep`). */
+  since: number;
 };
 
 /** Timers are kept as an end time on the server's clock and sent out as time left. */
@@ -53,6 +58,8 @@ const CLOSE_REPLACED = 4000;
 const POKE_COOLDOWN_MS = 10_000;
 const EMOTE_COOLDOWN_MS = 1_500;
 const OPENED_KEY = 'opened';
+/** How often sockets that went quiet are looked for while anyone is connected. */
+const SWEEP_MS = 30_000;
 
 export const AREA_HEADERS = { id: 'x-user-id', name: 'x-user-name', area: 'x-area' } as const;
 
@@ -64,6 +71,12 @@ export class AreaRoom extends DurableObject<Env> {
   private grids = new Map<AreaId, AreaGrid>();
   /** Renovation strips opened so far; loaded from storage on the first message. */
   private opened: number | null = null;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Heartbeats are answered without waking the object; their time tells live sockets from gone ones.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT.ping, HEARTBEAT.pong));
+  }
 
   override async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -89,7 +102,9 @@ export class AreaRoom extends DurableObject<Env> {
       lines: EMPTY_LINES,
       lastEmoteAt: 0,
       dancing: false,
+      since: Date.now(),
     });
+    await this.armSweep();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -105,6 +120,31 @@ export class AreaRoom extends DurableObject<Env> {
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
     this.leave(ws);
+  }
+
+  /**
+   * Drops sockets that went quiet: a phone put to sleep or a tab that vanished
+   * without closing. Otherwise they would stand in the room, and count, forever.
+   */
+  override async alarm(): Promise<void> {
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const me = this.load(ws);
+      const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
+      if (!me || isStale(now, me.since ?? 0, ping)) this.leave(ws);
+    }
+    if (this.ctx.getWebSockets().length > 0) await this.armSweep();
+  }
+
+  /** Someone started over: everyone they were before leaves the room at once. */
+  async kick(ids: readonly string[]): Promise<void> {
+    for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) this.leave(ws);
+  }
+
+  private async armSweep(): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + SWEEP_MS);
+    }
   }
 
   override async webSocketError(ws: WebSocket): Promise<void> {
@@ -195,7 +235,7 @@ export class AreaRoom extends DurableObject<Env> {
         }
         this.save(ws, { ...me, lastSayAt: now });
         void this.ctx.storage.put(saidKey(me.id), now);
-        this.broadcast({ t: 'said', id: me.id, text: result.text });
+        this.broadcast({ t: 'said', id: me.id, text: result.text, at: now });
         return;
       }
       case 'lines': {
@@ -221,6 +261,16 @@ export class AreaRoom extends DurableObject<Env> {
         }
         this.save(ws, { ...me, dancing: message.on });
         this.broadcast({ t: 'danced', id: me.id, on: message.on });
+        return;
+      }
+      case 'finished': {
+        // Only a timer that really ran out may be celebrated, and only once.
+        const timer = me.study.timer;
+        if (!me.joined || !timer || timer.endsAt - now > FINISH_GRACE_MS) return;
+        const study = { ...me.study, timer: null };
+        this.save(ws, { ...me, study });
+        this.broadcast({ t: 'finished', id: me.id });
+        this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
         return;
       }
       case 'poke': {
@@ -256,6 +306,7 @@ export class AreaRoom extends DurableObject<Env> {
           from: me.id,
           to: message.to,
           text: result.text,
+          at: now,
         };
         this.send(target, whisper);
         this.send(ws, whisper);

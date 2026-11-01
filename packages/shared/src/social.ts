@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PETS, type PetKind } from './character';
 import { containsLink } from './rules';
 import { normalizeChat } from './text';
 import type { AreaId } from './world';
@@ -23,7 +24,13 @@ export const socialClientSchema = z.discriminatedUnion('t', [
    * First message on every (re)connect, and again whenever the player changes
    * rooms or sits down at a table or gets up.
    */
-  z.object({ t: z.literal('where'), area: areaId, studying: z.boolean().optional() }),
+  z.object({
+    t: z.literal('where'),
+    area: areaId,
+    studying: z.boolean().optional(),
+    /** The pet walking along, so it can wait at the library door while its person studies. */
+    pet: z.enum(PETS).nullable().optional(),
+  }),
   /** Sends a request, or accepts theirs if they already asked. */
   z.object({ t: z.literal('befriend'), to: userId }),
   /** Declines a request, cancels one, or ends a friendship. */
@@ -66,6 +73,12 @@ export type DirectMessage = {
   at: number;
 };
 
+/** Pets cannot come into the library; they wait at its door in the hall. */
+export type WaitingPet = { id: string; name: string; pet: PetKind };
+
+/** At most this many pets are drawn at the library door. */
+export const MAX_WAITING_PETS = 8;
+
 export type SocialErrorCode =
   | 'bad_message'
   | 'rate_limited'
@@ -84,8 +97,11 @@ export type SocialServerMessage =
   | { t: 'dm'; message: DirectMessage }
   /** The newest messages of one conversation, oldest first. */
   | { t: 'history'; with: string; messages: DirectMessage[] }
-  /** How lively the building is: everyone online, and how many sit at a table. */
-  | { t: 'world'; online: number; studying: number }
+  /**
+   * How lively the building is: everyone online, how many sit at a table, and
+   * the pets waiting at the library door for their people.
+   */
+  | { t: 'world'; online: number; studying: number; waiting: WaitingPet[] }
   | { t: 'error'; code: SocialErrorCode };
 
 export function parseSocialMessage(raw: string): SocialClientMessage | null {

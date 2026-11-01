@@ -5,3 +5,14 @@ export const PROTOCOL_VERSION = 1;
 
 /** Size of one map tile in pixels (Tiled maps use the same value). */
 export const TILE_SIZE = 16;
+
+/**
+ * Sockets send this every HEARTBEAT_MS and the server answers without waking
+ * up. A socket silent for longer than STALE_MS belongs to a phone that went to
+ * sleep or a tab that vanished: the server drops it, so nobody is counted who
+ * is not really there. Long enough for background tabs, whose timers may only
+ * fire once a minute.
+ */
+export const HEARTBEAT = { ping: 'ping', pong: 'pong' } as const;
+export const HEARTBEAT_MS = 25_000;
+export const STALE_MS = 100_000;
