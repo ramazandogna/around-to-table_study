@@ -2,6 +2,32 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-11-01: Roles, blocks and the building chat live in the social hub
+- **Decision:** Roles are `user` and `admin`. The owner's guest ids are set on the server (`ADMIN_IDS`, a secret) and are always admins; admins make others admins from their profile card. Blocking is stored in the hub: it ends the friendship and its conversation, stops messages, buzzes and friend requests there, and the rooms ask the hub before passing a poke, whisper or invite; the blocked person is told. Muting is on the player's device only and nobody is told. A building-wide chat (last 50 lines) is a second tab next to the room's chat; the library reads it but does not post.
+- **Why:** One place for who may do what, checked on the server, without a new resource.
+- **How to become admin:** open your own profile (the ring around you → Profile), copy "Your ID" and run `wrangler secret put ADMIN_IDS` with it (comma-separated for several). A guest who starts over gets a new id.
+
+## 2026-11-01: Profiles count focus blocks the rooms saw finish
+- **Decision:** When a room sees a timer really run out (`finished`), it records the block in the hub (`focus_blocks`). A profile counts blocks today, this week (from Monday), this month and this year on the person's own clock (their offset comes with `where`), sorts them by length (25 pomodoro, 50 deep, 90 marathon, others custom), and adds time in the building, friends, messages sent, the best streak and the day they joined. Badges are worked out from these numbers (`shared/profile.ts`).
+- **Why:** Numbers others can trust, so effort shows; badges need no storage of their own.
+
+## 2026-11-01: Events can be proposed and wait for an admin
+- **Decision:** Anyone proposes a one-off event (title, line, room, start, length; 3 waiting at most). Admins see the waiting ones in the calendar and approve, turn down or later take them off; the proposer is told. Approved events join the weekly ones everywhere: the clock, the calendar's "Coming up next" card, the board, and the room's decorations.
+
+## 2026-11-01: Private rooms have rules and an owner
+- **Decision:** Opening a room sets three switches: notification sounds, pets, and a game table (Pig and Higher-lower; darts stay in the smoking room). The owner's room settings change them live, send someone out (they may come back) or ban them (the hub refuses their pass), unban, and close the room for good.
+
+## 2026-11-01: Chairs are pulled out, and sitting waits for a choice
+- **Decision:** Chairs start pushed in under their tables. Arriving at one pulls it out and asks what you will work on; you sit once you choose, and "Not now" steps you off. Others see someone sit once their status has an activity. Standing up after sitting pushes the chair back in (a `chair` message tells the room); a chair left out (no choice, or a closed tab) goes on the librarian's list after 40 seconds and she walks over and pushes it in.
+- **Why:** Sitting down is a decision in a library, and the librarian should have work, not just wander.
+
+## 2026-11-01: The building follows the hour and the month
+- **Decision:** The light follows the viewer's hour: morning, day, a yellower afternoon, an evening with desk lamps on and the town's lights in the windows, and a night with every lamp on, the moon in the glass and the library desk closed (laptop shut). Window panes are our own meshes over the Kenney windows; the librarian opens and shuts them by day. Heaters hang under windows from November to March, fans in summer.
+
+## 2026-11-01: A loader that ends on a whole bounce
+- **Decision:** Changing rooms shows the logo bouncing on a card until the new room answers; the time is rounded up to whole bounces (1.2 s each, at least two), and it gives up after 8 s.
+- **Why:** The prompt asked for a consistent loader that rounds a wait up. Rounding to five seconds every time would slow down walking between rooms, which people do all the time, so the loader rounds to its own animation instead; `LOADER_CYCLE_MS` and `MIN_MS` change it.
+
 ## 2026-11-01: Staff work shifts and pick their moments from the clock
 - **Decision:** `shared/staff.ts` holds the shifts: a day (9–15) and an evening (15–22) librarian, nobody at night (a "back at 9:00" sign), and a day and a night receptionist. Who is on follows the viewer's local hour. What they do is chosen per 12-second slot by a seeded random of the slot number (`chance`), with at most one errand a minute, so it never loops visibly and every screen agrees. The receptionist walks to the elevator when the player asks for a room (on that player's screen only).
 - **Why:** The reception handled rooms without anyone behind it, and a librarian on a fixed 150-second loop felt robotic.

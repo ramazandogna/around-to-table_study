@@ -45,6 +45,9 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **A dialog must not live inside something that can fold.** A hidden parent hides its fixed children too; overlays belong in a portal.
 - **Keep things that open a board away from things you walk to.** A topic jar beside the notice board opened the board every time.
 - **Let the server end what it started for someone else.** Clearing a remote player's dance or cigarette when their body moved on this screen lost it whenever it arrived while they were still walking over.
+- **A zustand selector must not build a new array or object.** It re-renders forever; select the plain value and work the rest out in the component.
+- **Wait for the state, not for an element to be gone.** A loader that appears a tick after a click passed "no loader" checks and the test acted on the old room.
+- **Optimistic switches need the world to watch the store, not the message.** The owner's own switch changed the store first, so the room's echo looked like no change and the owner's pet never came back.
 - **Turn a body about the point that stays put.** A pet rearing up or rolling over sank into the floor until it turned about its back paws and its middle.
 
 ## Process
