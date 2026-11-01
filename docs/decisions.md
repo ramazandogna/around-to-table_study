@@ -2,6 +2,22 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-11-01: Staff work shifts and pick their moments from the clock
+- **Decision:** `shared/staff.ts` holds the shifts: a day (9–15) and an evening (15–22) librarian, nobody at night (a "back at 9:00" sign), and a day and a night receptionist. Who is on follows the viewer's local hour. What they do is chosen per 12-second slot by a seeded random of the slot number (`chance`), with at most one errand a minute, so it never loops visibly and every screen agrees. The receptionist walks to the elevator when the player asks for a room (on that player's screen only).
+- **Why:** The reception handled rooms without anyone behind it, and a librarian on a fixed 150-second loop felt robotic.
+
+## 2026-11-01: Table games are decided by the server
+- **Decision:** Darts, Pig (dice) and Higher-lower are pure functions in `shared/tables.ts`; the smoking room's Durable Object keeps one table per game (in storage, so hibernation keeps it), rolls the dice and keeps the secret number, and sends everyone the same state. A turn left for 40 seconds is played for the absent player when anyone at the table asks (`nudge`). Darts are scored by the server from where the dart landed; the swaying aim is drawn by the thrower's screen.
+- **Why:** Two to four people need to see one game. Casual darts trust the landing point; dice and secrets cannot be trusted to a client.
+
+## 2026-11-01: The jukebox plays YouTube in YouTube's own player
+- **Decision:** People queue YouTube links (2 each, 20 in all). The server checks each video with YouTube's oEmbed (exists and may be embedded, gives the title) and keeps the song and its start time; every screen plays it in the official embedded player at the room's point in it, at a low volume (12 of 100 by default, never above 30). The first screen to learn a song's length tells the server, which moves on when it ends (an alarm); the person who queued it may skip it, anyone else asks and half the room skips it.
+- **Why:** Hosting music would need licences; the embedded player is how YouTube allows playback elsewhere. Its terms ask for the player to stay visible (at least 200×200), so it sits in a corner card that anyone can switch off on their screen. Live streams have no length and play until skipped.
+
+## 2026-11-01: The phone works everywhere; the library only makes it quiet
+- **Decision:** A new `phone` rule (true everywhere) replaces `dmAllowed` for friends' messages; `dmAllowed` now only means whispers to someone in the same room. In the library, or while studying, a message only shakes a little phone by the player's name. Friends see each other's room, whether they study, their vibe, mood and announcement, and when they were last online; read receipts, buzzes, "where I am" (a marker that becomes a "go there" button) and a friend link (`?friend=<id>`) were added.
+- **Why:** A phone that stops working in the library was a rule against how phones work; the quiet is about sound, not about the phone.
+
 ## 2026-11-01: Private rooms behind a pass
 - **Decision:** Anyone can open a private room for 3, 5 or 9 people from the reception or the elevator. Rooms live in the social hub's SQLite (name, size, salted password hash, owner) and are forgotten after 24 hours empty; each room runs in its own Durable Object (`room:CODE`). Joining checks the password once over HTTPS and returns a signed pass for that guest and that room (12 hours), so passwords never travel in socket URLs. Invites go three ways: a link (`?room=CODE`), a phone message whose marker becomes a "join" button, and the player card.
 - **Why:** Group study and private talk are the third pillar of the app. One registry and one pass check keep rooms on the free plan without a new resource.

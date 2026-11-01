@@ -44,6 +44,8 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Rooms should fit their content.** Big empty floors look unfinished; shrink the room before adding filler.
 - **A dialog must not live inside something that can fold.** A hidden parent hides its fixed children too; overlays belong in a portal.
 - **Keep things that open a board away from things you walk to.** A topic jar beside the notice board opened the board every time.
+- **Let the server end what it started for someone else.** Clearing a remote player's dance or cigarette when their body moved on this screen lost it whenever it arrived while they were still walking over.
+- **Turn a body about the point that stays put.** A pet rearing up or rolling over sank into the floor until it turned about its back paws and its middle.
 
 ## Process
 - **One cycle = one roadmap step + the top 3–5 issues**, then commit, deploy and try it on a phone.
