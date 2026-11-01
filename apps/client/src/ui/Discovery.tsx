@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { PAINTINGS, RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
+import { FLAW_IDS, FLAWS, PAINTINGS, RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
 import { t } from '../i18n/t';
 import { useGameStore, type Discovery as Found } from '../state/store';
 
@@ -61,6 +61,17 @@ function Body({ found }: { found: Found }) {
         <p className="discovery-kicker">{t('discovery.painting')}</p>
         <h3>{painting?.title}</h3>
         <p>{painting?.story}</p>
+      </>
+    );
+  }
+  if (found.kind === 'flaw') {
+    const id = FLAW_IDS[found.index];
+    const flaw = id ? FLAWS[id] : null;
+    return (
+      <>
+        <p className="discovery-kicker">{t('discovery.flaw')}</p>
+        <h3>{flaw?.title}</h3>
+        <p>{flaw?.text}</p>
       </>
     );
   }

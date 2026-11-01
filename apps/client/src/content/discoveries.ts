@@ -234,3 +234,24 @@ export const RENOVATION_NOTES: readonly string[] = [
   'Half the wall is a fresh warm cream. The other half is waiting for more people to come.',
   'A stack of new desks, still wrapped. Each one has a sticker: “for two”.',
 ];
+
+export type Flaw = { title: string; text: string };
+
+/** Small things wrong with the library, as in any real one: each can be looked at. */
+export const FLAWS = {
+  crack: {
+    title: 'A cracked pane',
+    text: 'A thin crack runs across one pane, star-shaped where a stray ball hit it last spring. A sticky note on the frame: “Glazier ordered. Please don’t lean on it. — the caretaker”',
+  },
+  shutter: {
+    title: 'Shutters closed',
+    text: 'This window lost its latch in the autumn storm, and the shutters banged all through exam week. They stay closed now, nailed shut, until the new latch arrives.',
+  },
+  shelf: {
+    title: 'Being fixed',
+    text: 'One shelf sagged under too many dictionaries. It is taped off while the carpenter makes a stronger one; its books wait in a neat pile beside it.',
+  },
+} as const satisfies Record<string, Flaw>;
+
+export type FlawId = keyof typeof FLAWS;
+export const FLAW_IDS = Object.keys(FLAWS) as FlawId[];

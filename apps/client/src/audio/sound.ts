@@ -5,14 +5,45 @@ import { readJson, writeJson } from '../net/storage';
  * and nothing to license: a glassy clink for friends, a phone buzz for
  * messages, soft footsteps, a pop for emotes, a chime when the library grows.
  */
-export type SoundName = 'clink' | 'phone' | 'step' | 'pop' | 'poke' | 'chime' | 'click';
+export type SoundName =
+  | 'clink'
+  | 'phone'
+  | 'step'
+  | 'pop'
+  | 'poke'
+  | 'chime'
+  | 'click'
+  /** A quarter of a study timer done: one soft bell. */
+  | 'quarter'
+  /** A study timer done: a little rising tune. */
+  | 'finish'
+  /** A cat saying goodbye at the library door. */
+  | 'mew';
+
+/** How the player's own footsteps sound; chosen in the wardrobe, kept on this device. */
+export const FOOTSTEPS = ['soft', 'wood', 'sneaker'] as const;
+export type Footsteps = (typeof FOOTSTEPS)[number];
 
 const MUTED_KEY = 'att.muted';
+const STEPS_KEY = 'att.steps';
 
 let context: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = readJson<boolean>(MUTED_KEY) ?? false;
 let stepSide = 0;
+const savedSteps = readJson<string>(STEPS_KEY);
+let footsteps: Footsteps = FOOTSTEPS.includes(savedSteps as Footsteps)
+  ? (savedSteps as Footsteps)
+  : 'soft';
+
+export function getFootsteps(): Footsteps {
+  return footsteps;
+}
+
+export function setFootsteps(value: Footsteps): void {
+  footsteps = value;
+  writeJson(STEPS_KEY, value);
+}
 
 /** Browsers only start audio after the player has touched or typed something. */
 function audio(): { ctx: AudioContext; out: GainNode } | null {
@@ -68,8 +99,13 @@ function tone({ ctx, out }: { ctx: AudioContext; out: GainNode }, t: Tone): void
   osc.stop(start + t.duration + 0.02);
 }
 
-/** A short burst of filtered noise, for footsteps on wood. */
-function thump({ ctx, out }: { ctx: AudioContext; out: GainNode }, volume: number, pitch: number) {
+/** A short burst of filtered noise, for footsteps. */
+function thump(
+  { ctx, out }: { ctx: AudioContext; out: GainNode },
+  volume: number,
+  pitch: number,
+  type: BiquadFilterType = 'lowpass',
+) {
   const length = Math.floor(ctx.sampleRate * 0.06);
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
   const data = buffer.getChannelData(0);
@@ -77,7 +113,7 @@ function thump({ ctx, out }: { ctx: AudioContext; out: GainNode }, volume: numbe
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
+  filter.type = type;
   filter.frequency.value = pitch;
   const gain = ctx.createGain();
   gain.gain.value = volume;
@@ -104,7 +140,7 @@ export function play(name: SoundName): void {
       break;
     case 'step':
       stepSide = 1 - stepSide;
-      thump(a, 0.18, 700 + stepSide * 160);
+      step(a, footsteps, stepSide);
       break;
     case 'pop':
       tone(a, { frequency: 520, duration: 0.12, volume: 0.18, to: 980 });
@@ -121,5 +157,59 @@ export function play(name: SoundName): void {
     case 'click':
       tone(a, { frequency: 1200, duration: 0.04, volume: 0.08, type: 'square', to: 800 });
       break;
+    case 'quarter':
+      tone(a, { frequency: 1175, duration: 0.9, volume: 0.1, type: 'triangle' });
+      tone(a, { frequency: 2350, duration: 0.5, volume: 0.03 });
+      break;
+    case 'finish':
+      [523, 659, 784, 1047, 1319].forEach((frequency, i) =>
+        tone(a, { frequency, at: i * 0.09, duration: 0.5, volume: 0.13, type: 'triangle' }),
+      );
+      tone(a, { frequency: 2093, at: 0.5, duration: 0.9, volume: 0.07 });
+      tone(a, { frequency: 2637, at: 0.58, duration: 0.8, volume: 0.05 });
+      break;
+    case 'mew':
+      tone(a, { frequency: 620, duration: 0.16, volume: 0.1, type: 'triangle', to: 980 });
+      tone(a, {
+        frequency: 980,
+        at: 0.15,
+        duration: 0.24,
+        volume: 0.09,
+        type: 'triangle',
+        to: 560,
+      });
+      break;
   }
+}
+
+/** One footstep in the chosen style; the two feet differ a little. */
+function step(a: { ctx: AudioContext; out: GainNode }, style: Footsteps, side: number): void {
+  switch (style) {
+    case 'soft':
+      thump(a, 0.18, 700 + side * 160);
+      break;
+    case 'wood':
+      // A hollow knock: a higher, ringing thump with a short tone in it.
+      thump(a, 0.22, 1500 + side * 200, 'bandpass');
+      tone(a, { frequency: 240 + side * 30, duration: 0.07, volume: 0.07, type: 'triangle' });
+      break;
+    case 'sneaker':
+      // Rubber on a polished floor: a soft pat and, now and then, a squeak.
+      thump(a, 0.12, 900 + side * 120);
+      if (Math.random() < 0.35) {
+        tone(a, { frequency: 2200, duration: 0.06, volume: 0.025, to: 2900 });
+      }
+      break;
+  }
+}
+
+/** Plays one step in a style, to hear it before choosing it. */
+export function previewStep(style: Footsteps): void {
+  const a = audio();
+  if (!a) return;
+  step(a, style, 0);
+  window.setTimeout(() => {
+    const b = audio();
+    if (b) step(b, style, 1);
+  }, 260);
 }

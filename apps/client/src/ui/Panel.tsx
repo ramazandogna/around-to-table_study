@@ -131,21 +131,37 @@ export function Stepper({
   );
 }
 
+/**
+ * A row of colours to pick from. The first chip keeps the character's own
+ * colour (`undefined`); the others are indexes into `colors`.
+ */
 export function Swatches({
   label,
   colors,
   value,
+  original,
   onChange,
 }: {
   label: string;
   colors: readonly string[];
-  value: number;
-  onChange: (index: number) => void;
+  value: number | undefined;
+  /** Name of the "as drawn" chip. */
+  original: string;
+  onChange: (index: number | undefined) => void;
 }) {
   return (
     <div className="option-row">
       <span className="option-label">{label}</span>
       <div className="swatches" role="radiogroup" aria-label={label}>
+        <button
+          type="button"
+          role="radio"
+          className="swatch swatch--original"
+          aria-checked={value === undefined}
+          aria-label={original}
+          title={original}
+          onClick={() => onChange(undefined)}
+        />
         {colors.map((color, i) => (
           <button
             key={color}

@@ -75,7 +75,8 @@ export function App() {
           <EmoteMenu />
           <ChatBar />
         </div>
-        <p className="hud-hint">{t('hint.controls')}</p>
+        <p className="hud-hint hud-hint--keys">{t('hint.controls')}</p>
+        <p className="hud-hint hud-hint--touch">{t('hint.touch')}</p>
       </footer>
       <SitDialog />
       <ConfirmDialog />

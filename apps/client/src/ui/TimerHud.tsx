@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { quartersDone } from '@att/shared';
+import { useEffect, useRef, useState } from 'react';
+import { play } from '../audio/sound';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { formatClock } from '../state/study';
@@ -17,6 +19,27 @@ export function TimerHud() {
 
   const left = timer ? timer.endsAt - now : 0;
   const done = timer !== null && left <= 0;
+
+  // Each quarter rings a soft bell for the player alone, even in the quiet library;
+  // the last one is the finish, which everyone in the room sees.
+  const quarters = timer
+    ? quartersDone({ totalMs: timer.totalMs, remainingMs: Math.max(0, left) })
+    : 0;
+  const rung = useRef<{ timer: typeof timer; quarters: number }>({ timer: null, quarters: 0 });
+  useEffect(() => {
+    if (!timer) return;
+    if (rung.current.timer !== timer) rung.current = { timer, quarters };
+    if (quarters <= rung.current.quarters) return;
+    rung.current.quarters = quarters;
+    const store = useGameStore.getState();
+    if (quarters < 4) {
+      play('quarter');
+      return;
+    }
+    play('finish');
+    store.connection?.finished();
+    store.setNotice('finished');
+  }, [timer, quarters]);
 
   // Do not disturb belongs to the timer; it ends when the time is up.
   useEffect(() => {

@@ -17,8 +17,23 @@ export function HudPlate() {
   const connected = useGameStore((s) => s.connected);
   const playersHere = useGameStore((s) => s.playersHere);
   const studying = useGameStore((s) => s.studying);
+  const open = useGameStore((s) => s.plateOpen);
   return (
-    <header className="hud-title panel panel--compact">
+    <header className={`hud-title panel panel--compact${open ? '' : ' hud-title--folded'}`}>
+      {/* On phones the plate starts folded to one small button; desktops never see it. */}
+      <button
+        type="button"
+        className="hud-fold"
+        aria-expanded={open}
+        aria-label={t(open ? 'hud.fold' : 'hud.unfold')}
+        onClick={() => useGameStore.getState().setPlateOpen(!open)}
+      >
+        <span aria-hidden>{AREA_ICON[area]}</span>
+        <span className="hud-fold-count">{connected ? playersHere : '…'}</span>
+        <span className="hud-fold-arrow" aria-hidden>
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
       <div className="hud-heading">
         <span className="hud-name">{APP_NAME}</span>
         <span className="hud-area">
@@ -74,7 +89,7 @@ function IntroLink() {
       onClick={() => useGameStore.getState().setIntroOpen(true)}
     >
       <span className="hud-icon" aria-hidden>
-        📜
+        ❓
       </span>
       <span className="hud-label">{t('hud.about')}</span>
     </button>
@@ -88,6 +103,7 @@ function IntroLink() {
 export function MapCorner() {
   const area = useGameStore((s) => s.area);
   const world = useGameStore((s) => s.world);
+  const open = useGameStore((s) => s.mapOpen);
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -98,7 +114,18 @@ export function MapCorner() {
   }, []);
 
   return (
-    <aside className="map-corner" aria-label={t('map.title')}>
+    <aside className={`map-corner${open ? '' : ' map-corner--folded'}`} aria-label={t('map.title')}>
+      {/* On phones the map starts folded to a small button; desktops never see it. */}
+      <button
+        type="button"
+        className="map-fold"
+        aria-expanded={open}
+        aria-label={t(open ? 'map.fold' : 'map.unfold')}
+        onClick={() => useGameStore.getState().setMapOpen(!open)}
+      >
+        <span aria-hidden>🗺️</span>
+        {world && <span className="map-fold-count">{world.online}</span>}
+      </button>
       <div className="map-frame">
         <span className="map-tab">{t(`area.${area}`)}</span>
         <div ref={host} className="map-canvas-host" />

@@ -8,6 +8,7 @@ import {
   type Friend,
   type StatusLines,
   type StudyStatus,
+  type WaitingPet,
 } from '@att/shared';
 import { create } from 'zustand';
 import { isMuted, setMuted as setSoundMuted } from '../audio/sound';
@@ -44,7 +45,11 @@ export type Notice =
   | 'desk_opened'
   | 'no_dance'
   | 'muted'
-  | 'unmuted';
+  | 'unmuted'
+  /** The player's pet stays at the library door. */
+  | 'pet_waits'
+  /** A study timer ran out. */
+  | 'finished';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -55,6 +60,8 @@ export type ChatLine = {
   to?: string;
   text?: string;
   self: boolean;
+  /** When it was said: the server's clock for chat, this device's for comings and goings. */
+  at: number;
 };
 
 const CHAT_LOG_LINES = 100;
@@ -79,7 +86,7 @@ export type SitStep = 'activity' | 'timer';
 
 /** Something found by looking closely: a shelf moment, a painting, the renovation. */
 export type Discovery = {
-  kind: 'shelf' | 'painting' | 'renovation';
+  kind: 'shelf' | 'painting' | 'renovation' | 'flaw';
   /** Index into the content list for its kind. */
   index: number;
   /** Which moment of a shelf, or which note of the renovation. */
@@ -111,6 +118,11 @@ type GameState = {
   playersHere: number;
   /** Everyone in the building and how many of them sit at a table, from the social socket. */
   world: { online: number; studying: number } | null;
+  /** Pets sitting at the library door while their people study, from the social socket. */
+  waitingPets: WaitingPet[];
+  /** On phones the title plate and the map fold into small buttons; these open them. */
+  plateOpen: boolean;
+  mapOpen: boolean;
   /** Renovation strips opened per room, as the server last said. */
   opened: Partial<Record<AreaId, number>>;
   radial: Radial | null;
@@ -165,7 +177,9 @@ type GameState = {
   addMessage: (friend: string, message: DirectMessage) => void;
   setConnected: (connected: boolean) => void;
   setPlayersHere: (count: number) => void;
-  setWorld: (world: { online: number; studying: number }) => void;
+  setWorld: (world: { online: number; studying: number }, waiting: WaitingPet[]) => void;
+  setPlateOpen: (open: boolean) => void;
+  setMapOpen: (open: boolean) => void;
   setOpened: (area: AreaId, opened: number) => void;
   setRadial: (radial: Radial | null) => void;
   setDiscovery: (discovery: Discovery | null) => void;
@@ -175,7 +189,7 @@ type GameState = {
   setStudying: (count: number) => void;
   setTyping: (typing: boolean) => void;
   setNotice: (notice: Notice | null, value?: string) => void;
-  addChatLine: (line: Omit<ChatLine, 'key'>) => void;
+  addChatLine: (line: Omit<ChatLine, 'key' | 'at'> & { at?: number }) => void;
   setChatOpen: (open: boolean) => void;
   setSelected: (selected: Selected | null) => void;
   /** Saves the lines on this device and shows them in the world. */
@@ -211,6 +225,9 @@ export const useGameStore = create<GameState>((set) => ({
   connected: false,
   playersHere: 1,
   world: null,
+  waitingPets: [],
+  plateOpen: false,
+  mapOpen: false,
   opened: {},
   radial: null,
   discovery: null,
@@ -275,7 +292,9 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   setConnected: (connected) => set({ connected }),
   setPlayersHere: (playersHere) => set({ playersHere }),
-  setWorld: (world) => set({ world }),
+  setWorld: (world, waitingPets) => set({ world, waitingPets }),
+  setPlateOpen: (plateOpen) => set({ plateOpen }),
+  setMapOpen: (mapOpen) => set({ mapOpen }),
   setOpened: (area, opened) => set((state) => ({ opened: { ...state.opened, [area]: opened } })),
   setRadial: (radial) => set({ radial }),
   setDiscovery: (discovery) => set({ discovery }),
@@ -290,7 +309,9 @@ export const useGameStore = create<GameState>((set) => ({
   setNotice: (notice, value) => set({ notice, noticeValue: value ?? null }),
   addChatLine: (line) =>
     set((state) => ({
-      chatLog: [...state.chatLog, { ...line, key: ++chatLineKey }].slice(-CHAT_LOG_LINES),
+      chatLog: [...state.chatLog, { ...line, at: line.at ?? Date.now(), key: ++chatLineKey }].slice(
+        -CHAT_LOG_LINES,
+      ),
       // Comings and goings are worth seeing but not worth a badge.
       unread: state.chatOpen
         ? 0

@@ -15,6 +15,7 @@ import {
   MathUtils,
   Vector3,
   type AnimationAction,
+  type BufferGeometry,
   type Mesh,
   type MeshStandardMaterial,
 } from 'three';
@@ -91,6 +92,8 @@ const EMOTE_GESTURE: Partial<Record<Emote, Gesture>> = {
   heart: 'nod',
 };
 const POKED_MS = 3200;
+/** A finished session stays over the head a little longer than an emote. */
+const CELEBRATE_MS = 4500;
 /** A tapped icon row stays open this long. */
 const LINES_OPEN_MS = 6000;
 
@@ -146,6 +149,8 @@ export class Avatar {
   private actions!: Record<Loop, AnimationAction>;
   private clips!: CharacterClips;
   private materials: MeshStandardMaterial[] = [];
+  /** Each avatar's own geometry, coloured for its look. */
+  private geometries: BufferGeometry[] = [];
   private pose: Pose = 'idle';
   /** The chair or sofa being sat on (or about to be). */
   private seat: Seat | null = null;
@@ -243,15 +248,18 @@ export class Avatar {
       this.mixer.stopAllAction();
       this.model.removeFromParent();
       for (const material of this.materials) material.dispose();
+      for (const geometry of this.geometries) geometry.dispose();
     }
     this.model = model;
     this.model.rotation.y = turned;
     this.clips = clips;
     // Each avatar gets its own materials, so it can light up on its own when hovered.
     this.materials = [];
+    this.geometries = [];
     model.traverse((child) => {
       const mesh = child as Mesh;
       if (!mesh.isMesh) return;
+      this.geometries.push(mesh.geometry);
       const material = (mesh.material as MeshStandardMaterial).clone();
       mesh.material = material;
       this.materials.push(material);
@@ -450,6 +458,16 @@ export class Avatar {
     const gesture = EMOTE_GESTURE[emote];
     if (gesture && !this.isMoving) this.play(gesture);
     if (HOPPING.has(emote) && !this.isSeated) this.hopFor = HOP_SECONDS;
+  }
+
+  /**
+   * A study session finished: a big burst of stars that the whole room sees,
+   * even in the quiet library, where emotes are otherwise small and still.
+   */
+  celebrate(): void {
+    this.stopEmote?.();
+    this.stopEmote = showEmote(this.emoteIcon, 'cheer', false, CELEBRATE_MS);
+    if (!this.isMoving) this.play('nod');
   }
 
   /** The name tag on screen, to tell when people crowd together. */
@@ -711,10 +729,11 @@ export class Avatar {
    * slow down with the body), and the sit pose in and out over a moment.
    */
   private animate(delta: number): void {
-    const sitTarget = this.pose === 'sit' ? 1 : 0;
+    // Only ever moves towards the pose: once fully seated (or standing) it stays
+    // put, so a slow frame cannot dip a seated body back towards standing.
     const fade = delta / SIT_FADE_SECONDS;
     this.sitBlend =
-      sitTarget > this.sitBlend
+      this.pose === 'sit'
         ? Math.min(1, this.sitBlend + fade)
         : Math.max(0, this.sitBlend - fade * 1.5);
     const pace = MathUtils.clamp(this.speed / WALK_SPEED, 0, 1);
@@ -809,6 +828,7 @@ export class Avatar {
     window.clearTimeout(this.linesOpenTimer);
     this.mixer.stopAllAction();
     for (const material of this.materials) material.dispose();
+    for (const geometry of this.geometries) geometry.dispose();
     this.label.element.remove();
     this.root.removeFromParent();
   }

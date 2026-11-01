@@ -15,9 +15,10 @@ import {
   type Object3D,
 } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { SHELF_TOPICS } from '../content/discoveries';
+import { FLAW_IDS, SHELF_TOPICS } from '../content/discoveries';
 import { t } from '../i18n/t';
 import { buildDoors, WALL_HEIGHT, type Person } from './doors';
+import { buildFlaws, type ShelfFront, type WindowSpot } from './flaws';
 import { floorTexture } from './floors';
 import { facing, instance, type Placement } from './instancing';
 import type { Furniture, ModelTemplate } from './models';
@@ -68,7 +69,7 @@ const noise = (x: number, y: number, salt = 0) => {
 /** Something to look at up close: a shelf of books, a painting, the renovation. */
 export type Examinable = {
   id: string;
-  kind: 'shelf' | 'painting' | 'renovation';
+  kind: 'shelf' | 'painting' | 'renovation' | 'flaw';
   /** Index into the content list for its kind. */
   index: number;
   /** Where to stand to look at it. */
@@ -156,7 +157,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
     }),
   );
 
-  buildWalls(grid, furniture, root, wallMaterial);
+  const windows = buildWalls(grid, furniture, root, wallMaterial);
   const doors = buildDoors(grid, root, {
     floorY: FLOOR_Y,
     wallThickness: furniture.wall.size.z,
@@ -182,6 +183,24 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
       const c = at(x, y);
       const { x: cx, z: cz } = tileCenter(x, y);
       switch (c) {
+        case TILE.staffChair: {
+          // The librarian's chair, pulled up to the desk beside it.
+          const desk = [
+            { x, y: y - 1 },
+            { x, y: y + 1 },
+            { x: x - 1, y },
+            { x: x + 1, y },
+          ].find((n) => at(n.x, n.y) === TILE.receptionDesk) ?? { x, y: y - 1 };
+          const toDesk = { x: desk.x - x, y: desk.y - y };
+          seats.push({
+            x: cx + toDesk.x * CHAIR_INSET,
+            z: cz + toDesk.y * CHAIR_INSET,
+            y: FLOOR_Y,
+            rotation: facing(toDesk.x, toDesk.y) + Math.PI,
+            scale: [1, CHAIR_SQUASH, 1],
+          });
+          break;
+        }
         case TILE.seat: {
           const toTable = grid.seatFacing({ x, y }) ?? { x: 0, y: 1 };
           seats.push({
@@ -302,6 +321,33 @@ export function buildArea(grid: AreaGrid, furniture: Furniture): BuiltArea {
     });
     pickables.push(renovation.pickable);
   }
+  const { y: shelfHeight, z: shelfDepth } = furniture.bookcaseClosedWide.size;
+  const fronts: ShelfFront[] = shelves.runs.map((run) => {
+    const first = run.tiles[0] ?? run.stand;
+    const last = run.tiles.at(-1) ?? first;
+    const back = 0.5 - shelfDepth / 2 - 0.02;
+    const out = shelfDepth / 2 - back;
+    return {
+      x: (first.x + last.x) / 2 + 0.5 + run.dx * out,
+      z: (first.y + last.y) / 2 + 0.5 + run.dz * out,
+      normal: { x: run.dx, z: run.dz },
+      length: run.tiles.length,
+      height: shelfHeight,
+      stand: run.stand,
+    };
+  });
+  const flaws = buildFlaws(grid, root, windows, fronts);
+  materials.push(...flaws.materials);
+  textures.push(...flaws.textures);
+  for (const { id, stand, mesh } of flaws.found) {
+    examinables.set(`flaw:${id}`, {
+      id: `flaw:${id}`,
+      kind: 'flaw',
+      index: FLAW_IDS.indexOf(id),
+      stand,
+    });
+    pickables.push(mesh);
+  }
   addDoorSigns(grid, root);
 
   return {
@@ -331,7 +377,7 @@ function buildWalls(
   furniture: Furniture,
   root: Group,
   material: MeshStandardMaterial,
-): void {
+): WindowSpot[] {
   const { width: W, height: H } = grid;
   const at = (x: number, y: number) => grid.tileAt({ x, y });
   const thickness = furniture.wall.size.z;
@@ -375,6 +421,24 @@ function buildWalls(
     }
   }
   root.add(instance(furniture.doorway, elevator));
+  return [
+    ...windows
+      .filter((w) => w.rotation === Math.PI)
+      .map((w) => ({
+        x: w.x,
+        z: w.z,
+        normal: { x: 0, z: 1 },
+        stand: { x: Math.floor(w.x), y: 1 },
+      })),
+    ...windows
+      .filter((w) => w.rotation !== Math.PI)
+      .map((w) => ({
+        x: w.x,
+        z: w.z,
+        normal: { x: 1, z: 0 },
+        stand: { x: 1, y: Math.floor(w.z) },
+      })),
+  ];
 }
 
 /**
@@ -666,14 +730,16 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
   if (middle) {
     const top = FLOOR_Y + furniture.desk.size.y;
     const rotation = middle.rotation ?? 0;
-    // The laptop faces the receptionist behind the desk; the lamp sits one tile along it.
+    // The laptop's screen faces the receptionist behind the desk (Kenney's laptop
+    // model opens towards -z, so the desk's own turn already points it there);
+    // the lamp sits one tile along it.
     root.add(
       instance(furniture.laptop, [
         {
           x: middle.x,
           z: middle.z,
           y: top,
-          rotation: rotation + Math.PI,
+          rotation,
           scale: [0.75, 0.75, 0.75],
         },
       ]),

@@ -42,7 +42,12 @@ export function emoteImage(emote: Emote): string {
  * Shows an emote in `host` (the slot over someone's head). Subtle emotes (in
  * the library) are small and still. Returns a function that removes it early.
  */
-export function showEmote(host: HTMLElement, emote: Emote, subtle: boolean): () => void {
+export function showEmote(
+  host: HTMLElement,
+  emote: Emote,
+  subtle: boolean,
+  ms = EMOTE_MS,
+): () => void {
   const effect = EFFECTS[emote];
   const frames = typeof effect.bubble === 'string' ? [effect.bubble] : effect.bubble;
   const bubble = document.createElement('img');
@@ -88,6 +93,7 @@ export function showEmote(host: HTMLElement, emote: Emote, subtle: boolean): () 
     host.className = 'avatar-emote';
     host.replaceChildren();
   };
-  const timer = window.setTimeout(stop, EMOTE_MS);
+  host.style.setProperty('--emote-ms', `${ms}ms`);
+  const timer = window.setTimeout(stop, ms);
   return stop;
 }

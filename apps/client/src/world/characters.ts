@@ -1,7 +1,17 @@
 import { CHARACTERS, type Appearance } from '@att/shared';
-import { AnimationMixer, Box3, Vector3, type AnimationClip, type Group, type Mesh } from 'three';
+import {
+  AnimationMixer,
+  Box3,
+  Vector3,
+  type AnimationClip,
+  type Group,
+  type Mesh,
+  type MeshStandardMaterial,
+  type SkinnedMesh,
+} from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
+import { dressMesh, mapOutfit, type OutfitMap } from './outfit';
 import { createDanceCycle, createStudyPose, createWaveGesture } from './poses';
 
 const PATH = 'models/characters/';
@@ -32,7 +42,7 @@ export type CharacterKit = {
   seatedHipHeight: number;
 };
 
-type Loaded = { scene: Group; clips: CharacterClips };
+type Loaded = { scene: Group; clips: CharacterClips; outfit: OutfitMap };
 
 let kit: Promise<CharacterKit> | null = null;
 
@@ -56,14 +66,23 @@ async function loadKit(): Promise<CharacterKit> {
       const scene = gltf.scene;
       const height = new Box3().setFromObject(scene).getSize(new Vector3()).y;
       scene.scale.setScalar(CHARACTER_HEIGHT / height);
+      const meshes: SkinnedMesh[] = [];
       scene.traverse((child) => {
         const mesh = child as Mesh;
-        if (mesh.isMesh) mesh.castShadow = true;
+        if (!mesh.isMesh) return;
+        mesh.castShadow = true;
+        // Every character wears vertex colours: white, unless a part was recoloured.
+        (mesh.material as MeshStandardMaterial).vertexColors = true;
+        meshes.push(mesh as SkinnedMesh);
       });
+      const head = meshes.find((m) => m.name.startsWith('head'));
+      const body = meshes.find((m) => m.name.startsWith('body'));
+      if (!head || !body) throw new Error(`Character ${id} has no head or body`);
       const animations = gltf.animations;
       const sit = clipNamed(animations, 'sit');
       return {
         scene,
+        outfit: mapOutfit(head, body),
         clips: {
           idle: clipNamed(animations, 'idle'),
           walk: clipNamed(animations, 'walk'),
@@ -84,7 +103,13 @@ async function loadKit(): Promise<CharacterKit> {
     seatedHipHeight: measureSeatedHip(first),
     create: (look) => {
       const source = loaded[look.character] ?? first;
-      return { model: clone(source.scene) as Group, clips: source.clips };
+      const model = clone(source.scene) as Group;
+      // Clones share geometry; each one gets its own, coloured for this look.
+      model.traverse((child) => {
+        const mesh = child as SkinnedMesh;
+        if (mesh.isSkinnedMesh) dressMesh(mesh, source.outfit.get(mesh.name), look);
+      });
+      return { model, clips: source.clips };
     },
   };
 }

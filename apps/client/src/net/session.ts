@@ -14,6 +14,9 @@ export type GuestSession = { token: string; id: string; name: string };
 const SESSION_KEY = 'att.session';
 const LOOK_KEY = 'att.look';
 const LINES_KEY = 'att.lines';
+/** Guests this device started over from whose leaving has not reached the server yet. */
+const PAST_KEY = 'att.past';
+const MAX_PAST = 9;
 
 export function loadSession(): GuestSession | null {
   const session = readJson<GuestSession>(SESSION_KEY);
@@ -24,11 +27,32 @@ export function forgetSession(): void {
   remove(SESSION_KEY);
 }
 
-/** Forgets the name and look on this device, so the next visit starts as someone new. */
+/**
+ * Forgets the name and look on this device, so the next visit starts as
+ * someone new, and asks the server to send this guest out of the building now
+ * rather than when its sockets time out. Guests whose leaving could not be
+ * sent (offline) are kept and sent again next time.
+ */
 export function forgetCharacter(): void {
+  const current = loadSession()?.token;
+  const tokens = [...new Set([current, ...(readJson<string[]>(PAST_KEY) ?? [])])]
+    .filter((token): token is string => typeof token === 'string')
+    .slice(0, MAX_PAST);
   forgetSession();
   remove(LOOK_KEY);
   remove(LINES_KEY);
+  if (tokens.length === 0) return;
+  writeJson(PAST_KEY, tokens);
+  void fetch('/api/leave', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tokens }),
+    keepalive: true,
+  })
+    .then((response) => response.ok && remove(PAST_KEY))
+    .catch(() => {
+      // Offline: kept for next time; their sockets also close once the heartbeat stops.
+    });
 }
 
 export type GuestError = 'invalid_name' | 'server_misconfigured' | 'network';

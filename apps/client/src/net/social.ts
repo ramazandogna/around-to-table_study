@@ -13,6 +13,7 @@ export function startSocial(session: GuestSession): () => void {
     token: session.token,
     area: () => useGameStore.getState().area,
     studying: () => useGameStore.getState().seated,
+    pet: () => useGameStore.getState().look?.pet ?? null,
     onMessage: (message) => {
       const store = useGameStore.getState();
       switch (message.t) {
@@ -48,7 +49,10 @@ export function startSocial(session: GuestSession): () => void {
           }
           break;
         case 'world':
-          store.setWorld({ online: message.online, studying: message.studying });
+          store.setWorld(
+            { online: message.online, studying: message.studying },
+            message.waiting ?? [],
+          );
           break;
         case 'error':
           if (
@@ -68,11 +72,13 @@ export function startSocial(session: GuestSession): () => void {
   });
   useGameStore.getState().setSocial(connection);
   const unsubscribe = useGameStore.subscribe((state, before) => {
-    if (state.seated !== before.seated && state.area === before.area) {
-      connection.where(state.area, state.seated);
+    const pet = state.look?.pet ?? null;
+    const petChanged = pet !== (before.look?.pet ?? null);
+    if ((state.seated !== before.seated || petChanged) && state.area === before.area) {
+      connection.where(state.area, state.seated, pet);
     }
     if (state.area === before.area) return;
-    connection.where(state.area, state.seated);
+    connection.where(state.area, state.seated, pet);
     if (!AREA_RULES[state.area].dmAllowed) {
       state.closePhone();
     } else if (!AREA_RULES[before.area].dmAllowed) {

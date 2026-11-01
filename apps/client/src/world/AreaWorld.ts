@@ -9,8 +9,10 @@ import {
   type AreaId,
   type BlockReason,
   type PlayerSnapshot,
+  type PetKind,
   type Point,
   type ServerMessage,
+  type WaitingPet,
 } from '@att/shared';
 import { play, unlockAudio } from '../audio/sound';
 import { RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
@@ -22,6 +24,9 @@ import { Avatar, type AvatarContext, type FloorPoint } from './Avatar';
 import { buildArea, FLOOR_Y, type BuiltArea, type Examinable } from './buildArea';
 import type { CharacterKit } from './characters';
 import { cursorFor, type CursorKind } from './cursors';
+import { Librarian } from './Librarian';
+import { Pet, type PetContext } from './Pet';
+import type { PetKit } from './pets';
 import type { IsoView } from './IsoView';
 import { minimap, type MapPerson } from './minimap';
 import type { Furniture } from './models';
@@ -82,7 +87,10 @@ const sameTile = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 /** Tiles apart, counting diagonal steps as one. */
 const reach = (a: Point, b: Point) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
-type Assets = { furniture: Furniture; characters: CharacterKit };
+type Assets = { furniture: Furniture; characters: CharacterKit; pets: PetKit };
+
+/** Pets sit this far apart beside the library door. */
+const PET_SPACING = 0.42;
 
 /** Something to do once the player has walked over to it. */
 type Pending =
@@ -129,6 +137,12 @@ export class AreaWorld {
   /** True while the mouse rests on the player, so the ring opens once per visit. */
   private overSelf = false;
   private readonly context: AvatarContext;
+  private readonly petContext: PetContext;
+  /** Pets walking along with people in this room, by their person's id ('self' for the player). */
+  private readonly pets = new Map<string, Pet>();
+  /** In the hall: pets sitting at the library door while their people study, by person. */
+  private readonly waiting = new Map<string, Pet>();
+  private librarian: Librarian | null = null;
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -142,12 +156,15 @@ export class AreaWorld {
       // Only the player steers with keys: someone else's seat is as good as a wall.
       walkable: (tile) => this.grid.isWalkable(tile) && !this.seatTaken(tile),
     };
+    this.petContext = { walkable: (tile) => this.grid.isWalkable(tile) };
     // The player's own look and status live in the store; the world shows them and the server shares them.
     this.unsubscribe = useGameStore.subscribe((state, before) => {
       if (state.look && state.look !== before.look) {
         this.player?.setLook(state.look);
         this.connection?.changeLook(state.look);
+        if (state.look.pet !== before.look?.pet) this.walkPet('self', this.player, state.look.pet);
       }
+      if (state.waitingPets !== before.waitingPets) this.seatWaitingPets(state.waitingPets);
       if (state.friends !== before.friends) this.markFriends();
       if (state.dancing !== before.dancing) this.dance(state.dancing);
       if (state.lines !== before.lines) {
@@ -201,6 +218,21 @@ export class AreaWorld {
     this.player.onTap = () => this.player?.toggleDetails();
     this.view.add(this.player.root);
     this.view.follow(start.x + 0.5, start.y + 0.5, 1);
+
+    // Pets wait outside the library; coming back out, yours is right there at the door.
+    const pet = look.pet;
+    if (pet && AREA_RULES[area].pets) {
+      const own = this.walkPet('self', this.player, pet);
+      const door = from === 'library' ? this.doorSpots()[0] : undefined;
+      if (own && door) own.wait(door.spot, door.facing);
+      own?.follow();
+    } else if (pet) {
+      useGameStore.getState().setNotice('pet_waits');
+      play('mew');
+    }
+    this.librarian = Librarian.create(this.assets.characters, this.grid, this.context);
+    if (this.librarian) this.view.add(this.librarian.avatar.root);
+    this.seatWaitingPets(useGameStore.getState().waitingPets);
 
     const store = useGameStore.getState();
     store.setArea(area);
@@ -276,6 +308,11 @@ export class AreaWorld {
     useGameStore.getState().setConnection(null);
     for (const other of this.others.values()) other.dispose();
     this.others.clear();
+    for (const pet of [...this.pets.values(), ...this.waiting.values()]) pet.dispose();
+    this.pets.clear();
+    this.waiting.clear();
+    this.librarian?.dispose();
+    this.librarian = null;
     this.player?.dispose();
     this.player = null;
     this.highlighted = null;
@@ -312,6 +349,8 @@ export class AreaWorld {
     this.updateBoard(player);
     this.updateHover();
     for (const other of this.others.values()) other.update(delta);
+    this.librarian?.update(delta);
+    this.updatePets(delta);
     this.arrangeCrowd(delta);
     this.mapTimer -= delta;
     if (this.mapTimer <= 0) {
@@ -332,6 +371,7 @@ export class AreaWorld {
     const nameOf = (id: string) => (id === selfId ? self?.name : this.others.get(id)?.name) ?? '?';
     switch (message.t) {
       case 'welcome':
+        for (const id of this.others.keys()) this.walkPet(id, null, undefined);
         for (const other of this.others.values()) other.dispose();
         this.others.clear();
         this.regrow(message.opened, false);
@@ -352,6 +392,7 @@ export class AreaWorld {
         const other = this.others.get(message.id);
         if (!other) break;
         store.addChatLine({ kind: 'left', name: other.name, self: false });
+        this.walkPet(message.id, null, undefined);
         other.dispose();
         this.others.delete(message.id);
         if (store.selected?.id === message.id) store.setSelected(null);
@@ -388,8 +429,15 @@ export class AreaWorld {
         if (!quiet) play('pop');
         break;
       }
-      case 'looked':
-        this.others.get(message.id)?.setLook(message.look);
+      case 'looked': {
+        const other = this.others.get(message.id);
+        other?.setLook(message.look);
+        if (other) this.walkPet(message.id, other, message.look.pet);
+        break;
+      }
+      case 'finished':
+        // A finished session: the whole room sees it; the sound was the finisher's alone.
+        (message.id === selfId ? this.player : this.others.get(message.id))?.celebrate();
         break;
       case 'placed':
         if (message.id === selfId && this.player && !sameTile(this.player.tile, message.tile)) {
@@ -406,6 +454,7 @@ export class AreaWorld {
           name: nameOf(message.id),
           text: message.text,
           self: mine,
+          at: message.at,
         });
         break;
       }
@@ -416,6 +465,7 @@ export class AreaWorld {
           to: nameOf(message.to),
           text: message.text,
           self: message.from === selfId,
+          at: message.at,
         });
         if (message.from !== selfId) store.setChatOpen(true);
         break;
@@ -466,6 +516,90 @@ export class AreaWorld {
     avatar.onTap = () => this.approach(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
+    this.walkPet(player.id, avatar, player.look.pet);
+  }
+
+  /**
+   * Gives someone's pet to the room, swaps it for another kind, or takes it
+   * away (no pet, or no owner). Rooms that keep pets out (the library) get
+   * none. Returns the pet walking with them, if any.
+   */
+  private walkPet(id: string, owner: Avatar | null, kind: PetKind | undefined): Pet | null {
+    const current = this.pets.get(id);
+    if (current && owner && current.kind === kind) return current;
+    current?.dispose();
+    this.pets.delete(id);
+    if (!owner || !kind || !AREA_RULES[this.areaId].pets) return null;
+    const { x, z } = owner.position;
+    const pet = new Pet(this.assets.pets, kind, { x, z }, `${id}:${kind}`, this.petContext);
+    pet.placeBy({ x, z });
+    this.pets.set(id, pet);
+    this.view.add(pet.root);
+    return pet;
+  }
+
+  private updatePets(delta: number): void {
+    for (const [id, pet] of this.pets) {
+      const owner = id === 'self' ? this.player : this.others.get(id);
+      if (!owner) continue;
+      const { x, z } = owner.position;
+      pet.update(delta, { x, z, moving: owner.isMoving });
+    }
+    for (const pet of this.waiting.values()) pet.update(delta, null);
+  }
+
+  /**
+   * In the hall, the pets of people studying in the library sit by its door,
+   * each with a small name tag, until their person comes back out.
+   */
+  private seatWaitingPets(waiting: readonly WaitingPet[]): void {
+    const selfId = useGameStore.getState().session?.id;
+    const here = this.areaId === 'hall' ? waiting.filter((w) => w.id !== selfId) : [];
+    for (const [id, pet] of this.waiting) {
+      if (here.some((w) => w.id === id && w.pet === pet.kind)) continue;
+      pet.dispose();
+      this.waiting.delete(id);
+    }
+    const spots = this.doorSpots();
+    here.forEach((w, i) => {
+      const spot = spots[i % Math.max(1, spots.length)];
+      if (!spot) return;
+      let pet = this.waiting.get(w.id);
+      if (!pet) {
+        pet = new Pet(this.assets.pets, w.pet, spot.spot, `${w.id}:${w.pet}`, this.petContext);
+        pet.setTag(t('pet.waiting', { name: w.name, pet: t(`pet.kind.${w.pet}`) }));
+        this.waiting.set(w.id, pet);
+        this.view.add(pet.root);
+      }
+      pet.wait(spot.spot, spot.facing);
+    });
+  }
+
+  /** Places beside the library door, inside the hall, facing the door. */
+  private doorSpots(): { spot: { x: number; z: number }; facing: { x: number; z: number } }[] {
+    if (this.areaId !== 'hall') return [];
+    const inside = this.grid.arrivalPoint('library');
+    const door = [
+      { x: inside.x, y: inside.y - 1 },
+      { x: inside.x, y: inside.y + 1 },
+      { x: inside.x - 1, y: inside.y },
+      { x: inside.x + 1, y: inside.y },
+    ].find((p) => this.grid.doorTarget(p) === 'library');
+    if (!door) return [];
+    const into = { x: inside.x - door.x, z: inside.y - door.y };
+    const side = { x: -into.z, z: into.x };
+    const spots: { spot: { x: number; z: number }; facing: { x: number; z: number } }[] = [];
+    for (const k of [1, -1, 2, -2, 3, -3, 4, -4]) {
+      const spot = {
+        x: inside.x + 0.5 + side.x * k * PET_SPACING + into.x * 0.1,
+        z: inside.y + 0.5 + side.z * k * PET_SPACING + into.z * 0.1,
+      };
+      const tile = { x: Math.floor(spot.x), y: Math.floor(spot.z) };
+      if (this.grid.isWalkable(tile) && !this.grid.isSeat(tile)) {
+        spots.push({ spot, facing: { x: -into.x, z: -into.z } });
+      }
+    }
+    return spots;
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
@@ -920,6 +1054,7 @@ export class AreaWorld {
         if (examinable.kind === 'shelf') {
           return t('tip.shelf', { topic: SHELF_TOPICS[examinable.index]?.name ?? '' });
         }
+        if (examinable.kind === 'flaw') return t('tip.flaw');
         return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
       }
       case 'tile':

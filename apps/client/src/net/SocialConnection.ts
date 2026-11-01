@@ -1,5 +1,6 @@
-import type { AreaId, SocialClientMessage, SocialServerMessage } from '@att/shared';
+import type { AreaId, PetKind, SocialClientMessage, SocialServerMessage } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
+import { isPong, keepAlive } from './heartbeat';
 
 type Options = {
   token: string;
@@ -7,12 +8,15 @@ type Options = {
   area: () => AreaId;
   /** Whether the player sits at a table, for the building's "studying" count. */
   studying: () => boolean;
+  /** The pet walking along, so it can wait at the library door. */
+  pet: () => PetKind | null;
   onMessage: (message: SocialServerMessage) => void;
 };
 
 /** The one socket for friends and presence; it stays open while moving between rooms. */
 export class SocialConnection {
   private readonly socket: ReconnectingWebSocket;
+  private readonly stopBeating: () => void;
 
   constructor(options: Options) {
     const url = () => {
@@ -20,9 +24,12 @@ export class SocialConnection {
       return `${scheme}://${location.host}/api/social/ws?token=${encodeURIComponent(options.token)}`;
     };
     this.socket = new ReconnectingWebSocket(url, [], { maxRetries: Infinity });
-    this.socket.addEventListener('open', () => this.where(options.area(), options.studying()));
+    this.stopBeating = keepAlive(this.socket);
+    this.socket.addEventListener('open', () =>
+      this.where(options.area(), options.studying(), options.pet()),
+    );
     this.socket.addEventListener('message', (event) => {
-      if (typeof event.data !== 'string') return;
+      if (typeof event.data !== 'string' || isPong(event.data)) return;
       try {
         options.onMessage(JSON.parse(event.data) as SocialServerMessage);
       } catch {
@@ -31,8 +38,8 @@ export class SocialConnection {
     });
   }
 
-  where(area: AreaId, studying: boolean): void {
-    this.send({ t: 'where', area, studying });
+  where(area: AreaId, studying: boolean, pet: PetKind | null): void {
+    this.send({ t: 'where', area, studying, pet });
   }
 
   befriend(to: string): void {
@@ -57,6 +64,7 @@ export class SocialConnection {
   }
 
   close(): void {
+    this.stopBeating();
     this.socket.close();
   }
 

@@ -9,6 +9,7 @@ import type {
   StudyStatus,
 } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
+import { isPong, keepAlive } from './heartbeat';
 
 type Options = {
   area: AreaId;
@@ -26,6 +27,7 @@ type Options = {
 /** One live connection to an area. Reconnects on its own and says hello again each time. */
 export class AreaConnection {
   private readonly socket: ReconnectingWebSocket;
+  private readonly stopBeating: () => void;
 
   constructor(private readonly options: Options) {
     const { area, token } = options;
@@ -34,6 +36,7 @@ export class AreaConnection {
       return `${scheme}://${location.host}/api/areas/${area}/ws?token=${encodeURIComponent(token)}`;
     };
     this.socket = new ReconnectingWebSocket(url, [], { maxRetries: Infinity });
+    this.stopBeating = keepAlive(this.socket);
     this.socket.addEventListener('open', () => {
       options.onStatus(true);
       this.send({
@@ -46,7 +49,7 @@ export class AreaConnection {
     });
     this.socket.addEventListener('close', () => options.onStatus(false));
     this.socket.addEventListener('message', (event) => {
-      if (typeof event.data !== 'string') return;
+      if (typeof event.data !== 'string' || isPong(event.data)) return;
       try {
         options.onMessage(JSON.parse(event.data) as ServerMessage);
       } catch {
@@ -83,6 +86,11 @@ export class AreaConnection {
     this.send({ t: 'dance', on });
   }
 
+  /** The study timer ran out; the server checks it really did. */
+  finished(): void {
+    this.send({ t: 'finished' });
+  }
+
   poke(to: string): void {
     this.send({ t: 'poke', to });
   }
@@ -92,6 +100,7 @@ export class AreaConnection {
   }
 
   close(): void {
+    this.stopBeating();
     this.socket.close();
   }
 

@@ -60,7 +60,7 @@ export function RadialMenu() {
     },
     {
       id: 'status',
-      icon: '🏷️',
+      icon: '💭',
       label: 'radial.status',
       run: () => store.setStatusOpen(true),
     },
@@ -85,7 +85,7 @@ export function RadialMenu() {
     },
     {
       id: 'about',
-      icon: '📜',
+      icon: '❓',
       label: 'radial.about',
       run: () => store.setIntroOpen(true),
     },
