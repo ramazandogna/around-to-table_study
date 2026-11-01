@@ -3,7 +3,10 @@ import { t, type MessageKey } from '../i18n/t';
 import { useGameStore, type ConfirmChoice } from '../state/store';
 import { Choice, Dialog, Panel } from './Panel';
 
-const OPTIONS: Record<'stand' | 'leave', { choice: ConfirmChoice; icon: string; key: string }[]> = {
+const OPTIONS: Record<
+  'stand' | 'leave' | 'block' | 'closeRoom',
+  { choice: ConfirmChoice; icon: string; key: string }[]
+> = {
   stand: [
     { choice: 'break', icon: '☕', key: 'confirm.break' },
     { choice: 'end', icon: '🏁', key: 'confirm.end' },
@@ -13,9 +16,20 @@ const OPTIONS: Record<'stand' | 'leave', { choice: ConfirmChoice; icon: string; 
     { choice: 'end', icon: '🚪', key: 'confirm.leave' },
     { choice: 'stay', icon: '📚', key: 'confirm.back' },
   ],
+  block: [
+    { choice: 'end', icon: '🚫', key: 'confirm.block' },
+    { choice: 'stay', icon: '↩️', key: 'confirm.cancel' },
+  ],
+  closeRoom: [
+    { choice: 'end', icon: '🗝️', key: 'confirm.closeRoom' },
+    { choice: 'stay', icon: '↩️', key: 'confirm.cancel' },
+  ],
 };
 
-/** Asks before a running timer is left behind: standing up from the table or leaving the library. */
+/**
+ * Asks before something hard to take back: leaving a running timer (standing
+ * up, leaving the library), blocking someone, closing a private room.
+ */
 export function ConfirmDialog() {
   const confirm = useGameStore((s) => s.confirm);
 
@@ -36,8 +50,13 @@ export function ConfirmDialog() {
   if (!confirm) return null;
   return (
     <Dialog>
-      <Panel title={t(`confirm.${confirm.kind}.title`)} className="panel--dialog">
-        <p className="panel-text">{t(`confirm.${confirm.kind}.text`)}</p>
+      <Panel
+        title={t(`confirm.${confirm.kind}.title`, { name: confirm.name ?? '' })}
+        className="panel--dialog"
+      >
+        <p className="panel-text">
+          {t(`confirm.${confirm.kind}.text`, { name: confirm.name ?? '' })}
+        </p>
         <div className="choice-list">
           {OPTIONS[confirm.kind].map(({ choice, icon, key }, i) => (
             <Choice

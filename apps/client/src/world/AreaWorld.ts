@@ -1,12 +1,18 @@
 import {
   AREA_RULES,
   EVENT_THEMES,
+  EVENTS,
+  themeOf,
   isRoomArea,
   roomArea,
   TILE,
   eventNow,
   createAreaGrid,
   onDuty,
+  rulesFor,
+  dayPhase,
+  type DayPhase,
+  type RoomRules,
   findPath,
   resolveWalkTarget,
   smoothPath,
@@ -22,13 +28,23 @@ import {
 import { playMusic, stopMusic } from '../audio/music';
 import { play, unlockAudio } from '../audio/sound';
 import { RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
+import { eventTitle } from '../content/events';
 import { TOPICS } from '../content/topics';
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
-import { mayRing } from '../net/social';
+import { isMuted, mayRing } from '../net/social';
 import { studyStatus, useGameStore, type ConfirmChoice, type RunningBlock } from '../state/store';
 import { Avatar, type AvatarContext, type FloorPoint } from './Avatar';
-import { buildArea, CHAIR_INSET, FLOOR_Y, type BuiltArea, type Examinable } from './buildArea';
+import { DAYLIGHT } from './ambience';
+import {
+  buildArea,
+  CHAIR_INSET,
+  CHAIR_PULLED,
+  CHAIR_TUCKED,
+  FLOOR_Y,
+  type BuiltArea,
+  type Examinable,
+} from './buildArea';
 import type { CharacterKit } from './characters';
 import { MACHINES, type ArcadeKit } from './arcade';
 import { cursorFor, type CursorKind } from './cursors';
@@ -107,6 +123,8 @@ const SEAT_PICK_HEIGHT = 0.82;
 const SEAT_PICK_RADIUS = 0.3;
 /** Pets sit this far apart beside the library door. */
 const PET_SPACING = 0.42;
+/** A chair left out this long is put on the librarian's list. */
+const TIDY_AFTER_SECONDS = 40;
 /** How often the shifts are checked, to change who sits at the desk. */
 const SHIFT_CHECK_SECONDS = 20;
 
@@ -140,6 +158,10 @@ export class AreaWorld {
   private built: BuiltArea | null = null;
   private player: Avatar | null = null;
   private readonly others = new Map<string, Avatar>();
+  /** Everyone's look, for bringing their pets back when a room lets pets in again. */
+  private readonly looks = new Map<string, Appearance>();
+  /** The people listed for a private room's owner, as last told to the store. */
+  private peopleKey = '';
   private connection: AreaConnection | null = null;
   private readonly heldKeys = new Set<string>();
   /** Where the keys point the player, or null when no key is held. */
@@ -174,6 +196,17 @@ export class AreaWorld {
   private staff: Staff | null = null;
   private deskSign: CSS2DObject | null = null;
   private shiftTimer = SHIFT_CHECK_SECONDS;
+  /** Chairs at tables by tile ("x,y"): how far out each is and whether it was left out. */
+  private readonly chairs = new Map<
+    string,
+    { tile: Point; toTable: Point; offset: number; out: boolean; emptyFor: number }
+  >();
+  /** The chair the player sat on, to push it back in on standing up. */
+  private satAt: Point | null = null;
+  private tidyTimer = 5;
+  private phase: DayPhase | null = null;
+  /** True once the player was asked what to do at the chair they stand at. */
+  private chairAsked = false;
   /** The room dressed up while an event is on, and which event that is. */
   private decor: EventDecor | null = null;
   private eventId: string | null = null;
@@ -215,6 +248,12 @@ export class AreaWorld {
       if (state.smoking !== before.smoking) this.smoke(state.smoking);
       if (state.buzzAt !== before.buzzAt) this.player?.buzz();
       if (state.travel && state.travel !== before.travel) this.travel(state.travel);
+      // The owner changed the private room's rules (here, or told by the room).
+      if (state.roomRules && before.roomRules && state.roomRules !== before.roomRules) {
+        this.applyRoomRules(state.roomRules, before.roomRules);
+      }
+      // Chose what to work on at the chair: now they sit down.
+      if (state.activity && !before.activity && this.player) this.player.chairAllowed = true;
       // Asking the reception for a room: the receptionist walks over to call the elevator.
       if (
         (state.roomsOpen && !before.roomsOpen) ||
@@ -228,6 +267,7 @@ export class AreaWorld {
       }
       if (
         state.activity === before.activity &&
+        state.study?.round === before.study?.round &&
         state.timer === before.timer &&
         state.dnd === before.dnd
       )
@@ -259,6 +299,8 @@ export class AreaWorld {
     const ticket = isRoomArea(area) ? useGameStore.getState().room : null;
     if (isRoomArea(area) && !ticket) area = 'hall';
     this.areaId = area;
+    useGameStore.getState().setRoomRules(isRoomArea(area) && ticket ? ticket.room.rules : null);
+    this.peopleKey = '';
     this.buildRoom(useGameStore.getState().opened[area] ?? 0);
     this.view.setBounds(this.grid.width, this.grid.height);
     this.boards = [];
@@ -280,7 +322,7 @@ export class AreaWorld {
 
     // Pets wait outside the library; coming back out, yours is right there at the door.
     const pet = look.pet;
-    if (pet && AREA_RULES[area].pets) {
+    if (pet && this.rules().pets) {
       const own = this.walkPet('self', this.player, look);
       const door = from === 'library' ? this.doorSpots()[0] : undefined;
       if (own && door) own.wait(door.spot, door.facing);
@@ -332,8 +374,29 @@ export class AreaWorld {
   private buildRoom(opened: number): void {
     this.removeRoom();
     this.grid = createAreaGrid(this.areaId, opened);
-    this.built = buildArea(this.grid, this.assets.furniture, this.assets.arcade);
+    this.built = buildArea(this.grid, this.assets.furniture, {
+      arcade: this.assets.arcade,
+      roomRules: useGameStore.getState().roomRules,
+    });
     this.view.add(this.built.root);
+    // Chairs start pushed in; who sits, or left one out, is worked out every frame.
+    this.chairs.clear();
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        const toTable = c === TILE.seat ? this.grid.seatFacing({ x, y }) : null;
+        if (toTable) {
+          this.chairs.set(`${x},${y}`, {
+            tile: { x, y },
+            toTable,
+            offset: CHAIR_TUCKED,
+            out: false,
+            emptyFor: 0,
+          });
+        }
+      }),
+    );
+    this.phase = null;
+    this.updateDaylight();
     this.seatMarkers = createSeatMarkers(this.grid.openChairs(), FLOOR_Y);
     this.seatTiles = [];
     this.grid.area.layout.forEach((row, y) =>
@@ -375,6 +438,7 @@ export class AreaWorld {
     useGameStore.getState().setConnection(null);
     for (const other of this.others.values()) other.dispose();
     this.others.clear();
+    this.looks.clear();
     for (const pet of [...this.pets.values(), ...this.waiting.values()]) pet.dispose();
     this.pets.clear();
     this.waiting.clear();
@@ -422,10 +486,13 @@ export class AreaWorld {
     this.updateHover();
     for (const other of this.others.values()) other.update(delta);
     this.staff?.update(delta);
+    this.updateChairs(delta);
+    this.askAtChair(player);
     this.shiftTimer -= delta;
     if (this.shiftTimer <= 0) {
       this.shiftTimer = SHIFT_CHECK_SECONDS;
       if ((this.staff?.id ?? null) !== onDuty(this.areaId, localHour())) this.seatStaff();
+      this.updateDaylight();
     }
     this.updatePets(delta);
     this.updateEvent(delta);
@@ -449,6 +516,7 @@ export class AreaWorld {
     const nameOf = (id: string) => (id === selfId ? self?.name : this.others.get(id)?.name) ?? '?';
     switch (message.t) {
       case 'welcome':
+        store.setLoading(false);
         for (const id of this.others.keys()) this.walkPet(id, null, null);
         for (const other of this.others.values()) other.dispose();
         this.others.clear();
@@ -535,6 +603,7 @@ export class AreaWorld {
       case 'looked': {
         const other = this.others.get(message.id);
         other?.setLook(message.look);
+        this.looks.set(message.id, message.look);
         if (other) this.walkPet(message.id, other, message.look);
         break;
       }
@@ -549,8 +618,9 @@ export class AreaWorld {
         break;
       case 'said': {
         const mine = message.id === selfId;
-        // "Do not disturb" hides everyone else's chatter, in the room and in the chat panel.
-        if (!mine && store.dnd) break;
+        // "Do not disturb" hides everyone else's chatter, in the room and in the chat panel;
+        // muting or blocking someone hides theirs.
+        if (!mine && (store.dnd || isMuted(message.id))) break;
         (mine ? this.player : this.others.get(message.id))?.say(message.text);
         store.addChatLine({
           kind: 'say',
@@ -562,6 +632,7 @@ export class AreaWorld {
         break;
       }
       case 'whispered':
+        if (message.from !== selfId && isMuted(message.from)) break;
         store.addChatLine({
           kind: 'whisper',
           name: nameOf(message.from),
@@ -573,8 +644,14 @@ export class AreaWorld {
         if (message.from !== selfId) store.setChatOpen(true);
         break;
       case 'invited': {
-        if (store.dnd) break;
+        if (store.dnd || isMuted(message.from)) break;
         store.setInvite({ from: nameOf(message.from), code: message.code, name: message.name });
+        store.notify({
+          kind: 'invite',
+          name: nameOf(message.from),
+          from: message.from,
+          code: message.code,
+        });
         if (mayRing()) play('clink');
         break;
       }
@@ -587,12 +664,18 @@ export class AreaWorld {
         }
         poker?.play('poke');
         poked?.poked(nameOf(message.from), message.to === selfId);
-        if (message.to === selfId) {
-          store.setNotice('poked', nameOf(message.from));
+        if (message.to === selfId && !isMuted(message.from)) {
+          store.notify({ kind: 'poke', name: nameOf(message.from), from: message.from }, 'poked');
           if (mayRing()) play('poke');
         }
         break;
       }
+      case 'roomRules':
+        store.setRoomRules(message.rules);
+        break;
+      case 'chaired':
+        this.setChair(message.tile, message.pulled);
+        break;
       case 'error':
         // A known wait shows on the send button; anything else gets a short notice.
         if (message.code === 'rate_limited' && message.retryInMs) {
@@ -600,18 +683,50 @@ export class AreaWorld {
         } else if (message.code === 'seat_taken') {
           this.stepOffSeat();
           store.setNotice('seat_taken');
-        } else if (message.code !== 'bad_message' && message.code !== 'blocked') {
+        } else if (
+          message.code === 'kicked' ||
+          message.code === 'banned' ||
+          message.code === 'room_closed'
+        ) {
+          // Sent out of a private room: back down to the hall, and told why.
+          const room = store.room?.room.name ?? '';
+          store.notify({ kind: message.code, name: room }, message.code);
+          if (message.code !== 'kicked') store.setRoom(null);
+          this.connection?.close();
+          this.goThrough('hall');
+        } else if (message.code === 'blocked') {
+          store.setNotice('blocked_between');
+        } else if (message.code !== 'bad_message') {
           store.setNotice(message.code);
         }
         break;
     }
     useGameStore.getState().setPlayersHere(this.others.size + 1);
+    this.listRoomPeople();
+  }
+
+  /** In a private room, its owner sees who is inside, to send someone out. */
+  private listRoomPeople(): void {
+    if (!isRoomArea(this.areaId)) return;
+    const people = [...this.others].map(([id, avatar]) => ({ id, name: avatar.name }));
+    const key = people.map((p) => p.id).join(',');
+    if (key === this.peopleKey) return;
+    this.peopleKey = key;
+    useGameStore.getState().setRoomPeople(people);
   }
 
   /** Puts whoever is on shift behind this room's desk, or a sign when the desk is closed. */
   private seatStaff(): void {
     this.removeStaff();
-    this.staff = Staff.create(this.assets.characters, this.grid, this.context, localHour());
+    const ambience = this.built?.ambience;
+    this.staff = Staff.create(this.assets.characters, this.grid, this.context, localHour(), {
+      windows: (ambience?.windows ?? []).map((w) => ({
+        stand: w.stand,
+        facing: { x: -w.normal.x, y: -w.normal.z },
+      })),
+      toggleWindow: (i) => ambience?.setWindowOpen(i, !ambience.isWindowOpen(i)),
+      daytime: () => ['morning', 'day', 'afternoon'].includes(dayPhase(localHour())),
+    });
     if (this.staff) {
       this.view.add(this.staff.avatar.root);
       return;
@@ -628,6 +743,127 @@ export class AreaWorld {
       this.deskSign.removeFromParent();
       this.deskSign = null;
     }
+  }
+
+  /**
+   * Chairs at tables: pulled out for whoever stands at one, slid in under
+   * whoever sits, and left out when someone walks off without sitting (or
+   * leaves the building seated). Whoever stood up after sitting pushes theirs
+   * back in; the librarian tidies the rest after a while.
+   */
+  private updateChairs(delta: number): void {
+    const built = this.built;
+    if (!built) return;
+    const bodies = [this.player, ...this.others.values()].filter((b): b is Avatar => !!b);
+    for (const chair of this.chairs.values()) {
+      const someone = bodies.find((b) => sameTile(b.tile, chair.tile) && !b.isMoving);
+      let target = chair.out ? CHAIR_PULLED : CHAIR_TUCKED;
+      if (someone?.isSeated) target = CHAIR_INSET;
+      else if (someone) target = CHAIR_PULLED;
+      if (someone) {
+        chair.out = true;
+        chair.emptyFor = 0;
+      } else if (chair.out) {
+        chair.emptyFor += delta;
+      }
+      if (Math.abs(target - chair.offset) < 0.002) continue;
+      chair.offset += (target - chair.offset) * Math.min(1, delta * 6);
+      built.setChair(chair.tile, chair.offset);
+    }
+    // Stood up after sitting: push the chair back in, for everyone.
+    const player = this.player;
+    if (player?.isSeated) this.satAt = player.tile;
+    else if (this.satAt && player && !sameTile(player.tile, this.satAt)) {
+      const chair = this.chairs.get(`${this.satAt.x},${this.satAt.y}`);
+      if (chair) {
+        chair.out = false;
+        this.connection?.chair(chair.tile, false);
+      }
+      this.satAt = null;
+    }
+    // The librarian's job: chairs left out for a while.
+    this.tidyTimer -= delta;
+    if (this.tidyTimer > 0 || this.staff?.kind !== 'librarian') return;
+    this.tidyTimer = 5;
+    const staff = this.staff;
+    for (const chair of this.chairs.values()) {
+      if (!chair.out || chair.emptyFor < TIDY_AFTER_SECONDS) continue;
+      if (
+        staff.choresWaiting.some(
+          (c) => sameTile(c.facing, chair.toTable) && sameTile(c.stand, this.tidyStand(chair)),
+        )
+      )
+        continue;
+      staff.addChore({
+        stand: this.tidyStand(chair),
+        facing: chair.toTable,
+        done: () => {
+          chair.out = false;
+        },
+      });
+    }
+  }
+
+  /** Where to stand to push a chair in: behind it, or on its tile when that is blocked. */
+  private tidyStand(chair: { tile: Point; toTable: Point }): Point {
+    const behind = { x: chair.tile.x - chair.toTable.x, y: chair.tile.y - chair.toTable.y };
+    return this.grid.isWalkable(behind) && !this.grid.isSeat(behind) ? behind : chair.tile;
+  }
+
+  /**
+   * At a chair: it is pulled out and the player is asked what they will work
+   * on; they sit once they choose. Saying "not now" steps them back off it.
+   */
+  private askAtChair(player: Avatar): void {
+    const store = useGameStore.getState();
+    if (!player.isAtChair) {
+      if (!player.isSeated) this.chairAsked = false;
+      if (!player.isAtChair && !player.isSeated && !player.isMoving) player.chairAllowed = false;
+      return;
+    }
+    if (!this.chairAsked) {
+      this.chairAsked = true;
+      if (store.activity) player.chairAllowed = true;
+      else store.setSitStep('activity');
+      return;
+    }
+    // Asked, and the question was closed without a choice.
+    if (!store.sitStep && !store.activity && !player.chairAllowed) {
+      this.chairAsked = false;
+      this.stepOffSeat();
+    }
+  }
+
+  /** A chair someone else moved (pulled out, or pushed back in). */
+  private setChair(tile: Point, pulled: boolean): void {
+    const chair = this.chairs.get(`${tile.x},${tile.y}`);
+    if (chair) chair.out = pulled;
+  }
+
+  /** The light of the hour, checked now and then: the sun, the sky in the windows, the lamps. */
+  private updateDaylight(): void {
+    const phase = dayPhase(localHour());
+    if (phase === this.phase) return;
+    this.phase = phase;
+    this.view.setDaylight(DAYLIGHT[phase]);
+    this.built?.ambience.setPhase(phase);
+  }
+
+  /** This room's rules, with a private room's owner's choices on top. */
+  private rules() {
+    return rulesFor(this.areaId, useGameStore.getState().roomRules);
+  }
+
+  /**
+   * The owner changed the private room's rules: pets come or go, and the
+   * game table is set up or put away.
+   */
+  private applyRoomRules(rules: RoomRules, before: RoomRules): void {
+    const store = useGameStore.getState();
+    if (before.games !== rules.games) this.buildRoom(this.grid.opened);
+    if (before.pets === rules.pets) return;
+    this.walkPet('self', this.player, store.look);
+    for (const [id, other] of this.others) this.walkPet(id, other, this.looks.get(id) ?? null);
   }
 
   /** A pet in the room by its person ('self' for the player's), walking along or waiting at the door. */
@@ -650,9 +886,10 @@ export class AreaWorld {
     avatar.setFriend(this.isFriend(player.id));
     avatar.setDancing(player.dancing);
     avatar.setSmoking(player.smoking ?? false);
-    avatar.onTap = () => this.approach(player.id);
+    avatar.onTap = () => this.openPersonRing(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
+    this.looks.set(player.id, player.look);
     this.walkPet(player.id, avatar, player.look);
   }
 
@@ -665,22 +902,22 @@ export class AreaWorld {
     this.eventTimer -= delta;
     if (this.eventTimer > 0) return;
     this.eventTimer = 1;
-    const live = eventNow(this.areaId, Date.now());
+    const live = eventNow(this.areaId, Date.now(), EVENTS, useGameStore.getState().proposed);
     const id = live?.event.id ?? null;
     if (id !== this.eventId) {
       this.eventId = id;
       this.decor?.dispose();
       this.decor = null;
       if (live) {
-        const title = t(`event.${live.event.id}.title` as MessageKey);
-        this.decor = buildEventDecor(this.grid, EVENT_THEMES[live.event.theme], title);
+        const title = eventTitle(live.event);
+        this.decor = buildEventDecor(this.grid, EVENT_THEMES[themeOf(live.event)], title);
         this.view.add(this.decor.root);
       }
     }
     // A song on the jukebox takes the place of the event's own music.
     const { musicOn, jukebox, jukeboxOn } = useGameStore.getState();
     const jukeboxPlaying = jukebox.now !== null && jukeboxOn;
-    if (live && musicOn && !jukeboxPlaying) playMusic(EVENT_THEMES[live.event.theme].music);
+    if (live && musicOn && !jukeboxPlaying) playMusic(EVENT_THEMES[themeOf(live.event)].music);
     else stopMusic();
   }
 
@@ -700,7 +937,7 @@ export class AreaWorld {
       return current;
     current?.dispose();
     this.pets.delete(id);
-    if (!owner || !kind || !AREA_RULES[this.areaId].pets) return null;
+    if (!owner || !kind || !this.rules().pets) return null;
     const { x, z } = owner.position;
     const pet = new Pet(this.assets.pets, kind, { x, z }, `${id}:${kind}`, this.petContext, dress);
     pet.placeBy({ x, z });
@@ -820,9 +1057,9 @@ export class AreaWorld {
         return;
       }
       case 'person':
-        // Tapping someone walks over to them and opens what you can do together.
+        // Tapping someone opens a ring of what you can do with them, around them.
         this.ripple(event, 'talk');
-        this.approach(target.id);
+        this.openPersonRing(target.id);
         return;
       case 'pet':
         this.ripple(event, 'talk');
@@ -861,7 +1098,7 @@ export class AreaWorld {
     switch (target.kind) {
       case 'person':
         this.ripple(event, 'talk');
-        this.select(target.id);
+        this.openPersonRing(target.id);
         return;
       case 'pet':
         this.ripple(event, 'talk');
@@ -1048,33 +1285,6 @@ export class AreaWorld {
     this.connection?.move(free);
   }
 
-  /** Walks over next to someone, then opens what you can do with them. */
-  private approach(id: string): void {
-    const other = this.others.get(id);
-    const player = this.player;
-    if (!other || !player) return;
-    if (reach(player.tile, other.tile) <= 1 && !player.isMoving) {
-      this.arrive(player, { kind: 'person', id });
-      return;
-    }
-    const spots = [-1, 0, 1]
-      .flatMap((dx) => [-1, 0, 1].map((dy) => ({ x: other.tile.x + dx, y: other.tile.y + dy })))
-      .filter(
-        (p) =>
-          !sameTile(p, other.tile) &&
-          this.grid.isWalkable(p) &&
-          !this.grid.isSeat(p) &&
-          !this.personAt(p),
-      )
-      .sort((a, b) => reach(a, player.tile) - reach(b, player.tile));
-    const spot = spots[0];
-    if (!spot) {
-      this.select(id);
-      return;
-    }
-    this.goTo(spot, { kind: 'person', id });
-  }
-
   /** Walks to `tile` (or next to it) and does `then` on arrival. */
   private goTo(tile: Point, then: Pending): void {
     const player = this.player;
@@ -1132,6 +1342,10 @@ export class AreaWorld {
           } else if (machine) {
             store.setGame(machine);
           }
+          return;
+        }
+        if (examinable.kind === 'lost') {
+          store.setDiscovery({ kind: 'lost', index: 0, pick: Math.floor(Date.now() / 86_400_000) });
           return;
         }
         const pick =
@@ -1219,6 +1433,22 @@ export class AreaWorld {
   }
 
   /** Opens someone's card, with what they are up to shown over their head. */
+  /** The ring of things to do with someone, around their chest on screen. */
+  private openPersonRing(id: string): void {
+    const other = this.others.get(id);
+    if (!other) return;
+    const box = other.bodyBox;
+    const at = this.view.project(box.x, box.bottom + (box.top - box.bottom) * 0.55, box.z);
+    useGameStore.getState().setRadial({
+      x: at.x,
+      y: at.y,
+      mode: 'person',
+      id,
+      name: other.name,
+      lines: other.statusLines,
+    });
+  }
+
   private select(id: string): void {
     const other = this.others.get(id);
     if (!other) return;
@@ -1426,6 +1656,7 @@ export class AreaWorld {
         if (examinable.kind === 'table')
           return t(examinable.index === 0 ? 'tip.darts' : 'tip.gameTable');
         if (examinable.kind === 'jukebox') return t('tip.jukebox');
+        if (examinable.kind === 'lost') return t('tip.lost');
         if (examinable.kind === 'game')
           return t(`tip.game.${MACHINES[examinable.index] ?? 'arcade'}`);
         return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
@@ -1632,6 +1863,7 @@ export class AreaWorld {
 
   private goThrough(to: AreaId, from: AreaId = this.areaId): void {
     this.leaving = true;
+    useGameStore.getState().setLoading(true);
     this.fader.classList.add('world-fader--dark');
     window.setTimeout(() => this.enter(to, from), FADE_MS);
   }

@@ -1,4 +1,11 @@
-import { TILE, type AreaGrid, type AreaId, type Point } from '@att/shared';
+import {
+  weatherDecor,
+  TILE,
+  type AreaGrid,
+  type AreaId,
+  type Point,
+  type RoomRules,
+} from '@att/shared';
 import {
   BoxGeometry,
   CanvasTexture,
@@ -6,11 +13,14 @@ import {
   ExtrudeGeometry,
   Group,
   InstancedMesh,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
+  Quaternion,
   Shape,
   SRGBColorSpace,
+  Vector3,
   type Material,
   type Object3D,
 } from 'three';
@@ -25,6 +35,8 @@ import { facing, instance, type Placement } from './instancing';
 import type { Furniture, ModelTemplate } from './models';
 import { hangPaintings } from './paintings';
 import { buildRenovation } from './renovation';
+import { buildAmbience, LAMP_SHADE, type Ambience } from './ambience';
+import { lostBox, umbrellaStand, wallClock } from './smallProps';
 import { dartCabinet, jukeboxModel, tableGames } from './smokingProps';
 
 /** Top of the floor tiles; furniture stands on this. */
@@ -54,6 +66,9 @@ const DOORS: ReadonlySet<string> = new Set([
 
 /** Chairs are pushed this far from the tile center, so their front edge meets the table. */
 export const CHAIR_INSET = 0.2;
+/** A chair pushed in under its table, and one pulled out to sit down (half a tile apart). */
+export const CHAIR_TUCKED = CHAIR_INSET + 0.32;
+export const CHAIR_PULLED = CHAIR_INSET - 0.18;
 /** Kenney's chair is tall next to its characters; a lower seat lets their feet reach the floor. */
 const CHAIR_SQUASH = 0.75;
 /** Top of the chair seat cushion above the floor (the model's seat is at 0.48). */
@@ -65,6 +80,7 @@ export const TABLE_HEIGHT = 0.62;
 const TABLE_DEPTH = 1.2;
 
 const tileCenter = (x: number, y: number) => ({ x: x + 0.5, z: y + 0.5 });
+const UP = new Vector3(0, 1, 0);
 
 /** Small deterministic noise so decoration varies per tile but never between reloads. */
 const noise = (x: number, y: number, salt = 0) => {
@@ -75,7 +91,8 @@ const noise = (x: number, y: number, salt = 0) => {
 /** Something to look at up close: a shelf of books, a painting, the renovation. */
 export type Examinable = {
   id: string;
-  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'game' | 'topic' | 'table' | 'jukebox';
+  kind:
+    'shelf' | 'painting' | 'renovation' | 'flaw' | 'game' | 'topic' | 'table' | 'jukebox' | 'lost';
   /** Index into the content list for its kind. */
   index: number;
   /** Where to stand to look at it. */
@@ -93,10 +110,21 @@ export type BuiltArea = {
    * `userData.examine` (an id), or `userData.examineByInstance` (ids per instance).
    */
   pickables: Object3D[];
+  /** The light of the hour, the windows and the season's things. */
+  ambience: Ambience;
+  /** Moves a chair along its way to the table (see CHAIR_TUCKED and CHAIR_PULLED). */
+  setChair: (tile: Point, offset: number) => void;
 };
 
+/** What a room is built with beyond its layout: a private room's rules. */
+export type BuildOptions = { arcade?: ArcadeKit | undefined; roomRules?: RoomRules | null };
+
 /** Builds the 3D room for an area from its ASCII layout and the Kenney furniture. */
-export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeKit): BuiltArea {
+export function buildArea(
+  grid: AreaGrid,
+  furniture: Furniture,
+  { arcade, roomRules }: BuildOptions = {},
+): BuiltArea {
   const root = new Group();
   const style = AREA_STYLE[grid.area.id];
   const at = (x: number, y: number) => grid.tileAt({ x, y });
@@ -182,6 +210,9 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
   const bookcaseTopics: (string | null)[] = [];
   const books: Placement[] = [];
   const noticeBoards: Point[] = [];
+  /** Chairs at tables, one instance each, so each can be pulled out and pushed back. */
+  const chairs: { tile: Point; toTable: Point; jitter: { x: number; z: number; turn: number } }[] =
+    [];
   const gameTables: Placement[] = [];
   /** Lights that pulse with time, e.g. the jukebox's. */
   const glows: ((time: number) => void)[] = [];
@@ -277,16 +308,57 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
           break;
         }
         case TILE.seat: {
-          const toTable = grid.seatFacing({ x, y }) ?? { x: 0, y: 1 };
-          seats.push({
-            x: cx + toTable.x * CHAIR_INSET + (noise(x, y, 5) - 0.5) * 0.06,
-            z: cz + toTable.y * CHAIR_INSET + (noise(x, y, 6) - 0.5) * 0.06,
-            y: FLOOR_Y,
-            // The Kenney chair's backrest is on +z, so it faces -z like the bookcase.
-            // Chairs are never quite straight once people have used them.
-            rotation: facing(toTable.x, toTable.y) + Math.PI + (noise(x, y, 7) - 0.5) * 0.22,
-            scale: [1, CHAIR_SQUASH, 1],
+          // Chairs are never quite straight once people have used them.
+          chairs.push({
+            tile: { x, y },
+            toTable: grid.seatFacing({ x, y }) ?? { x: 0, y: 1 },
+            jitter: {
+              x: (noise(x, y, 5) - 0.5) * 0.06,
+              z: (noise(x, y, 6) - 0.5) * 0.06,
+              turn: (noise(x, y, 7) - 0.5) * 0.22,
+            },
           });
+          break;
+        }
+        case TILE.umbrellaStand: {
+          const stand = umbrellaStand(materials);
+          stand.position.set(cx, FLOOR_Y, cz);
+          root.add(stand);
+          break;
+        }
+        case TILE.lostBox: {
+          const box = lostBox(materials);
+          box.position.set(cx, FLOOR_Y, cz);
+          box.userData.examine = 'lost';
+          root.add(box);
+          pickables.push(box);
+          const stand = [
+            { x, y: y - 1 },
+            { x: x + 1, y },
+            { x: x - 1, y },
+            { x, y: y + 1 },
+          ].find((p) => grid.isWalkable(p) && !grid.isSeat(p));
+          if (stand) examinables.set('lost', { id: 'lost', kind: 'lost', index: 0, stand });
+          break;
+        }
+        case TILE.roomGameTable: {
+          // A private room's game table: dice and cards on it when its owner allows games.
+          gameTables.push({ x: cx, z: cz, y: FLOOR_Y });
+          if (roomRules && !roomRules.games) break;
+          const games = tableGames(materials);
+          games.position.set(cx, FLOOR_Y + furniture.tableRound.size.y, cz);
+          games.userData.examine = 'table:games';
+          root.add(games);
+          pickables.push(games);
+          const stand = [
+            { x: x + 1, y },
+            { x, y: y + 1 },
+            { x, y: y - 1 },
+            { x: x - 1, y },
+          ].find((p) => grid.isWalkable(p) && !grid.isSeat(p));
+          if (stand) {
+            examinables.set('table:games', { id: 'table:games', kind: 'table', index: 1, stand });
+          }
           break;
         }
         case TILE.plant:
@@ -379,6 +451,40 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
     }
   }
   add('chairCushion', seats);
+  const chairGroup = instance(
+    furniture.chairCushion,
+    chairs.map(() => ({ x: 0, z: 0 })),
+  );
+  root.add(chairGroup);
+  const chairIndex = new Map(chairs.map((chair, i) => [`${chair.tile.x},${chair.tile.y}`, i]));
+  const chairMatrix = new Matrix4();
+  const chairPosition = new Vector3();
+  const chairRotation = new Quaternion();
+  const chairScale = new Vector3(1, CHAIR_SQUASH, 1);
+  const setChair = (tile: Point, offset: number) => {
+    const i = chairIndex.get(`${tile.x},${tile.y}`);
+    const chair = i === undefined ? undefined : chairs[i];
+    if (i === undefined || !chair) return;
+    const { x: cx, z: cz } = tileCenter(tile.x, tile.y);
+    chairPosition.set(
+      cx + chair.toTable.x * offset + chair.jitter.x,
+      FLOOR_Y,
+      cz + chair.toTable.y * offset + chair.jitter.z,
+    );
+    // The Kenney chair's backrest is on +z, so it faces -z like the bookcase.
+    chairRotation.setFromAxisAngle(
+      UP,
+      facing(chair.toTable.x, chair.toTable.y) + Math.PI + chair.jitter.turn,
+    );
+    chairMatrix.compose(chairPosition, chairRotation, chairScale);
+    for (const mesh of chairGroup.children as InstancedMesh[]) {
+      mesh.setMatrixAt(i, chairMatrix);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  };
+  // Every chair starts pushed in under its table.
+  for (const chair of chairs) setChair(chair.tile, CHAIR_TUCKED);
+  for (const mesh of chairGroup.children as InstancedMesh[]) mesh.computeBoundingSphere();
   add('pottedPlant', plants);
   add('desk', desks);
   add('loungeSofa', sofas);
@@ -396,7 +502,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
   materials.push(...labelShelves(shelves.runs, furniture, root, textures));
 
   materials.push(...buildDesks(grid, furniture, root));
-  decorate(grid, furniture, root, desks);
+  const decor = decorate(grid, furniture, root, desks, materials);
   materials.push(
     ...buildNoticeBoards(noticeBoards, root, grid.area.id === 'library' ? 'library' : 'hall'),
   );
@@ -447,16 +553,42 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
   }
   addDoorSigns(grid, root);
 
+  const ambience = buildAmbience(
+    root,
+    windows,
+    decor.floorLamps,
+    grid.area.id === 'library' ? decor.laptop : null,
+    weatherDecor(new Date().getMonth()),
+    FLOOR_Y,
+    materials,
+  );
+  // The library's digital clock, on the north wall between two shelves.
+  const wall = grid.area.id === 'library' ? wallClock(materials) : null;
+  if (wall) {
+    wall.root.position.set(15.5, FLOOR_Y + 2.05, 1.03);
+    root.add(wall.root);
+  }
+  let clockCheck = 0;
+
   return {
     root,
+    ambience,
+    setChair,
     update: (delta, people) => {
       doors.update(delta, people);
+      ambience.update(delta);
       clock += delta;
       for (const glow of glows) glow(clock);
+      clockCheck -= delta;
+      if (wall && clockCheck <= 0) {
+        clockCheck = 1;
+        wall.tick(new Date());
+      }
     },
     examinables,
     pickables,
     dispose: () => {
+      ambience.dispose();
       root.traverse((child) => {
         if (child instanceof CSS2DObject) child.element.remove();
         // Instanced furniture shares its geometry with every other room.
@@ -798,7 +930,7 @@ function buildDesks(grid: AreaGrid, furniture: Furniture, root: Group): MeshStan
       });
     }
   });
-  root.add(instance(furniture.lampRoundTable, lamps));
+  root.add(instance(furniture.lampRoundTable, lamps, { materialsByName: { lamp: LAMP_SHADE } }));
   return [wood, dark, leather, runner];
 }
 
@@ -853,34 +985,59 @@ function stadium(length: number, width: number, thickness: number): Mesh {
   return new Mesh(geometry);
 }
 
-function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Placement[]): void {
+/**
+ * The staff desk's laptop and lamp, floor lamps by the plants and a coat rack.
+ * Returns the laptop (open and shut, for the night) and where the floor lamps
+ * stand (for their light).
+ */
+function decorate(
+  grid: AreaGrid,
+  furniture: Furniture,
+  root: Group,
+  desks: Placement[],
+  materials: Material[],
+): { laptop: { open: Group; closed: Mesh } | null; floorLamps: { x: number; z: number }[] } {
   const middle = desks[Math.floor(desks.length / 2)];
+  let laptop: { open: Group; closed: Mesh } | null = null;
   if (middle) {
     const top = FLOOR_Y + furniture.desk.size.y;
     const rotation = middle.rotation ?? 0;
     // The laptop's screen faces the receptionist behind the desk (Kenney's laptop
     // model opens towards -z, so the desk's own turn already points it there);
     // the lamp sits one tile along it.
+    const open = instance(furniture.laptop, [
+      {
+        x: middle.x,
+        z: middle.z,
+        y: top,
+        rotation,
+        scale: [0.75, 0.75, 0.75],
+      },
+    ]);
+    root.add(open);
+    // Shut for the night: a closed lid in the same place.
+    const lid = new MeshStandardMaterial({ color: '#3a3f47', roughness: 0.5, metalness: 0.3 });
+    materials.push(lid);
+    const closed = new Mesh(new BoxGeometry(0.3, 0.025, 0.21), lid);
+    closed.position.set(middle.x, top + 0.0125, middle.z);
+    closed.rotation.y = rotation;
+    closed.visible = false;
+    closed.castShadow = true;
+    root.add(closed);
+    laptop = { open, closed };
     root.add(
-      instance(furniture.laptop, [
-        {
-          x: middle.x,
-          z: middle.z,
-          y: top,
-          rotation,
-          scale: [0.75, 0.75, 0.75],
-        },
-      ]),
-    );
-    root.add(
-      instance(furniture.lampRoundTable, [
-        {
-          x: middle.x - Math.cos(rotation),
-          z: middle.z + Math.sin(rotation),
-          y: top,
-          scale: [0.7, 0.7, 0.7],
-        },
-      ]),
+      instance(
+        furniture.lampRoundTable,
+        [
+          {
+            x: middle.x - Math.cos(rotation),
+            z: middle.z + Math.sin(rotation),
+            y: top,
+            scale: [0.7, 0.7, 0.7],
+          },
+        ],
+        { materialsByName: { lamp: LAMP_SHADE } },
+      ),
     );
   }
   // Floor lamps beside plants give rooms some warm vertical accents. They share the plant's
@@ -898,10 +1055,11 @@ function decorate(grid: AreaGrid, furniture: Furniture, root: Group, desks: Plac
       });
     }),
   );
-  root.add(instance(furniture.lampSquareFloor, lamps));
+  root.add(instance(furniture.lampSquareFloor, lamps, { materialsByName: { lamp: LAMP_SHADE } }));
   if (grid.area.id === 'hall') {
     root.add(instance(furniture.coatRackStanding, [{ x: 1.5, z: 7.5, y: FLOOR_Y }]));
   }
+  return { laptop, floorLamps: lamps.map((l) => ({ x: l.x, z: l.z })) };
 }
 
 type BoardKind = 'hall' | 'library';

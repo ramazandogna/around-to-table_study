@@ -1,6 +1,8 @@
 import type {
   Appearance,
   AreaId,
+  EventProposal,
+  RoomRules,
   SocialClientMessage,
   SocialServerMessage,
   StatusLines,
@@ -62,6 +64,7 @@ export class SocialConnection {
       mood: lines.mood,
       doing: lines.doing,
       note: lines.announcement,
+      tz: -new Date().getTimezoneOffset(),
       pet: pet ?? null,
       ...(pet && look.petColor !== undefined ? { petColor: look.petColor } : {}),
       ...(pet && look.petSex ? { petSex: look.petSex } : {}),
@@ -93,6 +96,62 @@ export class SocialConnection {
   /** Makes a friend's phone buzz: "come say hi". */
   buzz(to: string): void {
     this.send({ t: 'buzz', to });
+  }
+
+  /** A line for the whole building. */
+  shout(text: string): void {
+    this.send({ t: 'shout', text });
+  }
+
+  block(to: string): void {
+    this.send({ t: 'block', to });
+  }
+
+  unblock(id: string): void {
+    this.send({ t: 'unblock', id });
+  }
+
+  profile(id: string): void {
+    this.send({ t: 'profile', id });
+  }
+
+  propose(event: EventProposal): void {
+    this.send({ t: 'propose', ...event, area: event.area as 'smoking' | 'hall' | 'library' });
+  }
+
+  /** Admins: approve, turn down or take off an event. */
+  review(id: string, verdict: 'approved' | 'rejected' | 'removed'): void {
+    this.send({ t: 'review', id, verdict });
+  }
+
+  /** Admins: make someone an admin, or take it back. */
+  role(id: string, admin: boolean): void {
+    this.send({ t: 'role', id, admin });
+  }
+
+  admins(): void {
+    this.send({ t: 'admins' });
+  }
+
+  roomRules(code: string, rules: RoomRules): void {
+    this.send({ t: 'roomRules', code, rules });
+  }
+
+  /** The owner sends someone out of the room; with `ban` for good. */
+  roomOut(code: string, id: string, ban: boolean): void {
+    this.send({ t: 'roomOut', code, id, ban });
+  }
+
+  roomUnban(code: string, id: string): void {
+    this.send({ t: 'roomUnban', code, id });
+  }
+
+  roomBans(code: string): void {
+    this.send({ t: 'roomBans', code });
+  }
+
+  roomClose(code: string): void {
+    this.send({ t: 'roomClose', code });
   }
 
   close(): void {

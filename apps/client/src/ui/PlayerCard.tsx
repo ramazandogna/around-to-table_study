@@ -1,41 +1,49 @@
-import { AREA_RULES } from '@att/shared';
-import { useState, type FormEvent } from 'react';
-import { t } from '../i18n/t';
+import { AREA_RULES, BADGES, earnedBadges, type Profile } from '@att/shared';
+import { useEffect, useState, type FormEvent } from 'react';
+import { t, type MessageKey } from '../i18n/t';
+import { formatDuration } from '../state/stats';
 import { useGameStore, type Selected } from '../state/store';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
-import { Choice, Panel } from './Panel';
+import { Panel } from './Panel';
 
-const FRIEND_LABEL = {
-  none: 'card.friend',
-  incoming: 'card.friend.accept',
-  outgoing: 'card.friend.sent',
-  friend: 'card.friend.done',
-} as const;
-
-/** What you can do with someone after tapping them: poke, whisper and, later, friends and groups. */
+/**
+ * Someone's card: their status lines, what they have put in (focus blocks
+ * today, this week, this month and this year, the kinds of sessions, time in
+ * the building, friends, messages, since when) and the badges that earned.
+ * It opens from the ring around a person (or your own), or on the whisper.
+ */
 export function PlayerCard() {
   const selected = useGameStore((s) => s.selected);
   // A fresh card (and empty whisper) for each person.
   return selected ? <Card key={selected.id} {...selected} /> : null;
 }
 
-function Card({ id, name, lines }: Selected) {
+const joined = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
+
+function Card({ id, name, lines, view }: Selected) {
   const area = useGameStore((s) => s.area);
   const connection = useGameStore((s) => s.connection);
   const social = useGameStore((s) => s.social);
-  const room = useGameStore((s) => s.room);
-  const friendship = useGameStore((s) => s.friends.find((f) => f.id === id)?.state ?? null);
+  const myId = useGameStore((s) => s.session?.id);
+  const role = useGameStore((s) => s.role);
+  const profile = useGameStore((s) => (s.profile?.id === id ? s.profile : null));
   const cooldownUntil = useGameStore((s) => s.cooldownUntil[s.area] ?? 0);
   const store = useGameStore.getState();
   const rules = AREA_RULES[area];
-  const [whispering, setWhispering] = useState(false);
+  const [whispering, setWhispering] = useState(view === 'whisper');
   const [text, setText] = useState('');
   const close = () => store.setSelected(null);
+  const mine = id === myId;
 
-  function poke() {
-    connection?.poke(id);
-    close();
-  }
+  // The numbers come from the server, fresh each time the card opens.
+  useEffect(() => {
+    useGameStore.getState().openProfile(id);
+    social?.profile(id);
+  }, [social, id]);
 
   function whisper(event: FormEvent) {
     event.preventDefault();
@@ -61,6 +69,7 @@ function Card({ id, name, lines }: Selected) {
       >
         ✕
       </button>
+      {profile?.role === 'admin' && <p className="card-role">🛡️ {t('card.admin')}</p>}
       <ul className="card-lines">
         {lines.vibe && (
           <li className="card-vibe">
@@ -99,51 +108,93 @@ function Card({ id, name, lines }: Selected) {
             {t('card.send')}
           </button>
         </form>
+      ) : profile ? (
+        <Stats profile={profile} />
       ) : (
-        <div className="choice-list">
-          <Choice icon="👉" label={t('card.poke')} hint={t('card.poke.hint')} onSelect={poke} />
-          <Choice
-            icon="✉️"
-            label={t('card.whisper')}
-            hint={t(rules.dmAllowed ? 'card.whisper.hint' : 'card.whisper.library')}
-            disabled={!rules.dmAllowed}
-            onSelect={() => setWhispering(true)}
-          />
-          <Choice
-            icon={friendship === 'friend' ? '⭐' : '🤝'}
-            label={t(FRIEND_LABEL[friendship ?? 'none'])}
-            hint={t(`${FRIEND_LABEL[friendship ?? 'none']}.hint`)}
-            disabled={friendship === 'friend' || friendship === 'outgoing'}
-            onSelect={() => {
-              social?.befriend(id);
-              close();
-            }}
-          />
-          {friendship === 'friend' && rules.phone && (
-            <Choice
-              icon="📱"
-              label={t('card.phone')}
-              hint={t('card.phone.hint')}
-              onSelect={() => {
-                close();
-                store.openPhone(id);
-              }}
-            />
-          )}
-          {room && (
-            <Choice
-              icon="🔑"
-              label={t('card.invite')}
-              hint={t('card.invite.hint', { room: room.room.name })}
-              onSelect={() => {
-                connection?.invite(id, room.room.code, room.room.name);
-                store.setNotice('room_invited', name);
-                close();
-              }}
-            />
-          )}
-        </div>
+        <p className="creator-note">{t('card.loading')}</p>
+      )}
+      {mine && (
+        <p className="creator-note card-id">
+          {t('card.yourId')} <code>{id}</code>
+        </p>
+      )}
+      {!mine && role === 'admin' && profile && (
+        <button
+          type="button"
+          className="mini-button"
+          onClick={() => {
+            social?.role(id, profile.role !== 'admin');
+            social?.profile(id);
+          }}
+        >
+          🛡️ {t(profile.role === 'admin' ? 'card.unadmin' : 'card.makeAdmin')}
+        </button>
       )}
     </Panel>
+  );
+}
+
+/** The numbers, then the badges (earned ones lit, the rest faint, to aim for). */
+function Stats({ profile }: { profile: Profile }) {
+  const earned = new Set(earnedBadges(profile).map((b) => b.id));
+  const { blocks, kinds } = profile;
+  return (
+    <div className="card-stats">
+      <p className="field-label">🍅 {t('card.blocks')}</p>
+      <dl className="stat-grid">
+        {(['today', 'week', 'month', 'year', 'total'] as const).map((period) => (
+          <div key={period}>
+            <dt>{t(`card.period.${period}`)}</dt>
+            <dd>{blocks[period]}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="card-kinds">
+        {t('card.kinds', {
+          pomodoro: kinds.pomodoro,
+          deep: kinds.deep,
+          marathon: kinds.marathon,
+          custom: kinds.custom,
+        })}
+      </p>
+      <dl className="stat-list">
+        <div>
+          <dt>⏱ {t('card.focus')}</dt>
+          <dd>{formatDuration(profile.focusMs)}</dd>
+        </div>
+        <div>
+          <dt>🏠 {t('card.time')}</dt>
+          <dd>{formatDuration(profile.timeMs)}</dd>
+        </div>
+        <div>
+          <dt>🔥 {t('card.streak')}</dt>
+          <dd>{t('card.days', { n: profile.bestStreak })}</dd>
+        </div>
+        <div>
+          <dt>🤝 {t('card.friends')}</dt>
+          <dd>{profile.friends}</dd>
+        </div>
+        <div>
+          <dt>💬 {t('card.messages')}</dt>
+          <dd>{profile.messages}</dd>
+        </div>
+        <div>
+          <dt>📅 {t('card.joined')}</dt>
+          <dd>{joined.format(profile.joinedAt)}</dd>
+        </div>
+      </dl>
+      <p className="field-label">🏅 {t('card.badges')}</p>
+      <ul className="badge-row">
+        {BADGES.map((badge) => (
+          <li
+            key={badge.id}
+            className={`badge${earned.has(badge.id) ? ' badge--earned' : ''}`}
+            title={`${t(`badge.${badge.id}` as MessageKey)} · ${t(`badge.${badge.id}.how` as MessageKey)}`}
+          >
+            {badge.icon}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
-import { AREA_RULES } from '@att/shared';
-import { useEffect, useRef, useState } from 'react';
+import { AREA_RULES, SHOUT_MAX_CHARS, type Shout } from '@att/shared';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore, type ChatLine } from '../state/store';
 
@@ -21,15 +21,19 @@ function continues(line: ChatLine, before: ChatLine | undefined): boolean {
 }
 
 /**
- * The room's chat in a thin column on the right. The quiet library has none:
- * there it folds into an icon that says why.
+ * The chat in a thin column on the right, in two tabs: this room, and the
+ * whole building. The quiet library has neither: there it folds into an icon
+ * that says why.
  */
 export function ChatPanel() {
   const area = useGameStore((s) => s.area);
   const lines = useGameStore((s) => s.chatLog);
   const open = useGameStore((s) => s.chatOpen);
   const unread = useGameStore((s) => s.unread);
+  const shoutUnread = useGameStore((s) => s.shoutUnread);
+  const tab = useGameStore((s) => s.chatTab);
   const setOpen = useGameStore((s) => s.setChatOpen);
+  const setTab = useGameStore((s) => s.setChatTab);
   const list = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
@@ -41,14 +45,30 @@ export function ChatPanel() {
     return (
       <button type="button" className="chat-toggle" onClick={() => setOpen(true)}>
         <span aria-hidden>💬</span> {t('chat.title')}
-        {unread > 0 && <span className="chat-unread">{unread}</span>}
+        {unread + shoutUnread > 0 && <span className="chat-unread">{unread + shoutUnread}</span>}
       </button>
     );
   }
   return (
     <section className="panel panel--compact chat-panel" aria-label={t('chat.title')}>
       <header className="chat-panel-head">
-        <h2>{t('chat.title')}</h2>
+        <div className="chat-tabs" role="tablist">
+          {(['room', 'building'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              className="chat-tab"
+              aria-selected={tab === option}
+              onClick={() => setTab(option)}
+            >
+              {t(`chat.tab.${option}`)}
+              {option === 'building' && shoutUnread > 0 && tab !== 'building' && (
+                <span className="chat-unread">{shoutUnread}</span>
+              )}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           className="icon-button"
@@ -59,13 +79,95 @@ export function ChatPanel() {
           ✕
         </button>
       </header>
+      {tab === 'building' ? (
+        <Building />
+      ) : (
+        <ol ref={list} className="chat-lines" aria-live="polite">
+          {lines.length === 0 && <li className="chat-line chat-line--event">{t('chat.empty')}</li>}
+          {lines.map((line, i) => (
+            <Line key={line.key} line={line} grouped={continues(line, lines[i - 1])} />
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+/** The building-wide chat: everyone online, wherever they are (but the library). */
+function Building() {
+  const shouts = useGameStore((s) => s.shouts);
+  const muted = useGameStore((s) => s.mutedPeople);
+  const blocked = useGameStore((s) => s.blocked);
+  const myId = useGameStore((s) => s.session?.id);
+  const [text, setText] = useState('');
+  const list = useRef<HTMLOListElement>(null);
+  const store = useGameStore.getState();
+  const visible = shouts.filter((l) => !(l.from in muted) && !blocked.some((b) => b.id === l.from));
+
+  useEffect(() => {
+    list.current?.scrollTo({ top: list.current.scrollHeight });
+  }, [visible.length]);
+
+  function send(event: FormEvent) {
+    event.preventDefault();
+    const message = text.trim();
+    if (!message) return;
+    store.social?.shout(message);
+    setText('');
+  }
+
+  return (
+    <>
       <ol ref={list} className="chat-lines" aria-live="polite">
-        {lines.length === 0 && <li className="chat-line chat-line--event">{t('chat.empty')}</li>}
-        {lines.map((line, i) => (
-          <Line key={line.key} line={line} grouped={continues(line, lines[i - 1])} />
+        {visible.length === 0 && (
+          <li className="chat-line chat-line--event">{t('chat.building.empty')}</li>
+        )}
+        {visible.map((line, i) => (
+          <ShoutLine key={line.id} line={line} mine={line.from === myId} before={visible[i - 1]} />
         ))}
       </ol>
-    </section>
+      <form className="whisper chat-shout" onSubmit={send}>
+        <input
+          value={text}
+          maxLength={SHOUT_MAX_CHARS}
+          placeholder={t('chat.building.placeholder')}
+          aria-label={t('chat.building.placeholder')}
+          onChange={(e) => setText(e.target.value)}
+          onFocus={() => store.setTyping(true)}
+          onBlur={() => store.setTyping(false)}
+        />
+        <button type="submit" className="mini-button mini-button--ok" disabled={!text.trim()}>
+          {t('phone.send')}
+        </button>
+      </form>
+    </>
+  );
+}
+
+function ShoutLine({
+  line,
+  mine,
+  before,
+}: {
+  line: Shout;
+  mine: boolean;
+  before: Shout | undefined;
+}) {
+  const grouped = !!before && before.from === line.from && line.at - before.at < GROUP_MS;
+  return (
+    <li
+      className={`chat-line${mine ? ' chat-line--self' : ''}${grouped ? ' chat-line--more' : ''}`}
+    >
+      {!grouped && (
+        <span className="chat-meta">
+          <b className="chat-name">{line.name}</b>
+          <time className="chat-time" dateTime={new Date(line.at).toISOString()}>
+            {clock.format(line.at)}
+          </time>
+        </span>
+      )}
+      <span className="chat-text">{line.text}</span>
+    </li>
   );
 }
 

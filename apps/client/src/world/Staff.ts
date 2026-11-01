@@ -101,10 +101,25 @@ const DESK_MOMENTS: readonly (Emote | 'stretch' | 'type' | 'look')[] = [
   'type',
 ];
 
-type Spot = { stand: Point; facing: Point };
+/** A place to go; a window spot also says which window, to open or shut it there. */
+type Spot = { stand: Point; facing: Point; window?: number };
+
+/** A job to do somewhere, e.g. pushing a chair back under its table. */
+export type Chore = { stand: Point; facing: Point; done: () => void };
+
+/** What a room tells its staff about: its windows, and how to open or shut one. */
+export type StaffRoom = {
+  windows: readonly { stand: Point; facing: Point }[];
+  toggleWindow: (index: number) => void;
+  /** Windows are only opened by day. */
+  daytime: () => boolean;
+};
 
 /** Where a staff member is wanted right now. */
-type Wanted = { at: 'desk' } | { at: 'errand'; spot: number } | { at: 'escort' };
+type Wanted = { at: 'desk' } | { at: 'errand'; spot: number } | { at: 'escort' } | { at: 'chore' };
+
+/** A chore takes this long once there: a push, a little tidy. */
+const CHORE_SECONDS = 1.1;
 
 export class Staff {
   readonly avatar: Avatar;
@@ -119,6 +134,11 @@ export class Staff {
   private reachIn = REACH_SECONDS;
   private lineIndex = 0;
   private escortLeft = 0;
+  private readonly chores: Chore[] = [];
+  private choreLeft = CHORE_SECONDS;
+  /** The window opened or shut on this visit, so it happens once per trip. */
+  private windowDone = false;
+  private readonly windowCount: number;
 
   /**
    * Whoever is on duty at a desk in this room right now, or null (no desk, or
@@ -129,10 +149,11 @@ export class Staff {
     grid: AreaGrid,
     context: AvatarContext,
     hour: number,
+    room?: StaffRoom,
   ): Staff | null {
     const chair = staffChair(grid);
     const id = onDuty(grid.area.id, hour);
-    return chair && id ? new Staff(kit, grid, chair, context, id) : null;
+    return chair && id ? new Staff(kit, grid, chair, context, id, room) : null;
   }
 
   private constructor(
@@ -141,13 +162,21 @@ export class Staff {
     chair: Point,
     context: AvatarContext,
     readonly id: StaffId,
+    private readonly room?: StaffRoom,
   ) {
     this.person = PEOPLE[id];
     this.chair = chair;
     const desk = deskBeside(grid, chair);
     const facing = { x: desk.x - chair.x, y: desk.y - chair.y };
     this.aisle = { x: chair.x - facing.x, y: chair.y - facing.y };
-    this.errands = this.person.kind === 'librarian' ? shelvesIn(grid) : receptionErrands(grid);
+    // The librarian's rounds: shelves, and the windows (opened or shut by day).
+    const windows: Spot[] =
+      this.person.kind === 'librarian'
+        ? (room?.windows ?? []).map((w, i) => ({ ...w, window: i }))
+        : [];
+    this.windowCount = windows.length;
+    this.errands =
+      this.person.kind === 'librarian' ? [...shelvesIn(grid), ...windows] : receptionErrands(grid);
     this.elevator = elevatorFront(grid);
     const own: AvatarContext = {
       ...context,
@@ -171,6 +200,17 @@ export class Staff {
     if (line) this.avatar.say(t(line));
   }
 
+  /** A job for later, done when the round brings them by; the librarian tidies chairs. */
+  addChore(chore: Chore): void {
+    if (this.person.kind !== 'librarian') return;
+    this.chores.push(chore);
+  }
+
+  /** Chores waiting, e.g. to tell which chairs are already on the list. */
+  get choresWaiting(): readonly Chore[] {
+    return this.chores;
+  }
+
   /** The receptionist walks over to the elevator and calls it for the player. */
   escort(): void {
     if (this.person.kind !== 'receptionist' || !this.elevator) return;
@@ -183,9 +223,28 @@ export class Staff {
     const slot = Math.floor(seconds / SLOT);
     this.escortLeft = Math.max(0, this.escortLeft - delta);
     const wanted = this.wanted(slot);
-    const key = wanted.at === 'errand' ? `errand:${wanted.spot}` : wanted.at;
-    if (key !== this.at) this.go(wanted, this.at === null);
+    const chore = wanted.at === 'chore' ? this.chores[0] : undefined;
+    const key =
+      wanted.at === 'errand'
+        ? `errand:${wanted.spot}`
+        : chore
+          ? `chore:${chore.stand.x},${chore.stand.y}`
+          : wanted.at;
+    if (key !== this.at) {
+      this.windowDone = false;
+      this.choreLeft = CHORE_SECONDS;
+      this.go(wanted, this.at === null);
+    }
     this.at = key;
+    if (chore && !this.avatar.isMoving) {
+      this.avatar.face(chore.facing.x, chore.facing.y);
+      if (this.choreLeft === CHORE_SECONDS) this.avatar.play('poke');
+      this.choreLeft -= delta;
+      if (this.choreLeft <= 0) {
+        chore.done();
+        this.chores.shift();
+      }
+    }
 
     if (slot !== this.lastSlot) {
       this.lastSlot = slot;
@@ -200,6 +259,11 @@ export class Staff {
           : null;
     if (spot && !this.avatar.isMoving) {
       this.avatar.face(spot.facing.x, spot.facing.y);
+      if (spot.window !== undefined && !this.windowDone) {
+        this.windowDone = true;
+        this.avatar.play('poke');
+        this.room?.toggleWindow(spot.window);
+      }
       this.reachIn -= delta;
       if (this.reachIn <= 0 && wanted.at === 'errand') {
         this.reachIn = REACH_SECONDS;
@@ -212,6 +276,8 @@ export class Staff {
   /** Where the clock (or the player's room) wants them this slot. */
   private wanted(slot: number): Wanted {
     if (this.escortLeft > 0) return { at: 'escort' };
+    // A chair left out comes before the rounds.
+    if (this.chores.length > 0) return { at: 'chore' };
     if (this.errands.length === 0) return { at: 'desk' };
     const block = Math.floor(slot / BLOCK);
     const salt = this.id.length * 977;
@@ -220,7 +286,11 @@ export class Staff {
     const start = Math.floor(chance(block * 3 + 1 + salt) * (BLOCK - ERRAND_SLOTS + 1));
     const offset = slot - block * BLOCK;
     if (offset < start || offset >= start + ERRAND_SLOTS) return { at: 'desk' };
-    const spot = Math.floor(chance(block * 3 + 2 + salt) * this.errands.length);
+    let spot = Math.floor(chance(block * 3 + 2 + salt) * this.errands.length);
+    // Windows only by day; at night that round goes to a shelf instead.
+    if (this.errands[spot]?.window !== undefined && !(this.room?.daytime() ?? false)) {
+      spot = Math.floor(chance(block * 3 + 2 + salt) * (this.errands.length - this.windowCount));
+    }
     return { at: 'errand', spot };
   }
 
@@ -244,7 +314,13 @@ export class Staff {
   /** Walks to the desk or somewhere else; on arrival in the room they are simply already there. */
   private go(to: Wanted, now: boolean): void {
     const spot =
-      to.at === 'errand' ? this.errands[to.spot] : to.at === 'escort' ? this.elevator : null;
+      to.at === 'errand'
+        ? this.errands[to.spot]
+        : to.at === 'escort'
+          ? this.elevator
+          : to.at === 'chore'
+            ? (this.chores[0] ?? null)
+            : null;
     const goal = spot ? spot.stand : this.chair;
     if (now) {
       this.avatar.teleport(goal);

@@ -80,6 +80,34 @@ function Queue() {
         <p className="panel-text">{t('jukebox.empty')}</p>
       )}
 
+      <div className="jukebox-mine">
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={on}
+            onChange={(e) => useGameStore.getState().setJukeboxPrefs({ on: e.target.checked })}
+          />
+          {t('jukebox.listen')}
+        </label>
+        <label className="field jukebox-volume">
+          <span className="field-label">🎧 {t('jukebox.volume')}</span>
+          <input
+            type="range"
+            min={0}
+            max={JUKEBOX.maxVolume}
+            value={volume}
+            onChange={(e) =>
+              useGameStore.getState().setJukeboxPrefs({ volume: Number(e.target.value) })
+            }
+          />
+          <span className="creator-note">
+            {t('jukebox.volume.mine', {
+              n: Math.round((volume / JUKEBOX.maxVolume) * 100),
+            })}
+          </span>
+        </label>
+      </div>
+
       {state.queue.length > 0 && (
         <>
           <p className="field-label">{t('jukebox.next')}</p>
@@ -118,29 +146,6 @@ function Queue() {
         </button>
       </form>
       <p className="creator-note">{t('jukebox.rules', { n: JUKEBOX.perPerson })}</p>
-
-      <div className="jukebox-mine">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={on}
-            onChange={(e) => useGameStore.getState().setJukeboxPrefs({ on: e.target.checked })}
-          />
-          {t('jukebox.listen')}
-        </label>
-        <label className="field jukebox-volume">
-          <span className="field-label">🔉 {t('jukebox.volume')}</span>
-          <input
-            type="range"
-            min={0}
-            max={JUKEBOX.maxVolume}
-            value={volume}
-            onChange={(e) =>
-              useGameStore.getState().setJukeboxPrefs({ volume: Number(e.target.value) })
-            }
-          />
-        </label>
-      </div>
     </div>
   );
 }
@@ -250,12 +255,18 @@ function Player() {
           width: SIZE,
           height: SIZE,
           videoId: song.video,
+          // No controls of YouTube's own: the room's volume is set here (and only lowered
+          // per person), and no fullscreen can swallow the screen. A tap still plays it
+          // where the browser blocked autoplay.
           playerVars: {
             autoplay: 1,
             start: Math.floor(playedSeconds(song, Date.now())),
             playsinline: 1,
             rel: 0,
-            controls: 1,
+            controls: 0,
+            fs: 0,
+            disablekb: 1,
+            iv_load_policy: 3,
           },
           events: {
             onReady: (event) => {
@@ -294,7 +305,10 @@ function Player() {
     });
   }, [playing]);
 
-  useEffect(() => player.current?.setVolume(volume), [volume]);
+  // An effect must return nothing (or a cleanup): setVolume's return value is not one.
+  useEffect(() => {
+    player.current?.setVolume(volume);
+  }, [volume]);
 
   // Stay with the room: after a pause or a slow load, jump to where everyone is.
   useEffect(() => {

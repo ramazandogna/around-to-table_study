@@ -42,7 +42,36 @@ export function Discovery() {
   );
 }
 
+/** What is in the lost-and-found box today: a few things members forgot. */
+const LOST_ITEMS = [
+  '🧣',
+  '☂️',
+  '🎧',
+  '🔑',
+  '📓',
+  '🖊️',
+  '🧤',
+  '☕',
+  '🕶️',
+  '🔌',
+  '🧸',
+  '📱',
+] as const;
+
 function Body({ found }: { found: Found }) {
+  if (found.kind === 'lost') {
+    // A different handful each day (the day is the pick), the same for everyone that day.
+    const day = found.pick;
+    const items = LOST_ITEMS.filter((_, i) => (i * 7 + day) % 3 !== 0).slice(0, 6);
+    return (
+      <>
+        <p className="discovery-kicker">{t('discovery.lost.kicker')}</p>
+        <h3>{t('discovery.lost.title')}</h3>
+        <p>{t('discovery.lost.text')}</p>
+        <p className="discovery-items">{items.join(' ')}</p>
+      </>
+    );
+  }
   if (found.kind === 'shelf') {
     const topic = SHELF_TOPICS[found.index];
     const moment = topic?.moments[found.pick];

@@ -1,7 +1,8 @@
-import { AREA_RULES } from '@att/shared';
+import { AREA_RULES, EMOTES, EMPTY_LINES } from '@att/shared';
 import { useEffect } from 'react';
 import { t, type MessageKey } from '../i18n/t';
-import { useGameStore } from '../state/store';
+import { useGameStore, type Radial } from '../state/store';
+import { emoteImage } from '../world/emotes';
 
 /** How far the buttons sit from the middle of the ring, in pixels. */
 const RADIUS = 78;
@@ -10,7 +11,9 @@ const CLOSE_DISTANCE = 128;
 
 type Action = {
   id: string;
+  /** An emoji, or an image for emotes. */
   icon: string;
+  image?: string;
   label: MessageKey;
   /** Why it cannot be used here, if it cannot. */
   off?: MessageKey | undefined;
@@ -18,9 +21,11 @@ type Action = {
 };
 
 /**
- * A ring of things to do around your own character: dance, set your status,
- * send a message, show an emote, change clothes. It opens when the mouse
- * rests on you (or you tap yourself) and closes when the mouse moves away.
+ * A ring of things to do, around a character. Around your own: dance, smoke,
+ * set your status, send a message, show an emote (which opens a second ring of
+ * emotes in the same place), change clothes. Around someone else: poke, add as
+ * a friend, message, invite, look at their profile, mute or block. It opens on
+ * a tap (or when the mouse rests on you) and closes when the mouse moves away.
  */
 export function RadialMenu() {
   const radial = useGameStore((s) => s.radial);
@@ -49,9 +54,131 @@ export function RadialMenu() {
   }, [radial]);
 
   if (!radial) return null;
+  const actions =
+    radial.mode === 'emote'
+      ? emoteActions()
+      : radial.mode === 'person'
+        ? personActions(radial)
+        : selfActions(radial, { area, dancing, smoking, seated });
+  return <Ring radial={radial} actions={actions} />;
+}
+
+function emoteActions(): Action[] {
+  const store = useGameStore.getState();
+  return EMOTES.map((emote) => ({
+    id: emote,
+    icon: '',
+    image: emoteImage(emote),
+    label: `emote.${emote}` as MessageKey,
+    run: () => store.connection?.emote(emote),
+  }));
+}
+
+/** What you can do with someone: everything starts from here. */
+function personActions(radial: Radial): Action[] {
+  const store = useGameStore.getState();
+  const id = radial.id ?? '';
+  const name = radial.name ?? '';
+  const lines = radial.lines ?? EMPTY_LINES;
+  const friendship = store.friends.find((f) => f.id === id)?.state ?? null;
+  const muted = id in store.mutedPeople;
+  const blocked = store.blocked.some((b) => b.id === id);
+  const rules = AREA_RULES[store.area];
+  const actions: Action[] = [
+    {
+      id: 'poke',
+      icon: '👉',
+      label: 'ring.poke',
+      run: () => store.connection?.poke(id),
+    },
+    {
+      id: 'friend',
+      icon: friendship === 'friend' ? '⭐' : '🤝',
+      label:
+        friendship === 'friend'
+          ? 'ring.friends'
+          : friendship === 'incoming'
+            ? 'ring.accept'
+            : friendship === 'outgoing'
+              ? 'ring.asked'
+              : 'ring.befriend',
+      off: friendship === 'friend' || friendship === 'outgoing' ? 'ring.already' : undefined,
+      run: () => {
+        store.social?.befriend(id);
+        store.setNotice('friend_sent', name);
+      },
+    },
+    {
+      id: 'message',
+      icon: friendship === 'friend' ? '📱' : '✉️',
+      label: friendship === 'friend' ? 'ring.phone' : 'ring.whisper',
+      off: friendship !== 'friend' && !rules.dmAllowed ? 'card.whisper.library' : undefined,
+      run: () =>
+        friendship === 'friend'
+          ? store.openPhone(id)
+          : store.setSelected({ id, name, lines, view: 'whisper' }),
+    },
+    ...(store.room
+      ? [
+          {
+            id: 'invite',
+            icon: '🔑',
+            label: 'ring.invite',
+            run: () => {
+              const room = store.room?.room;
+              if (!room) return;
+              store.connection?.invite(id, room.code, room.name);
+              store.setNotice('room_invited', name);
+            },
+          } satisfies Action,
+        ]
+      : []),
+    {
+      id: 'profile',
+      icon: '🪪',
+      label: 'ring.profile',
+      run: () => store.setSelected({ id, name, lines, view: 'profile' }),
+    },
+    {
+      id: 'mute',
+      icon: muted ? '🔊' : '🔇',
+      label: muted ? 'ring.unmute' : 'ring.mute',
+      run: () => {
+        if (muted) store.unmute(id);
+        else store.mute(id, name);
+        store.setNotice(muted ? 'unmuted_person' : 'muted_person', name);
+      },
+    },
+    {
+      id: 'block',
+      icon: '🚫',
+      label: blocked ? 'ring.unblock' : 'ring.block',
+      run: () =>
+        blocked
+          ? store.social?.unblock(id)
+          : store.ask({
+              kind: 'block',
+              name,
+              answer: (choice) => {
+                store.ask(null);
+                if (choice !== 'end') return;
+                store.social?.block(id);
+                store.setNotice('blocked', name);
+              },
+            }),
+    },
+  ];
+  return actions;
+}
+
+function selfActions(
+  radial: Radial,
+  state: { area: keyof typeof AREA_RULES; dancing: boolean; smoking: boolean; seated: boolean },
+): Action[] {
+  const { area, dancing, smoking, seated } = state;
   const rules = AREA_RULES[area];
   const store = useGameStore.getState();
-  const actions: Action[] = [
+  return [
     {
       id: 'dance',
       icon: dancing ? '🛑' : '💃',
@@ -88,7 +215,24 @@ export function RadialMenu() {
       id: 'emote',
       icon: '😊',
       label: 'radial.emote',
-      run: () => store.setEmoteOpen(true),
+      // The emotes open as a ring of their own, around the character.
+      run: () => window.setTimeout(() => store.setRadial({ ...radial, mode: 'emote' }), 0),
+    },
+    {
+      id: 'profile',
+      icon: '🪪',
+      label: 'radial.profile',
+      run: () => {
+        const session = store.session;
+        if (session) {
+          store.setSelected({
+            id: session.id,
+            name: session.name,
+            lines: store.lines,
+            view: 'profile',
+          });
+        }
+      },
     },
     {
       id: 'wardrobe',
@@ -103,17 +247,21 @@ export function RadialMenu() {
       run: () => store.setIntroOpen(true),
     },
   ];
+}
 
+function Ring({ radial, actions }: { radial: Radial; actions: Action[] }) {
+  const store = useGameStore.getState();
   return (
     <div
-      className="radial"
+      className={`radial radial--${radial.mode ?? 'self'}`}
       style={{ left: radial.x, top: radial.y }}
       role="menu"
-      aria-label={t('radial.title')}
+      aria-label={radial.mode === 'person' ? (radial.name ?? '') : t('radial.title')}
     >
       <span className="radial-ring" aria-hidden />
       {actions.map((action, i) => {
-        // Start at the top and go round clockwise.
+        // More buttons need a wider ring. Start at the top and go round clockwise.
+        const radius = Math.max(RADIUS, actions.length * 11);
         const angle = -Math.PI / 2 + (i / actions.length) * Math.PI * 2;
         const disabled = action.off !== undefined;
         return (
@@ -123,20 +271,14 @@ export function RadialMenu() {
             role="menuitem"
             className="radial-button"
             style={{
-              translate: `${Math.cos(angle) * RADIUS}px ${Math.sin(angle) * RADIUS}px`,
+              translate: `${Math.cos(angle) * radius}px ${Math.sin(angle) * radius}px`,
               animationDelay: `${i * 25}ms`,
             }}
             aria-disabled={disabled}
             title={action.off ? t(action.off) : t(action.label)}
             onClick={() => {
               if (action.off) {
-                store.setNotice(
-                  action.id === 'dance'
-                    ? 'no_dance'
-                    : action.id === 'smoke'
-                      ? 'no_smoke'
-                      : 'phone_silent',
-                );
+                store.setNotice('off', t(action.off));
                 return;
               }
               store.setRadial(null);
@@ -144,7 +286,7 @@ export function RadialMenu() {
             }}
           >
             <span className="radial-icon" aria-hidden>
-              {action.icon}
+              {action.image ? <img src={action.image} alt="" /> : action.icon}
             </span>
             <span className="radial-label">{t(action.label)}</span>
           </button>

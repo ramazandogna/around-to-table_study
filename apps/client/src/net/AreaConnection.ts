@@ -94,6 +94,11 @@ export class AreaConnection {
   }
 
   /** The study timer ran out; the server checks it really did. */
+  /** A chair pulled out, or pushed back under its table. */
+  chair(tile: Point, pulled: boolean): void {
+    this.send({ t: 'chair', tile, pulled });
+  }
+
   smoke(on: boolean): void {
     this.send({ t: 'smoke', on });
   }

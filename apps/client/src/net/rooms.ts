@@ -1,4 +1,4 @@
-import type { RoomInfo, RoomSize } from '@att/shared';
+import type { RoomInfo, RoomRules, RoomSize } from '@att/shared';
 
 /** What went wrong with a room request, as the server says it. */
 export type RoomError =
@@ -8,6 +8,8 @@ export type RoomError =
   | 'too_many_rooms'
   | 'unknown_room'
   | 'wrong_password'
+  /** The room's owner banned this player. */
+  | 'banned'
   | 'network';
 
 /** A room the player is in (or going into), with the pass its socket needs. */
@@ -47,10 +49,11 @@ export async function createRoom(
   name: string,
   size: RoomSize,
   password: string,
+  rules: RoomRules,
 ): Promise<RoomInfo | RoomError> {
   const result = await call<{ room: RoomInfo }>(
     '/api/rooms',
-    post({ token, name, size, ...(password ? { password } : {}) }),
+    post({ token, name, size, rules, ...(password ? { password } : {}) }),
   );
   return typeof result === 'string' ? result : result.room;
 }

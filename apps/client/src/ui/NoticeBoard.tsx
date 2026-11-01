@@ -1,7 +1,8 @@
-import { AREA_RULES, createAreaGrid, upcoming } from '@att/shared';
+import { AREA_RULES, createAreaGrid, EVENTS, upcoming } from '@att/shared';
 import type { ReactNode } from 'react';
+import { eventTitle } from '../content/events';
 import { HALL_EVENTS, LIBRARY_SESSIONS, type Pinned } from '../content/boards';
-import { t, type MessageKey } from '../i18n/t';
+import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { useNow } from './Calendar';
 
@@ -208,13 +209,14 @@ function Notice({
 /** The next event from the calendar, or that nothing is planned. */
 function NextEvent() {
   const now = useNow(60_000);
-  const next = upcoming(now, 7)[0];
+  const proposed = useGameStore((s) => s.proposed);
+  const next = upcoming(now, 7, EVENTS, proposed)[0];
   if (!next) return <p>{t('board.events.none')}</p>;
   const live = now >= next.start;
   return (
     <>
       <p>
-        <b>{t(`event.${next.event.id}.title` as MessageKey)}</b>
+        <b>{eventTitle(next.event)}</b>
         {' · '}
         {live
           ? t('board.events.now', { area: t(`area.${next.event.area}`) })

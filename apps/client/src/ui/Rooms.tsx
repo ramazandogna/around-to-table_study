@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ROOM_RULES,
   normalizeRoomCode,
   roomArea,
   ROOM_NAME_MAX,
@@ -6,6 +7,7 @@ import {
   ROOM_SIZES,
   roomInviteMark,
   type RoomInfo,
+  type RoomRules,
   type RoomSize,
 } from '@att/shared';
 import { useEffect, useState, type FormEvent } from 'react';
@@ -246,13 +248,14 @@ function CreateRoom({
   const [title, setTitle] = useState(() => t('room.defaultName', { name }));
   const [size, setSize] = useState<RoomSize>(5);
   const [password, setPassword] = useState('');
+  const [rules, setRules] = useState<RoomRules>(DEFAULT_ROOM_RULES);
   const [working, setWorking] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setWorking(true);
     onError(null);
-    const room = await createRoom(token, title, size, password);
+    const room = await createRoom(token, title, size, password, rules);
     setWorking(false);
     if (typeof room === 'string') onError(room);
     else onCreated(room, password);
@@ -309,6 +312,7 @@ function CreateRoom({
         />
       </label>
       <p className="creator-note">{t(password ? 'room.private.note' : 'room.open.note')}</p>
+      <RuleSwitches rules={rules} onChange={setRules} />
       <button type="submit" className="panel-ok" disabled={busy || working}>
         {t('room.create')}
       </button>
@@ -316,9 +320,145 @@ function CreateRoom({
   );
 }
 
+/** The room's rules as small switches: sounds, pets, a game table. */
+function RuleSwitches({
+  rules,
+  onChange,
+}: {
+  rules: RoomRules;
+  onChange: (rules: RoomRules) => void;
+}) {
+  return (
+    <fieldset className="room-rules">
+      <legend className="field-label">{t('room.rules')}</legend>
+      {(['sound', 'pets', 'games'] as const).map((rule) => (
+        <label key={rule} className="check">
+          <input
+            type="checkbox"
+            checked={rules[rule]}
+            onChange={(e) => onChange({ ...rules, [rule]: e.target.checked })}
+          />
+          {t(`room.rule.${rule}`)}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+/**
+ * The owner's window: the room's rules, who is inside (to send someone out, or
+ * ban them for good), who is banned, and closing the room.
+ */
+export function RoomAdmin() {
+  const open = useGameStore((s) => s.roomAdminOpen);
+  const ticket = useGameStore((s) => s.room);
+  const current = useGameStore((s) => s.roomRules);
+  const people = useGameStore((s) => s.roomPeople);
+  const banned = useGameStore((s) => s.roomBans);
+  const social = useGameStore((s) => s.social);
+  const code = ticket?.room.code;
+  useEffect(() => {
+    if (open && code) social?.roomBans(code);
+  }, [open, code, social]);
+  if (!open || !ticket || !code) return null;
+  const store = useGameStore.getState();
+  const rules = current ?? ticket.room.rules;
+  const close = () => store.setRoomAdminOpen(false);
+  return (
+    <Dialog>
+      <Panel title={`🗝️ ${ticket.room.name}`} className="panel--dialog panel--rooms">
+        <RuleSwitches
+          rules={rules}
+          onChange={(next) => {
+            // Shown at once; the room confirms it to everyone inside.
+            store.setRoomRules(next);
+            social?.roomRules(code, next);
+          }}
+        />
+        <p className="field-label">{t('room.admin.people')}</p>
+        {people.length === 0 ? (
+          <p className="board-empty">{t('room.admin.nobody')}</p>
+        ) : (
+          <ul className="room-list">
+            {people.map((person) => (
+              <li key={person.id} className="room-line">
+                <span className="room-name">{person.name}</span>
+                <button
+                  type="button"
+                  className="mini-button"
+                  title={t('room.admin.kick.hint')}
+                  onClick={() => {
+                    social?.roomOut(code, person.id, false);
+                    store.setNotice('off', t('room.admin.kicked', { name: person.name }));
+                  }}
+                >
+                  🚪 {t('room.admin.kick')}
+                </button>
+                <button
+                  type="button"
+                  className="mini-button"
+                  title={t('room.admin.ban.hint')}
+                  onClick={() => {
+                    social?.roomOut(code, person.id, true);
+                    store.setNotice('off', t('room.admin.banned', { name: person.name }));
+                  }}
+                >
+                  ⛔ {t('room.admin.ban')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {banned.length > 0 && (
+          <>
+            <p className="field-label">{t('room.admin.bannedList')}</p>
+            <ul className="room-list">
+              {banned.map((person) => (
+                <li key={person.id} className="room-line">
+                  <span className="room-name">{person.name}</span>
+                  <button
+                    type="button"
+                    className="mini-button"
+                    onClick={() => social?.roomUnban(code, person.id)}
+                  >
+                    {t('room.admin.unban')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <div className="panel-actions">
+          <button
+            type="button"
+            className="panel-button"
+            onClick={() =>
+              store.ask({
+                kind: 'closeRoom',
+                name: ticket.room.name,
+                answer: (choice) => {
+                  store.ask(null);
+                  if (choice !== 'end') return;
+                  social?.roomClose(code);
+                  close();
+                },
+              })
+            }
+          >
+            🗝️ {t('room.admin.close')}
+          </button>
+          <button type="button" className="panel-ok" onClick={close}>
+            {t('table.close')}
+          </button>
+        </div>
+      </Panel>
+    </Dialog>
+  );
+}
+
 /**
  * While in a private room: its code on the HUD, to copy a link or to send it
- * to a friend's phone.
+ * to a friend's phone. Its owner also gets the room's settings.
  */
 export function RoomChip() {
   const ticket = useGameStore((s) => s.room);
@@ -326,8 +466,10 @@ export function RoomChip() {
   const friends = useGameStore((s) => s.friends);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const myId = useGameStore((s) => s.session?.id);
   if (!ticket) return null;
   const { room } = ticket;
+  const owner = room.owner === myId;
   const online = friends.filter((f) => f.state === 'friend');
   const inside = area === roomArea(room.size);
 
@@ -341,6 +483,18 @@ export function RoomChip() {
           <p className="panel-text">
             {t(room.locked ? 'room.share.locked' : 'room.share.open', { code: room.code })}
           </p>
+          {owner && (
+            <button
+              type="button"
+              className="mini-button mini-button--ok"
+              onClick={() => {
+                setOpen(false);
+                useGameStore.getState().setRoomAdminOpen(true);
+              }}
+            >
+              ⚙️ {t('room.admin.open')}
+            </button>
+          )}
           {!inside && (
             <div className="tags">
               <button

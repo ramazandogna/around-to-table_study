@@ -11,8 +11,10 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Discovery } from './ui/Discovery';
 import { Games } from './ui/Games';
 import { JukeboxPanel, JukeboxPlayer } from './ui/Jukebox';
+import { Loader } from './ui/Loader';
 import { TableGames } from './ui/TableGames';
-import { InviteToast, RoomChip, RoomsPanel } from './ui/Rooms';
+import { AdminPanel, InboxPanel, PeoplePanel } from './ui/Inbox';
+import { InviteToast, RoomAdmin, RoomChip, RoomsPanel } from './ui/Rooms';
 import { NoticeBoard } from './ui/NoticeBoard';
 import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
@@ -107,6 +109,7 @@ export function App() {
       <aside className="hud-side">
         <FriendsPanel />
         <PhonePanel />
+        <InboxPanel />
         <PlayerCard />
       </aside>
       <div className="hud-right">
@@ -120,6 +123,9 @@ export function App() {
       <JukeboxPanel />
       <JukeboxPlayer />
       <RoomsPanel />
+      <RoomAdmin />
+      <PeoplePanel />
+      <AdminPanel />
       <InviteToast />
       <RadialMenu />
       <footer className="hud-bottom">
@@ -137,6 +143,7 @@ export function App() {
       <SitDialog />
       <ConfirmDialog />
       <Intro />
+      <Loader />
     </main>
   );
 }

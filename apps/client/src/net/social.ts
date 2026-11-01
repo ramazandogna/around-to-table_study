@@ -1,4 +1,4 @@
-import { AREA_RULES, type Friend } from '@att/shared';
+import { rulesFor, type Friend } from '@att/shared';
 import { play } from '../audio/sound';
 import { useGameStore } from '../state/store';
 import { SocialConnection, type Presence } from './SocialConnection';
@@ -26,9 +26,9 @@ export function startSocial(session: GuestSession): () => void {
           if (mine) break;
           const reading = store.phoneOpen && store.phoneWith === other;
           if (reading) connection.read(other);
-          else {
+          else if (!isMuted(other)) {
             // Where it may not ring (the library, a focus block) the phone only buzzes by the name.
-            store.setNotice('dm', nameOf(store.friends, other));
+            store.notify({ kind: 'dm', name: nameOf(store.friends, other), from: other }, 'dm');
             store.buzz();
             if (mayRing()) play('phone');
           }
@@ -42,19 +42,57 @@ export function startSocial(session: GuestSession): () => void {
           store.setSeen(message.by, message.upTo);
           break;
         case 'buzzed':
-          store.setNotice('buzzed', message.name);
+          if (isMuted(message.from)) break;
+          store.notify({ kind: 'buzz', name: message.name, from: message.from }, 'buzzed');
           store.buzz();
           if (mayRing()) play('phone');
           break;
+        case 'me':
+          store.setMe(message.role, message.blocked);
+          break;
+        case 'shouts':
+          store.addShouts(message.lines, true);
+          break;
+        case 'shouted':
+          store.addShouts([message.line]);
+          break;
+        case 'profile':
+          store.setProfile(message.profile);
+          break;
+        case 'events':
+          store.setProposed(message.events);
+          break;
+        case 'reviewed':
+          store.notify(
+            {
+              kind: message.verdict === 'approved' ? 'event_approved' : 'event_rejected',
+              name: message.title,
+            },
+            message.verdict === 'approved' ? 'event_approved' : 'event_rejected',
+          );
+          if (mayRing()) play('chime');
+          break;
+        case 'blockedBy':
+          store.notify({ kind: 'blocked_by', name: message.name }, 'blocked_by');
+          break;
+        case 'admins':
+          store.setAdmins(message.admins);
+          break;
+        case 'roomBans':
+          store.setRoomBans(message.banned);
+          break;
         case 'friendEvent':
-          // In quiet rooms a request only shows as a badge on the friends button.
-          if (AREA_RULES[store.area].notifySound || message.kind === 'accepted') {
-            store.setNotice(
-              message.kind === 'request' ? 'friend_request' : 'friend_accepted',
-              message.name,
-            );
-            if (mayRing()) play('clink');
-          }
+          if (isMuted(message.id)) break;
+          // Every request is kept in the bell's list; quiet rooms only skip the sound.
+          store.notify(
+            {
+              kind: message.kind === 'request' ? 'friend_request' : 'friend_accepted',
+              name: message.name,
+              from: message.id,
+            },
+            message.kind === 'request' ? 'friend_request' : 'friend_accepted',
+          );
+          if (mayRing()) play('clink');
           break;
         case 'world':
           store.setWorld(
@@ -68,9 +106,14 @@ export function startSocial(session: GuestSession): () => void {
             message.code === 'too_many' ||
             message.code === 'not_friends' ||
             message.code === 'link_blocked' ||
-            message.code === 'phone_silent'
+            message.code === 'phone_silent' ||
+            message.code === 'forbidden' ||
+            message.code === 'bad_event' ||
+            message.code === 'too_many_events'
           ) {
             store.setNotice(message.code);
+          } else if (message.code === 'blocked') {
+            store.setNotice('blocked_between');
           } else if (message.code === 'rate_limited') {
             store.setNotice('rate_limited');
           }
@@ -103,8 +146,14 @@ export function startSocial(session: GuestSession): () => void {
  * while the player sits studying or asked not to be disturbed.
  */
 export function mayRing(): boolean {
-  const { area, seated, dnd } = useGameStore.getState();
-  return AREA_RULES[area].notifySound && !seated && !dnd;
+  const { area, seated, dnd, roomRules } = useGameStore.getState();
+  return rulesFor(area, roomRules).notifySound && !seated && !dnd;
+}
+
+/** Someone the player muted (on this device) or blocked: nothing of theirs is shown. */
+export function isMuted(id: string): boolean {
+  const { mutedPeople, blocked } = useGameStore.getState();
+  return id in mutedPeople || blocked.some((b) => b.id === id);
 }
 
 /** Phone messages waiting across all friends. */

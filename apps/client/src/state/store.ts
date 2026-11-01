@@ -4,6 +4,11 @@ import {
   EMPTY_LINES,
   JUKEBOX,
   type JukeboxState,
+  type Profile,
+  type ProposedEvent,
+  type Role,
+  type RoomRules,
+  type Shout,
   type Table,
   type TableKind,
   type Activity,
@@ -85,7 +90,33 @@ export type Notice =
   /** No smoking outside the smoking room. */
   | 'no_smoke'
   /** The status lines ran out and were cleared. */
-  | 'lines_expired';
+  | 'lines_expired'
+  /** Someone blocked the player (the value is who). */
+  | 'blocked_by'
+  /** The player blocked, muted or unmuted someone (the value is who). */
+  | 'blocked'
+  | 'muted_person'
+  | 'unmuted_person'
+  /** One of the two blocked the other, so it did not go through. */
+  | 'blocked_between'
+  | 'forbidden'
+  | 'bad_event'
+  | 'too_many_events'
+  /** A proposed event went to the admins. */
+  | 'event_proposed'
+  /** An admin approved or turned down the player's event (the value is its title). */
+  | 'event_approved'
+  | 'event_rejected'
+  /** The private room's owner sent the player out, banned them, or closed the room. */
+  | 'kicked'
+  | 'banned'
+  | 'room_closed'
+  /** Building-wide chat is read-only in the library. */
+  | 'shout_quiet'
+  /** A friend request went out (the value is who to). */
+  | 'friend_sent'
+  /** Something that cannot be done right now; the value says why. */
+  | 'off';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -103,7 +134,53 @@ export type ChatLine = {
 const CHAT_LOG_LINES = 100;
 let chatLineKey = 0;
 
-export type Selected = { id: string; name: string; lines: StatusLines };
+/**
+ * The person whose card is open, with their status lines as they were when
+ * tapped; `view` opens it on the profile or straight on the whisper.
+ */
+export type Selected = {
+  id: string;
+  name: string;
+  lines: StatusLines;
+  view?: 'profile' | 'whisper';
+};
+
+/** Something that happened to the player, kept in the bell's list until read. */
+export type InboxItem = {
+  key: number;
+  kind:
+    | 'dm'
+    | 'poke'
+    | 'invite'
+    | 'friend_request'
+    | 'friend_accepted'
+    | 'buzz'
+    | 'event_approved'
+    | 'event_rejected'
+    | 'blocked_by'
+    | 'kicked'
+    | 'banned'
+    | 'room_closed';
+  name: string;
+  /** Whose it is, to open their conversation or card. */
+  from?: string | undefined;
+  /** A room code for invites. */
+  code?: string | undefined;
+  at: number;
+};
+
+const INBOX_SIZE = 40;
+let inboxKey = 0;
+const MUTED_KEY = 'att.mutedPeople';
+
+function loadMuted(): Record<string, string> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(MUTED_KEY) ?? '{}') as unknown;
+    return stored && typeof stored === 'object' ? (stored as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
 
 /** What the player chose when asked before the world goes on. */
 export type ConfirmChoice = 'break' | 'end' | 'stay';
@@ -112,7 +189,13 @@ export type ConfirmChoice = 'break' | 'end' | 'stay';
  * A question the world waits on: standing up from a running timer, or leaving
  * the library with one.
  */
-export type Confirm = { kind: 'stand' | 'leave'; answer: (choice: ConfirmChoice) => void };
+export type Confirm = {
+  /** Also asked before blocking someone and before closing a private room. */
+  kind: 'stand' | 'leave' | 'block' | 'closeRoom';
+  /** Who or what it is about, for the question's text. */
+  name?: string;
+  answer: (choice: ConfirmChoice) => void;
+};
 
 /** A running timer on this device's clock. */
 export type LocalTimer = { endsAt: number; totalMs: number };
@@ -143,7 +226,7 @@ export type SitStep = 'activity' | 'timer';
 
 /** Something found by looking closely: a shelf moment, a painting, the renovation. */
 export type Discovery = {
-  kind: 'shelf' | 'painting' | 'renovation' | 'flaw';
+  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'lost';
   /** Index into the content list for its kind. */
   index: number;
   /** Which moment of a shelf, or which note of the renovation. */
@@ -183,7 +266,19 @@ function loadLinesUntil(): number | null {
 }
 
 /** Where the ring of actions around the player opens, in screen pixels. */
-export type Radial = { x: number; y: number };
+/**
+ * Where a ring of actions opens, in screen pixels, and around whom: the player
+ * (their actions, or the emotes), or someone else (what to do with them).
+ */
+export type Radial = {
+  x: number;
+  y: number;
+  mode?: 'self' | 'emote' | 'person' | undefined;
+  /** For 'person': who, by name, with their status lines as they were when tapped. */
+  id?: string | undefined;
+  name?: string | undefined;
+  lines?: StatusLines | undefined;
+};
 
 /** State shared between the three.js world and the React UI. */
 type GameState = {
@@ -251,6 +346,33 @@ type GameState = {
   linesUntil: number | null;
   /** A room the player asked to go to from the phone (to a friend); the world takes them. */
   travel: AreaId | null;
+  role: Role;
+  /** People the player blocked (on the server) and muted (on this device only). */
+  blocked: { id: string; name: string }[];
+  mutedPeople: Record<string, string>;
+  /** The building-wide chat, newest last, and lines not seen yet. */
+  shouts: Shout[];
+  shoutUnread: number;
+  chatTab: 'room' | 'building';
+  /** Proposed events as the server shows them to this player. */
+  proposed: ProposedEvent[];
+  /** A profile card opened, or the id being loaded. */
+  profile: Profile | null;
+  profileId: string | null;
+  inbox: InboxItem[];
+  inboxOpen: boolean;
+  inboxUnread: number;
+  /** The private room's rules while inside it; people inside, for its owner to manage. */
+  roomRules: RoomRules | null;
+  roomPeople: { id: string; name: string }[];
+  roomAdminOpen: boolean;
+  roomBans: { id: string; name: string }[];
+  adminOpen: boolean;
+  admins: { id: string; name: string }[];
+  peopleOpen: boolean;
+  eventFormOpen: boolean;
+  /** Changing rooms: the loader shows while true. */
+  loading: boolean;
   muted: boolean;
   /** People sitting at the table in this room right now, the player included. */
   studying: number;
@@ -326,6 +448,26 @@ type GameState = {
   buzz: () => void;
   setSeen: (friend: string, upTo: number) => void;
   setTravel: (area: AreaId | null) => void;
+  setMe: (role: Role, blocked: { id: string; name: string }[]) => void;
+  mute: (id: string, name: string) => void;
+  unmute: (id: string) => void;
+  addShouts: (lines: Shout[], replace?: boolean) => void;
+  setChatTab: (tab: 'room' | 'building') => void;
+  setProposed: (events: ProposedEvent[]) => void;
+  openProfile: (id: string | null) => void;
+  setProfile: (profile: Profile | null) => void;
+  /** Tells the player about something with a notice, and keeps it in the bell's list. */
+  notify: (item: Omit<InboxItem, 'key' | 'at'>, notice?: Notice) => void;
+  setInboxOpen: (open: boolean) => void;
+  setRoomRules: (rules: RoomRules | null) => void;
+  setRoomPeople: (people: { id: string; name: string }[]) => void;
+  setRoomAdminOpen: (open: boolean) => void;
+  setRoomBans: (banned: { id: string; name: string }[]) => void;
+  setAdminOpen: (open: boolean) => void;
+  setAdmins: (admins: { id: string; name: string }[]) => void;
+  setPeopleOpen: (open: boolean) => void;
+  setEventFormOpen: (open: boolean) => void;
+  setLoading: (loading: boolean) => void;
   setMuted: (muted: boolean) => void;
   setStudying: (count: number) => void;
   setTyping: (typing: boolean) => void;
@@ -407,6 +549,27 @@ export const useGameStore = create<GameState>((set) => ({
   seen: {},
   linesUntil: loadLinesUntil(),
   travel: null,
+  role: 'user',
+  blocked: [],
+  mutedPeople: loadMuted(),
+  shouts: [],
+  shoutUnread: 0,
+  chatTab: 'room',
+  proposed: [],
+  profile: null,
+  profileId: null,
+  inbox: [],
+  inboxOpen: false,
+  inboxUnread: 0,
+  roomRules: null,
+  roomPeople: [],
+  roomAdminOpen: false,
+  roomBans: [],
+  adminOpen: false,
+  admins: [],
+  peopleOpen: false,
+  eventFormOpen: false,
+  loading: true,
   muted: isMuted(),
   studying: 0,
   typing: false,
@@ -451,6 +614,8 @@ export const useGameStore = create<GameState>((set) => ({
       tableOpen: null,
       jukebox: EMPTY_JUKEBOX,
       jukeboxOpen: false,
+      roomPeople: [],
+      roomAdminOpen: false,
     }),
   setConnection: (connection) => set({ connection }),
   setSocial: (social) => set({ social }),
@@ -517,6 +682,58 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   buzz: () => set({ buzzAt: Date.now() }),
   setTravel: (travel) => set({ travel }),
+  setMe: (role, blocked) => set({ role, blocked }),
+  mute: (id, name) =>
+    set((state) => {
+      const mutedPeople = { ...state.mutedPeople, [id]: name };
+      try {
+        localStorage.setItem(MUTED_KEY, JSON.stringify(mutedPeople));
+      } catch {
+        // Private mode: muted for this visit.
+      }
+      return { mutedPeople };
+    }),
+  unmute: (id) =>
+    set((state) => {
+      const mutedPeople = Object.fromEntries(
+        Object.entries(state.mutedPeople).filter(([key]) => key !== id),
+      );
+      try {
+        localStorage.setItem(MUTED_KEY, JSON.stringify(mutedPeople));
+      } catch {
+        // Private mode.
+      }
+      return { mutedPeople };
+    }),
+  addShouts: (lines, replace = false) =>
+    set((state) => {
+      const shouts = (replace ? lines : [...state.shouts, ...lines]).slice(-100);
+      const fresh = replace ? 0 : lines.filter((l) => l.from !== state.session?.id).length;
+      const reading = state.chatOpen && state.chatTab === 'building';
+      return { shouts, shoutUnread: reading ? 0 : state.shoutUnread + fresh };
+    }),
+  setChatTab: (chatTab) =>
+    set((state) => ({ chatTab, shoutUnread: chatTab === 'building' ? 0 : state.shoutUnread })),
+  setProposed: (proposed) => set({ proposed }),
+  openProfile: (profileId) => set({ profileId, profile: null }),
+  setProfile: (profile) =>
+    set((state) => (profile && profile.id !== state.profileId ? {} : { profile })),
+  notify: (item, notice) =>
+    set((state) => ({
+      inbox: [{ ...item, key: ++inboxKey, at: Date.now() }, ...state.inbox].slice(0, INBOX_SIZE),
+      inboxUnread: state.inboxOpen ? 0 : state.inboxUnread + 1,
+      ...(notice ? { notice, noticeValue: item.name } : {}),
+    })),
+  setInboxOpen: (inboxOpen) => set(inboxOpen ? { inboxOpen, inboxUnread: 0 } : { inboxOpen }),
+  setRoomRules: (roomRules) => set({ roomRules }),
+  setRoomPeople: (roomPeople) => set({ roomPeople }),
+  setRoomAdminOpen: (roomAdminOpen) => set({ roomAdminOpen }),
+  setRoomBans: (roomBans) => set({ roomBans }),
+  setAdminOpen: (adminOpen) => set({ adminOpen }),
+  setAdmins: (admins) => set({ admins }),
+  setPeopleOpen: (peopleOpen) => set({ peopleOpen }),
+  setEventFormOpen: (eventFormOpen) => set({ eventFormOpen }),
+  setLoading: (loading) => set({ loading }),
   setSeen: (friend, upTo) =>
     set((state) =>
       (state.seen[friend] ?? 0) >= upTo ? {} : { seen: { ...state.seen, [friend]: upTo } },
@@ -538,7 +755,12 @@ export const useGameStore = create<GameState>((set) => ({
         ? 0
         : state.unread + (line.kind === 'say' || line.kind === 'whisper' ? 1 : 0),
     })),
-  setChatOpen: (chatOpen) => set({ chatOpen, unread: 0 }),
+  setChatOpen: (chatOpen) =>
+    set((state) => ({
+      chatOpen,
+      unread: 0,
+      shoutUnread: chatOpen && state.chatTab === 'building' ? 0 : state.shoutUnread,
+    })),
   setSelected: (selected) => set({ selected }),
   setLines: (lines, until = null) => {
     saveLines(lines);
@@ -554,9 +776,19 @@ export const useGameStore = create<GameState>((set) => ({
   setEmoteOpen: (emoteOpen) => set({ emoteOpen }),
   ask: (confirm) => set({ confirm }),
   setBoardOpen: (boardOpen) => set({ boardOpen }),
-  // Sitting down asks what you will work on; standing up clears the table.
+  // What to work on is asked at the chair, before sitting; once seated, the timer is next
+  // (unless a session is already going). Standing up clears the table.
   setSeated: (seated) =>
-    set(seated ? { seated, sitStep: 'activity' } : { seated, sitStep: null, activity: null }),
+    set((state) =>
+      seated
+        ? {
+            seated,
+            sitStep: state.activity
+              ? (state.sitStep ?? (state.timer || state.study ? null : 'timer'))
+              : 'activity',
+          }
+        : { seated, sitStep: null, activity: null },
+    ),
   setSitStep: (sitStep) => set({ sitStep }),
   setWardrobeOpen: (wardrobeOpen) => set({ wardrobeOpen }),
   setActivity: (activity) => set({ activity }),
@@ -627,13 +859,26 @@ export const useGameStore = create<GameState>((set) => ({
       timer: null,
       study: null,
       dnd: false,
+      role: 'user',
+      blocked: [],
+      inbox: [],
+      inboxUnread: 0,
+      shouts: [],
+      proposed: [],
+      profile: null,
+      profileId: null,
     }),
 }));
 
 /** The player's study status as the server expects it. */
 export function studyStatus(state: GameState = useGameStore.getState()): StudyStatus {
-  const { activity, timer, dnd } = state;
+  const { activity, timer, dnd, study } = state;
   return {
+    // Which focus block of the session, for others to see ("2 of 4").
+    round:
+      study?.rhythm && study.rhythm.rounds > 1 && study.phase !== 'free'
+        ? { n: study.round, of: study.rhythm.rounds }
+        : null,
     activity,
     timer: timer
       ? { remainingMs: Math.max(0, Math.round(timer.endsAt - Date.now())), totalMs: timer.totalMs }

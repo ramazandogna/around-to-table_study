@@ -1,5 +1,6 @@
 import {
   DARTS_PER_TURN,
+  isRoomArea,
   PIG_GOAL,
   TABLE_GAMES,
   TABLE_PLAYERS,
@@ -71,9 +72,12 @@ export function TableGames() {
 /** The three games, each with who is at it. */
 function Menu() {
   const tables = useGameStore((s) => s.tables);
+  // A private room's table has the dice and the number game; darts need the smoking room's board.
+  const area = useGameStore((s) => s.area);
+  const kinds = isRoomArea(area) ? TABLE_GAMES.filter((k) => k !== 'darts') : TABLE_GAMES;
   return (
     <ul className="table-menu">
-      {TABLE_GAMES.map((kind) => {
+      {kinds.map((kind) => {
         const table = tables[kind];
         const state = !table
           ? t('table.state.free')

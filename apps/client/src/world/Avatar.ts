@@ -55,10 +55,12 @@ const BODY_RADIUS = 0.24;
 const ARRIVE_EPSILON = 0.002;
 /** How quickly the body slides onto or off a chair. */
 const SEAT_EASE = 9;
-/** The hips rest slightly behind the chair's center, against the backrest. */
-const SIT_INSET = CHAIR_INSET - 0.08;
-/** On a sofa the body leans back into the cushions. */
-const SOFA_INSET = -0.1;
+/** The hips rest just in front of the chair's center, so the backrest stays behind the back. */
+const SIT_INSET = CHAIR_INSET + 0.06;
+/** On a sofa the body sits forward enough to stay inside the backrest. */
+const SOFA_INSET = 0.1;
+/** Waiting to sit, the body stands this far behind the chair's tile middle. */
+const STAND_BEHIND = 0.42;
 /** The hip joints sit this far above the cushion (half a leg's thickness). */
 const HIP_ABOVE_SEAT = 0.05;
 /** Where the bottom of the name tag sits; lines and bubbles grow upwards from it. */
@@ -168,6 +170,13 @@ export class Avatar {
   private stillFor = 0;
   private dancing = false;
   private smoking = false;
+  /** A chair at a table this body stands at without sitting yet. */
+  private waitingAt: Seat | null = null;
+  /**
+   * The player's own chair: true once they chose what to work on. Someone
+   * else sits once their status says what they work on (see `mayTakeChair`).
+   */
+  chairAllowed = true;
   private readonly cigarette = new Cigarette();
   private readonly puffs = new SmokePuffs();
   private smokeTime = 0;
@@ -343,6 +352,16 @@ export class Avatar {
     return this.smoking;
   }
 
+  /** Whether this body may sit down on a chair at a table now. */
+  private mayTakeChair(): boolean {
+    return this.isSelf ? this.chairAllowed : this.status.activity !== null;
+  }
+
+  /** Standing at a chair, waiting to sit (it is pulled out for them). */
+  get isAtChair(): boolean {
+    return this.waitingAt !== null;
+  }
+
   /** Smokes in place while standing; walking or sitting down puts it out. */
   setSmoking(on: boolean): void {
     if (on) this.dancing = false;
@@ -421,7 +440,7 @@ export class Avatar {
   }
 
   /** Shows the person's activity on the table and their timer and "do not disturb" on the name tag. */
-  setStatus({ activity, timer, dnd }: StudyStatus): void {
+  setStatus({ activity, timer, dnd, round }: StudyStatus): void {
     if (activity !== this.status.activity) {
       this.props?.removeFromParent();
       this.props = activity ? this.context.props(activity) : null;
@@ -433,9 +452,13 @@ export class Avatar {
     this.status = {
       activity,
       dnd,
+      round: round ?? null,
       timer: timer ? { endsAt: Date.now() + timer.remainingMs, totalMs: timer.totalMs } : null,
     };
-    this.badges.textContent = `${timer ? ' ⏱' : ''}${dnd ? ' 🔕' : ''}`;
+    // A session's progress shows by the name ("🍅 2/4"), so others see how far along someone is.
+    const progress = round ? ` 🍅${round.n}/${round.of}` : timer ? ' ⏱' : '';
+    this.badges.textContent = `${progress}${dnd ? ' 🔕' : ''}`;
+    this.nameTag.title = round ? t('details.round', { n: round.n, of: round.of }) : '';
     if (this.details.classList.contains('avatar-details--visible')) this.renderDetails();
   }
 
@@ -677,6 +700,7 @@ export class Avatar {
     this.stillFor = this.isMoving ? 0 : this.stillFor + delta;
     if (this.isMoving) {
       this.pose = 'walk';
+      this.waitingAt = null;
       // Someone else's dance or cigarette is the server's to end (on "moved"): their body
       // may still be catching up here when they start, and should start once it arrives.
       if (this.isSelf) {
@@ -684,9 +708,13 @@ export class Avatar {
         if (this.smoking) this.setSmoking(false);
       }
     } else if (this.stillFor >= SETTLE_SECONDS) {
-      this.seat = this.context.seats(this.tile);
+      const seat = this.context.seats(this.tile);
+      // At a table the chair is pulled out first; sitting waits for a choice of what to do.
+      this.waitingAt = seat?.kind === 'chair' && !this.mayTakeChair() ? seat : null;
+      this.seat = this.waitingAt ? null : seat;
+      const facingSeat = this.seat ?? this.waitingAt;
+      if (facingSeat) this.face(facingSeat.facing.x, facingSeat.facing.y);
       if (this.seat) {
-        this.face(this.seat.facing.x, this.seat.facing.y);
         this.dancing = false;
         if (this.smoking) this.setSmoking(false);
       }
@@ -883,6 +911,12 @@ export class Avatar {
       const y = FLOOR_Y + cushion + HIP_ABOVE_SEAT - this.kit.seatedHipHeight;
       this.settleTarget.set(x + seat.facing.x * inset, y, z + seat.facing.y * inset);
       position.lerp(this.settleTarget, ease);
+    } else if (this.waitingAt && !this.isMoving) {
+      // Standing behind the pulled-out chair, not in it.
+      const { x, z } = tileCenter(this.tile);
+      const back = this.waitingAt.facing;
+      this.settleTarget.set(x - back.x * STAND_BEHIND, FLOOR_Y, z - back.y * STAND_BEHIND);
+      position.lerp(this.settleTarget, ease);
     } else {
       position.y = MathUtils.lerp(position.y, FLOOR_Y, ease);
     }
@@ -907,8 +941,9 @@ export class Avatar {
   }
 
   private renderDetails(): void {
-    const { activity, timer, dnd } = this.status;
+    const { activity, timer, dnd, round } = this.status;
     const lines: string[] = [];
+    if (round) lines.push(`🍅 ${t('details.round', { n: round.n, of: round.of })}`);
     if (activity && this.isSeated)
       lines.push(`${ACTIVITY_ICON[activity]} ${t(`activity.${activity}`)}`);
     if (timer) {

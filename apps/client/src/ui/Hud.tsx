@@ -5,6 +5,7 @@ import { useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
 import { WorldClock } from './Calendar';
 import { FriendsLink } from './Friends';
+import { InboxLink } from './Inbox';
 import { PhoneLink } from './Phone';
 import { StartOver } from './StartOver';
 import { StatusDialog } from './StatusDialog';
@@ -46,7 +47,10 @@ export function HudPlate() {
         </span>
       </button>
       <div className="hud-heading">
-        <span className="hud-name">{APP_NAME}</span>
+        <span className="hud-name">
+          <img className="hud-logo" src="/logo.png" alt="" />
+          {APP_NAME}
+        </span>
         <span className="hud-area">
           <span aria-hidden>{AREA_ICON[area]}</span> {areaName}
           <span className="hud-count">
@@ -59,6 +63,7 @@ export function HudPlate() {
         <StatusDialog />
         <FriendsLink />
         <PhoneLink />
+        <InboxLink />
         <Wardrobe />
         <SoundToggle />
         <IntroLink />

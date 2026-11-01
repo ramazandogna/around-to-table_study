@@ -30,6 +30,7 @@ export class IsoView {
   private readonly renderer: WebGLRenderer;
   private readonly labels = new CSS2DRenderer();
   private readonly sun = new DirectionalLight(0xfff1dc, 2.2);
+  private readonly sky = new HemisphereLight(0xfff4e0, 0x5a4636, 1.6);
   private readonly focus = new Vector3();
   private readonly raycaster = new Raycaster();
   private readonly floor = new Plane(new Vector3(0, 1, 0), 0);
@@ -50,7 +51,7 @@ export class IsoView {
     container.appendChild(labels);
 
     this.scene.background = new Color(0x1b1512);
-    this.scene.add(new HemisphereLight(0xfff4e0, 0x5a4636, 1.6));
+    this.scene.add(this.sky);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0005;
@@ -67,6 +68,24 @@ export class IsoView {
     canvas.addEventListener('pointermove', this.onPointerMove);
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('pointercancel', this.onPointerUp);
+  }
+
+  /**
+   * The light of the hour: the sun through the windows by day, warmer in the
+   * afternoon, low and blue at night (the lamps do the rest).
+   */
+  setDaylight(light: {
+    sun: number;
+    sunColor: number;
+    sky: number;
+    skyColor: number;
+    ground: number;
+  }): void {
+    this.sun.intensity = light.sun;
+    this.sun.color.setHex(light.sunColor);
+    this.sky.intensity = light.sky;
+    this.sky.color.setHex(light.skyColor);
+    this.sky.groundColor.setHex(light.ground);
   }
 
   /** True while two fingers are on the screen, so taps are not treated as walking. */
