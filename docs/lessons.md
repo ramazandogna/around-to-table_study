@@ -45,6 +45,9 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **A dialog must not live inside something that can fold.** A hidden parent hides its fixed children too; overlays belong in a portal.
 - **Keep things that open a board away from things you walk to.** A topic jar beside the notice board opened the board every time.
 - **Let the server end what it started for someone else.** Clearing a remote player's dance or cigarette when their body moved on this screen lost it whenever it arrived while they were still walking over.
+- **Do not rely on the server for seeking audio.** The dev server answered range requests with the whole file, so Chromium could not jump to the room's point; fetching the track whole and playing it from memory works everywhere.
+- **Look at what a hidden overlay covers on a phone.** A joystick moved the chat line, which pushed Send off the screen; the music card sat on the joystick. Every new fixed element needs a phone screenshot.
+- **Reproduce a bug before calling it fixed.** The jukebox "black screen" pointed at an effect returning a value, but bringing that line back did not break anything; the report says so rather than claiming a fix.
 - **A zustand selector must not build a new array or object.** It re-renders forever; select the plain value and work the rest out in the component.
 - **Wait for the state, not for an element to be gone.** A loader that appears a tick after a click passed "no loader" checks and the test acted on the old room.
 - **Optimistic switches need the world to watch the store, not the message.** The owner's own switch changed the store first, so the room's echo looked like no change and the owner's pet never came back.

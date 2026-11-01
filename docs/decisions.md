@@ -2,6 +2,25 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-11-01: The early beta has a door code that changes with every deploy
+- **Decision:** `pnpm run deploy` runs `scripts/deploy.mjs`: it makes an 8-character password (letters and digits, no look-alikes), uploads it as the `ACCESS_PASSWORD` secret together with the code (`wrangler deploy --secrets-file`, a temporary file removed right after) and prints `password: XXXXXXXX` under the worker's address. Making a character needs it. The password is part of the key that signs sessions and room passes, so a new one ends every old session at once; the browser notices (`/api/access`), forgets the session and asks for the name and the code again, keeping the look. Wrong tries are limited (8 per address in ten minutes). Without the secret (local development) the door is open.
+- **Why:** Links were going around; only people given this week's code should come in, without accounts yet.
+
+## 2026-11-01: The building starts over by a data epoch
+- **Decision:** `DATA_EPOCH` in `shared/constants.ts`. When the social hub or a room wakes up with an older epoch, it drops everything (guests, friendships, messages, rooms, numbers, tables, the jukebox) once; browsers clear what the game kept. Bumped to 2 for the beta's fresh start; the next bump starts over again.
+
+## 2026-11-01: The smoking room always has music
+- **Decision:** Calm piano, guitar and string pieces by Kevin MacLeod (CC BY 4.0, credited in the player and CREDITS) are served from `public/music` and play all the time, at the room's point by the clock, from memory (each file is fetched whole, so seeking works without range requests). A queued YouTube song takes over in YouTube's own player, kept at 200×200 as YouTube's terms ask, and the calm music comes back after. The card opens on coming in; "–" tucks it away (a YouTube player stays 200×200), "✕" stops it on that screen. A clear "tap to listen" appears when a browser blocks sound. There is no "music only" check for YouTube songs: that needs a YouTube Data API key (category 10).
+
+## 2026-11-01: Walking with keys and a joystick; taps are for people and things
+- **Decision:** Touch screens get an on-screen joystick (any direction) besides tapping; desktops keep WASD and the arrows. Tapping the floor still walks, for newcomers, but the crowd problem (people covering the tile behind them) is solved by walking with the stick or the keys. A sofa now asks before sitting, and the player hops onto it.
+
+## 2026-11-01: More pets, made from fewer models
+- **Decision:** Seven pets: cat, beagle (the Kenney dog), corgi, dachshund and shiba (the Kenney dog reshaped: body length and width, leg length, ears, tail, a fur colour of their own, with the clips reshaped to match), rabbit and a turtle built in code with its own clips. Each kind has its own speed, silliness and chatter; rabbits hop, a turtle pulls its head in. Accessories sit on the body, or on the turtle's head.
+
+## 2026-11-01: A landing page in the game's colours, on rei-kit's glass
+- **Decision:** `site/` is a small Vue 3 + Tailwind 4 page on rei-kit 4.4 (`data-material="glass"`), the game's palette mapped onto rei-kit's roles, in English (default), Turkish, Chinese and Japanese. It is outside the pnpm workspace (own lockfile, installed with `--ignore-workspace`) and published to GitHub Pages by `.github/workflows/site.yml` whenever `site/` changes.
+
 ## 2026-11-01: Roles, blocks and the building chat live in the social hub
 - **Decision:** Roles are `user` and `admin`. The owner's guest ids are set on the server (`ADMIN_IDS`, a secret) and are always admins; admins make others admins from their profile card. Blocking is stored in the hub: it ends the friendship and its conversation, stops messages, buzzes and friend requests there, and the rooms ask the hub before passing a poke, whisper or invite; the blocked person is told. Muting is on the player's device only and nobody is told. A building-wide chat (last 50 lines) is a second tab next to the room's chat; the library reads it but does not post.
 - **Why:** One place for who may do what, checked on the server, without a new resource.
