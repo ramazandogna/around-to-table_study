@@ -47,4 +47,16 @@ describe('appearance', () => {
     const dog = { t: 'hello', look: { character: 0, pet: 'dog' } };
     expect(parseClientMessage(JSON.stringify(dog))).toBeNull();
   });
+
+  it('dresses the pet from fixed lists', () => {
+    const cat = { character: 0, pet: 'cat', petSex: 'female', petColor: 2, petAccessory: 'bow' };
+    expect(isValidAppearance(cat)).toBe(true);
+    expect(parseClientMessage(JSON.stringify({ t: 'look', look: cat }))).toEqual({
+      t: 'look',
+      look: cat,
+    });
+    expect(isValidAppearance({ ...cat, petAccessory: 'crown' })).toBe(false);
+    expect(isValidAppearance({ ...cat, petColor: 99 })).toBe(false);
+    expect(isValidAppearance({ ...cat, petSex: 'robot' })).toBe(false);
+  });
 });

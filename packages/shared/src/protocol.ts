@@ -3,6 +3,9 @@ import {
   CHARACTERS,
   OUTFIT_PARTS,
   PALETTES,
+  PET_ACCESSORIES,
+  PET_COLORS,
+  PET_SEXES,
   PETS_AVAILABLE,
   type Appearance,
   type OutfitPart,
@@ -12,7 +15,7 @@ import { DOINGS, EMOTES, MOODS, STATUS_LIMITS, type Emote, type StatusLines } fr
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import type { AreaId, Point } from './world';
 
-const areaId = z.enum(['hall', 'library', 'smoking']);
+const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
 const index = (length: number) =>
   z
@@ -26,6 +29,9 @@ const appearance = z.object({
     OUTFIT_PARTS.map((part) => [part, index(PALETTES[part].length).optional()]),
   ) as Record<OutfitPart, z.ZodOptional<z.ZodNumber>>),
   pet: z.enum(PETS_AVAILABLE as [PetKind, ...PetKind[]]).optional(),
+  petSex: z.enum(PET_SEXES).optional(),
+  petColor: index(PET_COLORS.length).optional(),
+  petAccessory: z.enum(PET_ACCESSORIES).optional(),
 });
 const studyStatus = z.object({
   activity: z.enum(ACTIVITIES).nullable(),
@@ -74,6 +80,13 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('dance'), on: z.boolean() }),
   /** The sender's study timer ran out: everyone in the room sees them celebrate. */
   z.object({ t: z.literal('finished') }),
+  /** Asks someone in the same area to come to the sender's private room. */
+  z.object({
+    t: z.literal('invite'),
+    to: z.string().min(1).max(64),
+    code: z.string().regex(/^[A-Z2-9]{6}$/),
+    name: z.string().min(1).max(48),
+  }),
   /** A friendly nudge to someone in the same area. */
   z.object({ t: z.literal('poke'), to: z.string().min(1).max(64) }),
   /** A private message to someone in the same area; only where the area allows it. */
@@ -141,6 +154,8 @@ export type ServerMessage =
   | { t: 'whispered'; from: string; to: string; text: string; at: number }
   /** Someone's study timer ran out. */
   | { t: 'finished'; id: string }
+  /** An invitation to someone's private room, for the person invited. */
+  | { t: 'invited'; from: string; code: string; name: string }
   | { t: 'error'; code: ErrorCode; retryInMs?: number };
 
 export function parseClientMessage(raw: string): ClientMessage | null {

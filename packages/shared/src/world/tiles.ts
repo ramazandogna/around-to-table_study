@@ -23,6 +23,10 @@ export const TILE = {
   noticeBoard: 'N',
   /** The chair behind the librarian's desk: hers, so nobody else walks or sits there. */
   staffChair: 'Q',
+  /** Things to play with in the smoking room, against a wall. */
+  arcade: 'G',
+  clawMachine: 'J',
+  vendingMachine: 'V',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];

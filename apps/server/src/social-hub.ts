@@ -7,6 +7,11 @@ import {
   isStale,
   MAX_FRIENDS,
   MAX_WAITING_PETS,
+  makeRoomCode,
+  ROOM_IDLE_MS,
+  roomArea,
+  type RoomInfo,
+  type RoomSize,
   parseSocialMessage,
   type AreaId,
   type DirectMessage,
@@ -29,8 +34,12 @@ type Member = {
   studying?: boolean;
   /** The pet walking along; it waits at the library door while its person studies. */
   pet?: PetKind | null;
+  /** How the pet looks, for drawing it at the door. */
+  petLook?: Pick<WaitingPet, 'petColor' | 'petSex' | 'petAccessory'>;
   /** When the socket connected, for telling vanished ones apart (see `alarm`). */
   since?: number;
+  /** The private room they are in, if any. */
+  room?: string;
   changes: RateWindow;
   messages: RateWindow;
 };
@@ -48,6 +57,26 @@ const MESSAGE_WINDOW_MS = 10_000;
 const WORLD_EVERY_MS = 1_500;
 /** How often sockets that went quiet are looked for while anyone is connected. */
 const SWEEP_MS = 30_000;
+/** Rooms one person may open per hour, so nobody fills the reception. */
+const ROOMS_PER_HOUR = 5;
+
+type RoomRow = {
+  code: string;
+  name: string;
+  size: number;
+  password: string | null;
+  owner: string;
+  used_at: number;
+};
+
+/** Passwords are kept only as a salted hash. */
+async function hashPassword(code: string, password: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${code}:${password}`),
+  );
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 export const SOCIAL_HEADERS = { id: 'x-user-id', name: 'x-user-name' } as const;
 
@@ -92,6 +121,15 @@ export class SocialHub extends DurableObject<Env> {
         read INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS messages_by_pair ON messages (a, b, id);
+      CREATE TABLE IF NOT EXISTS rooms (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        password TEXT,
+        owner TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        used_at INTEGER NOT NULL
+      );
     `);
   }
 
@@ -156,9 +194,115 @@ export class SocialHub extends DurableObject<Env> {
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
   }
 
-  /** Someone started over: everyone they were before goes offline at once. */
-  async kick(ids: readonly string[]): Promise<void> {
-    for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) this.leave(ws);
+  /**
+   * Someone started over: everyone they were before goes offline at once.
+   * Returns the private rooms they were in, so those can let them go too.
+   */
+  async kick(ids: readonly string[]): Promise<string[]> {
+    const rooms = new Set<string>();
+    for (const id of ids) {
+      for (const ws of this.ctx.getWebSockets(id)) {
+        const room = (ws.deserializeAttachment() as Member | null)?.room;
+        if (room) rooms.add(room);
+        this.leave(ws);
+      }
+    }
+    return [...rooms];
+  }
+
+  /** Opens a private room; null when this person opened too many lately. */
+  async createRoom(
+    owner: string,
+    name: string,
+    size: RoomSize,
+    password: string | null,
+  ): Promise<RoomInfo | null> {
+    const now = Date.now();
+    const recent = this.sql
+      .exec<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM rooms WHERE owner = ? AND created_at > ?',
+        owner,
+        now - 60 * 60_000,
+      )
+      .one().n;
+    if (recent >= ROOMS_PER_HOUR) return null;
+    this.sql.exec('DELETE FROM rooms WHERE used_at < ?', now - ROOM_IDLE_MS);
+    let code = makeRoomCode();
+    while (this.sql.exec('SELECT 1 FROM rooms WHERE code = ?', code).toArray().length) {
+      code = makeRoomCode();
+    }
+    const hash = password ? await hashPassword(code, password) : null;
+    this.sql.exec(
+      'INSERT INTO rooms (code, name, size, password, owner, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      code,
+      name,
+      size,
+      hash,
+      owner,
+      now,
+      now,
+    );
+    return { code, name, size, locked: hash !== null, people: 0 };
+  }
+
+  /** A room by its code, with how many people are inside; null when there is none. */
+  async roomInfo(code: string): Promise<RoomInfo | null> {
+    const row = this.roomRow(code);
+    return row ? this.info(row) : null;
+  }
+
+  /**
+   * Whether someone may come into a room: 'ok', 'unknown' (no such room or
+   * forgotten) or 'password' (missing or wrong). Coming in keeps it alive.
+   */
+  async checkRoom(code: string, password: string | null): Promise<'ok' | 'unknown' | 'password'> {
+    const row = this.roomRow(code);
+    if (!row) return 'unknown';
+    if (row.password && (!password || (await hashPassword(code, password)) !== row.password)) {
+      return 'password';
+    }
+    this.sql.exec('UPDATE rooms SET used_at = ? WHERE code = ?', Date.now(), code);
+    return 'ok';
+  }
+
+  /** Rooms without a password, for the reception: the liveliest first. */
+  async openRooms(): Promise<RoomInfo[]> {
+    const rows = this.sql
+      .exec<RoomRow>(
+        'SELECT code, name, size, password, owner, used_at FROM rooms WHERE password IS NULL AND used_at > ? ORDER BY used_at DESC LIMIT 40',
+        Date.now() - ROOM_IDLE_MS,
+      )
+      .toArray();
+    return rows.map((row) => this.info(row)).sort((a, b) => b.people - a.people);
+  }
+
+  private roomRow(code: string): RoomRow | null {
+    return (
+      this.sql
+        .exec<RoomRow>(
+          'SELECT code, name, size, password, owner, used_at FROM rooms WHERE code = ? AND used_at > ?',
+          code,
+          Date.now() - ROOM_IDLE_MS,
+        )
+        .toArray()[0] ?? null
+    );
+  }
+
+  private info(row: RoomRow): RoomInfo {
+    const people = new Set<string>();
+    for (const ws of this.ctx.getWebSockets()) {
+      const member = ws.deserializeAttachment() as Member | null;
+      if (member?.room === row.code && member.area === roomArea(row.size as RoomSize)) {
+        people.add(member.id);
+      }
+    }
+    return {
+      code: row.code,
+      name: row.name,
+      size: row.size as RoomSize,
+      locked: row.password !== null,
+      people: people.size,
+    };
   }
 
   private async armSweep(): Promise<void> {
@@ -175,6 +319,12 @@ export class SocialHub extends DurableObject<Env> {
         area: message.area,
         studying: message.studying ?? false,
         pet: message.pet ?? null,
+        ...(message.room ? { room: message.room } : { room: undefined }),
+        petLook: {
+          petColor: message.petColor,
+          petSex: message.petSex,
+          petAccessory: message.petAccessory,
+        },
       });
       this.tellWorld();
       if (!moved && me.area) return;
@@ -375,7 +525,12 @@ export class SocialHub extends DurableObject<Env> {
         online.add(member.id);
         if (member.studying) studying.add(member.id);
         if (member.area === 'library' && member.pet && waiting.size < MAX_WAITING_PETS) {
-          waiting.set(member.id, { id: member.id, name: member.name, pet: member.pet });
+          waiting.set(member.id, {
+            id: member.id,
+            name: member.name,
+            pet: member.pet,
+            ...member.petLook,
+          });
         }
       }
       const data = JSON.stringify({

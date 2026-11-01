@@ -65,9 +65,28 @@ export const PETS = ['cat', 'dog', 'rabbit'] as const;
 export type PetKind = (typeof PETS)[number];
 export const PETS_AVAILABLE: readonly PetKind[] = ['cat'];
 
+/** A pet's fur, as hex. Left out, the pet keeps its own colour. Only ever append. */
+export const PET_COLORS = [
+  '#f0a057',
+  '#f6e7cf',
+  '#3b3a40',
+  '#8a5a3c',
+  '#ffffff',
+  '#c9b9a6',
+] as const;
+export const PET_SEXES = ['female', 'male'] as const;
+export type PetSex = (typeof PET_SEXES)[number];
+/** Something for the pet to wear. */
+export const PET_ACCESSORIES = ['collar', 'bell', 'bow', 'scarf', 'hat', 'glasses'] as const;
+export type PetAccessory = (typeof PET_ACCESSORIES)[number];
+
 export type Appearance = {
   character: number;
   pet?: PetKind | undefined;
+  petSex?: PetSex | undefined;
+  /** Index into PET_COLORS. */
+  petColor?: number | undefined;
+  petAccessory?: PetAccessory | undefined;
 } & { [P in OutfitPart]?: number | undefined };
 
 const isIndex = (value: unknown, length: number) =>
@@ -81,8 +100,11 @@ export function isValidAppearance(look: unknown): look is Appearance {
     const value = fields[part];
     if (value !== undefined && !isIndex(value, PALETTES[part].length)) return false;
   }
-  const pet = fields.pet;
-  return pet === undefined || PETS_AVAILABLE.includes(pet as PetKind);
+  const { pet, petSex, petColor, petAccessory } = fields;
+  if (pet !== undefined && !PETS_AVAILABLE.includes(pet as PetKind)) return false;
+  if (petSex !== undefined && !PET_SEXES.includes(petSex as PetSex)) return false;
+  if (petColor !== undefined && !isIndex(petColor, PET_COLORS.length)) return false;
+  return petAccessory === undefined || PET_ACCESSORIES.includes(petAccessory as PetAccessory);
 }
 
 export function randomAppearance(random: () => number = Math.random): Appearance {

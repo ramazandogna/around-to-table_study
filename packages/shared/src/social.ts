@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { PETS, type PetKind } from './character';
+import {
+  PET_ACCESSORIES,
+  PET_COLORS,
+  PET_SEXES,
+  PETS,
+  type PetAccessory,
+  type PetKind,
+  type PetSex,
+} from './character';
 import { containsLink } from './rules';
 import { normalizeChat } from './text';
 import type { AreaId } from './world';
@@ -8,7 +16,7 @@ import type { AreaId } from './world';
  * The social connection: one socket per player, next to the area socket, that
  * carries friends and their presence across every room.
  */
-const areaId = z.enum(['hall', 'library', 'smoking']);
+const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
 const userId = z.string().min(1).max(64);
 
 /** Most friends one person can have; plenty for a study place. */
@@ -30,6 +38,20 @@ export const socialClientSchema = z.discriminatedUnion('t', [
     studying: z.boolean().optional(),
     /** The pet walking along, so it can wait at the library door while its person studies. */
     pet: z.enum(PETS).nullable().optional(),
+    /** How the pet looks, so the hall draws it right at the door. */
+    petColor: z
+      .number()
+      .int()
+      .min(0)
+      .max(PET_COLORS.length - 1)
+      .optional(),
+    petSex: z.enum(PET_SEXES).optional(),
+    petAccessory: z.enum(PET_ACCESSORIES).optional(),
+    /** The private room's code, when in one, so the reception can count people inside. */
+    room: z
+      .string()
+      .regex(/^[A-Z2-9]{6}$/)
+      .optional(),
   }),
   /** Sends a request, or accepts theirs if they already asked. */
   z.object({ t: z.literal('befriend'), to: userId }),
@@ -74,7 +96,14 @@ export type DirectMessage = {
 };
 
 /** Pets cannot come into the library; they wait at its door in the hall. */
-export type WaitingPet = { id: string; name: string; pet: PetKind };
+export type WaitingPet = {
+  id: string;
+  name: string;
+  pet: PetKind;
+  petColor?: number | undefined;
+  petSex?: PetSex | undefined;
+  petAccessory?: PetAccessory | undefined;
+};
 
 /** At most this many pets are drawn at the library door. */
 export const MAX_WAITING_PETS = 8;

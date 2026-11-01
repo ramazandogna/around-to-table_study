@@ -5,8 +5,6 @@
 export const ACTIVITIES = ['focus', 'reading', 'online', 'quiet'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
 
-/** Timer lengths offered when sitting down. */
-export const TIMER_PRESETS_MINUTES = [25, 50, 60] as const;
 /** Longest timer anyone can run. */
 export const MAX_TIMER_MS = 3 * 60 * 60 * 1000;
 
@@ -37,3 +35,43 @@ export function quartersDone(timer: TimerStatus): number {
 
 /** A finish may be claimed this long before the server's clock says so (clocks and latency). */
 export const FINISH_GRACE_MS = 5_000;
+
+/**
+ * Ways to study at a table. Each is a rhythm of focus and breaks; "free" just
+ * counts up, and "together" joins someone else's running block so both end at
+ * the same moment.
+ */
+export const STUDY_PLANS = ['pomodoro', 'deep', 'marathon', 'custom', 'free', 'together'] as const;
+export type StudyPlanId = (typeof STUDY_PLANS)[number];
+
+export type StudyRhythm = {
+  workMinutes: number;
+  breakMinutes: number;
+  rounds: number;
+  /** A longer break after the last round, if any (minutes). */
+  longBreakMinutes?: number;
+};
+
+export const PLAN_RHYTHMS: Record<'pomodoro' | 'deep' | 'marathon', StudyRhythm> = {
+  pomodoro: { workMinutes: 25, breakMinutes: 5, rounds: 4, longBreakMinutes: 15 },
+  deep: { workMinutes: 50, breakMinutes: 10, rounds: 2 },
+  marathon: { workMinutes: 90, breakMinutes: 15, rounds: 1 },
+};
+
+/** What a custom rhythm may be set to. */
+export const CUSTOM_LIMITS = {
+  workMinutes: { min: 5, max: 180, step: 5 },
+  breakMinutes: { min: 0, max: 30, step: 5 },
+  rounds: { min: 1, max: 8, step: 1 },
+} as const;
+
+/** Keeps a custom rhythm inside the limits, on whole steps. */
+export function clampRhythm(rhythm: StudyRhythm): StudyRhythm {
+  const fit = (value: number, { min, max, step }: { min: number; max: number; step: number }) =>
+    Math.min(max, Math.max(min, Math.round(value / step) * step));
+  return {
+    workMinutes: fit(rhythm.workMinutes, CUSTOM_LIMITS.workMinutes),
+    breakMinutes: fit(rhythm.breakMinutes, CUSTOM_LIMITS.breakMinutes),
+    rounds: fit(rhythm.rounds, CUSTOM_LIMITS.rounds),
+  };
+}

@@ -1,5 +1,5 @@
 import type { AreaDefinition, AreaId, Rect } from './areas';
-import { AREAS } from './areas';
+import { AREAS, isRoomArea } from './areas';
 import { TILE, isWalkableTile } from './tiles';
 
 export type Point = { x: number; y: number };
@@ -122,6 +122,14 @@ export class AreaGrid {
       const door = doorTiles[Math.floor((doorTiles.length - 1) / 2)];
       const inside = door && this.neighbors(door).find((n) => !this.doorTarget(n));
       if (inside) return inside;
+    }
+    // Back from a private room: out of the elevator.
+    if (isRoomArea(from)) {
+      const elevator = this.area.layout
+        .flatMap((row, y) => [...row].map((c, x) => ({ c, x, y })))
+        .find(({ c }) => c === TILE.elevator);
+      const out = elevator && this.neighbors(elevator)[0];
+      if (out) return out;
     }
     return { ...this.area.spawn };
   }

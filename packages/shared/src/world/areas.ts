@@ -1,6 +1,23 @@
 import { TILE } from './tiles';
 
-export type AreaId = 'hall' | 'library' | 'smoking';
+/** The building's shared rooms. */
+export const PUBLIC_AREAS = ['hall', 'library', 'smoking'] as const;
+export type PublicAreaId = (typeof PUBLIC_AREAS)[number];
+
+/**
+ * Private rooms anyone can open: one layout per size. Bigger and decorated
+ * rooms are for later (and may need premium).
+ */
+export const ROOM_SIZES = [3, 5, 9] as const;
+export type RoomSize = (typeof ROOM_SIZES)[number];
+export type RoomAreaId = `room${RoomSize}`;
+export const ROOM_AREAS = ROOM_SIZES.map((size) => `room${size}` as RoomAreaId);
+
+export type AreaId = PublicAreaId | RoomAreaId;
+
+export const isRoomArea = (id: string): id is RoomAreaId =>
+  (ROOM_AREAS as readonly string[]).includes(id);
+export const roomArea = (size: RoomSize): RoomAreaId => `room${size}`;
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -38,7 +55,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
       '#................#',
       'K................E',
       '#.....N..........E',
-      '#...........C....#',
+      '#.A.........C....#',
       '#..bbbb.....C....#',
       '#P..........C...P#',
       '#######OOOO#######',
@@ -94,7 +111,7 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     id: 'smoking',
     layout: [
       '################',
-      '#P............P#',
+      '#P.....V...GJ.P#',
       '#..bb....bb....#',
       '#..............#',
       '#.....A........H',
@@ -108,5 +125,57 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     spawn: { x: 8, y: 5 },
     renovation: null,
     rugs: [{ x: 4, y: 3, w: 6, h: 4 }],
+  },
+
+  // Private rooms: a table for everyone, a sofa, shelves, and a door back to the hall.
+  room3: {
+    id: 'room3',
+    layout: [
+      '#########',
+      '#P..B..P#',
+      '#..SSS..#',
+      '#..TTT..#',
+      '#.......#',
+      '#.bb....#',
+      '####H####',
+    ],
+    doors: { [TILE.doorToHall]: 'hall' },
+    spawn: { x: 4, y: 4 },
+    renovation: null,
+    rugs: [],
+  },
+  room5: {
+    id: 'room5',
+    layout: [
+      '###########',
+      '#P..BBB..P#',
+      '#...SSS...#',
+      '#...TTT...#',
+      '#...S.S...#',
+      '#.........#',
+      '#.bb...bb.#',
+      '#####H#####',
+    ],
+    doors: { [TILE.doorToHall]: 'hall' },
+    spawn: { x: 5, y: 5 },
+    renovation: null,
+    rugs: [],
+  },
+  room9: {
+    id: 'room9',
+    layout: [
+      '#############',
+      '#P..BBBBB..P#',
+      '#..SSS..SS..#',
+      '#..TTT..TT..#',
+      '#..SS...SS..#',
+      '#...........#',
+      '#.bb.....bb.#',
+      '######H######',
+    ],
+    doors: { [TILE.doorToHall]: 'hall' },
+    spawn: { x: 6, y: 5 },
+    renovation: null,
+    rugs: [],
   },
 };

@@ -249,3 +249,18 @@ describe('the librarian and pets', () => {
     expect(AREA_RULES.smoking.pets).toBe(true);
   });
 });
+
+describe('the smoking room games', () => {
+  it('stands the machines against the north wall, each with room to play in front', () => {
+    const grid = createAreaGrid('smoking');
+    for (const [char, x] of [
+      [TILE.vendingMachine, 7],
+      [TILE.arcade, 11],
+      [TILE.clawMachine, 12],
+    ] as const) {
+      expect(grid.tileAt({ x, y: 1 })).toBe(char);
+      expect(grid.isWalkable({ x, y: 1 })).toBe(false);
+      expect(grid.isWalkable({ x, y: 2 })).toBe(true);
+    }
+  });
+});

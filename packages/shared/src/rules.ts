@@ -24,7 +24,24 @@ export type AreaRules = {
   pets: boolean;
 };
 
+/** Private rooms are for the people who were invited: they talk freely, like the smoking room. */
+const PRIVATE_ROOM: AreaRules = {
+  maxChars: 300,
+  cooldownMs: 2_000,
+  allowCaps: true,
+  allowLinks: false,
+  effectsVisible: true,
+  notifySound: true,
+  dmAllowed: true,
+  chatLog: true,
+  dance: true,
+  pets: true,
+};
+
 export const AREA_RULES: Record<AreaId, AreaRules> = {
+  room3: PRIVATE_ROOM,
+  room5: PRIVATE_ROOM,
+  room9: PRIVATE_ROOM,
   library: {
     maxChars: 50,
     // Anywhere from 60 to 90 seconds keeps the library quiet; 75 is the middle.

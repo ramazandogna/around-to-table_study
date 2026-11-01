@@ -34,21 +34,20 @@ function hmacKey(secret: string): Promise<CryptoKey> {
   );
 }
 
-/** A token is `payload.signature`, both base64url; the payload is the session as JSON. */
-export async function signSession(session: Session, secret: string): Promise<string> {
-  const payload = toBase64Url(encoder.encode(JSON.stringify(session)));
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    await hmacKey(secret),
-    encoder.encode(payload),
-  );
-  return `${payload}.${toBase64Url(new Uint8Array(signature))}`;
+/** A token is `payload.signature`, both base64url; the payload is JSON. */
+async function signPayload(payload: unknown, secret: string): Promise<string> {
+  const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
+  const signature = await crypto.subtle.sign('HMAC', await hmacKey(secret), encoder.encode(body));
+  return `${body}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
-export async function verifySession(token: string, secret: string): Promise<Session | null> {
+/** The JSON inside a token signed with `secret`, or null. */
+async function verifyPayload(
+  token: string,
+  secret: string,
+): Promise<Record<string, unknown> | null> {
   const [payload, signature, extra] = token.split('.');
   if (!payload || !signature || extra !== undefined) return null;
-
   const signatureBytes = fromBase64Url(signature);
   if (!signatureBytes) return null;
   const valid = await crypto.subtle.verify(
@@ -58,15 +57,58 @@ export async function verifySession(token: string, secret: string): Promise<Sess
     encoder.encode(payload),
   );
   if (!valid) return null;
-
   const payloadBytes = fromBase64Url(payload);
   if (!payloadBytes) return null;
   try {
-    const session = JSON.parse(new TextDecoder().decode(payloadBytes)) as Partial<Session>;
-    if (typeof session.id !== 'string' || typeof session.iat !== 'number') return null;
-    const name = typeof session.name === 'string' ? normalizeName(session.name) : null;
-    return name ? { id: session.id, name, iat: session.iat } : null;
+    const parsed = JSON.parse(new TextDecoder().decode(payloadBytes)) as unknown;
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
+}
+
+export function signSession(session: Session, secret: string): Promise<string> {
+  return signPayload(session, secret);
+}
+
+export async function verifySession(token: string, secret: string): Promise<Session | null> {
+  const session = await verifyPayload(token, secret);
+  if (!session || typeof session.id !== 'string' || typeof session.iat !== 'number') return null;
+  const name = typeof session.name === 'string' ? normalizeName(session.name) : null;
+  return name ? { id: session.id, name, iat: session.iat } : null;
+}
+
+/** How long a room pass lets someone (re)connect to a private room. */
+export const ROOM_PASS_MS = 12 * 60 * 60_000;
+
+/**
+ * A pass into one private room for one guest, given once the password (if
+ * any) was right, so sockets never carry the password itself.
+ */
+export function signRoomPass(
+  code: string,
+  id: string,
+  now: number,
+  secret: string,
+): Promise<string> {
+  return signPayload({ kind: 'room', code, id, exp: now + ROOM_PASS_MS }, secret);
+}
+
+export async function verifyRoomPass(
+  token: string,
+  secret: string,
+  code: string,
+  id: string,
+  now: number,
+): Promise<boolean> {
+  const pass = await verifyPayload(token, secret);
+  return (
+    pass?.kind === 'room' &&
+    pass.code === code &&
+    pass.id === id &&
+    typeof pass.exp === 'number' &&
+    pass.exp > now
+  );
 }

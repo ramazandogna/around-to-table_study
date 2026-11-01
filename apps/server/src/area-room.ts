@@ -1,6 +1,7 @@
 import {
   AREA_RULES,
   applyAreaRules,
+  cleanRoomName,
   cleanStatusLines,
   EMPTY_LINES,
   FINISH_GRACE_MS,
@@ -271,6 +272,18 @@ export class AreaRoom extends DurableObject<Env> {
         this.save(ws, { ...me, study });
         this.broadcast({ t: 'finished', id: me.id });
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
+        return;
+      }
+      case 'invite': {
+        if (!me.joined) return;
+        // Invites share the poke's budget: one every few seconds is plenty.
+        if (now - me.lastPokeAt < POKE_COOLDOWN_MS)
+          return this.send(ws, { t: 'error', code: 'rate_limited' });
+        const name = cleanRoomName(message.name);
+        const target = name && this.reach(ws, me, message.to);
+        if (!name || !target) return;
+        this.save(ws, { ...me, lastPokeAt: now });
+        this.send(target, { t: 'invited', from: me.id, code: message.code, name });
         return;
       }
       case 'poke': {

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { FINISH_GRACE_MS, isStale, parseClientMessage, quartersDone, STALE_MS } from '../src';
+import {
+  clampRhythm,
+  FINISH_GRACE_MS,
+  isStale,
+  MAX_TIMER_MS,
+  parseClientMessage,
+  PLAN_RHYTHMS,
+  quartersDone,
+  STALE_MS,
+} from '../src';
 
 describe('presence', () => {
   it('keeps a socket that answers its heartbeat', () => {
@@ -33,5 +42,26 @@ describe('study quarters', () => {
   it('lets a finish be claimed with a moment of grace', () => {
     expect(FINISH_GRACE_MS).toBeGreaterThan(0);
     expect(parseClientMessage(JSON.stringify({ t: 'finished' }))).toEqual({ t: 'finished' });
+  });
+});
+
+describe('study rhythms', () => {
+  it('keeps a custom rhythm on whole steps inside the limits', () => {
+    expect(clampRhythm({ workMinutes: 2, breakMinutes: 7, rounds: 20 })).toEqual({
+      workMinutes: 5,
+      breakMinutes: 5,
+      rounds: 8,
+    });
+    expect(clampRhythm({ workMinutes: 999, breakMinutes: -3, rounds: 0 })).toEqual({
+      workMinutes: 180,
+      breakMinutes: 0,
+      rounds: 1,
+    });
+  });
+
+  it('fits every preset inside the longest timer', () => {
+    for (const rhythm of Object.values(PLAN_RHYTHMS)) {
+      expect(rhythm.workMinutes * 60_000).toBeLessThanOrEqual(MAX_TIMER_MS);
+    }
   });
 });
