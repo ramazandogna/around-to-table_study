@@ -26,6 +26,7 @@ export function RadialMenu() {
   const radial = useGameStore((s) => s.radial);
   const area = useGameStore((s) => s.area);
   const dancing = useGameStore((s) => s.dancing);
+  const smoking = useGameStore((s) => s.smoking);
   const seated = useGameStore((s) => s.seated);
 
   useEffect(() => {
@@ -58,6 +59,18 @@ export function RadialMenu() {
       off: !rules.dance ? 'radial.dance.off' : seated ? 'radial.dance.seated' : undefined,
       run: () => store.setDancing(!dancing),
     },
+    // Only where people smoke, right beside the dance.
+    ...(rules.smoke
+      ? [
+          {
+            id: 'smoke',
+            icon: smoking ? '🚭' : '🚬',
+            label: smoking ? 'radial.smoke.stop' : 'radial.smoke',
+            off: seated ? 'radial.dance.seated' : undefined,
+            run: () => store.setSmoking(!smoking),
+          } satisfies Action,
+        ]
+      : []),
     {
       id: 'status',
       icon: '💭',
@@ -68,7 +81,7 @@ export function RadialMenu() {
       id: 'message',
       icon: '📱',
       label: 'radial.message',
-      off: rules.dmAllowed ? undefined : 'radial.message.off',
+      off: rules.phone ? undefined : 'radial.message.off',
       run: () => store.openPhone(null),
     },
     {
@@ -117,7 +130,13 @@ export function RadialMenu() {
             title={action.off ? t(action.off) : t(action.label)}
             onClick={() => {
               if (action.off) {
-                store.setNotice(action.id === 'dance' ? 'no_dance' : 'phone_silent');
+                store.setNotice(
+                  action.id === 'dance'
+                    ? 'no_dance'
+                    : action.id === 'smoke'
+                      ? 'no_smoke'
+                      : 'phone_silent',
+                );
                 return;
               }
               store.setRadial(null);

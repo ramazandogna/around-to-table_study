@@ -9,6 +9,7 @@ export function EmoteMenu() {
   const open = useGameStore((s) => s.emoteOpen);
   const area = useGameStore((s) => s.area);
   const dancing = useGameStore((s) => s.dancing);
+  const smoking = useGameStore((s) => s.smoking);
   const setOpen = useGameStore((s) => s.setEmoteOpen);
 
   function send(emote: Emote) {
@@ -63,6 +64,19 @@ export function EmoteMenu() {
               }}
             >
               {t(dancing ? 'radial.stop' : 'radial.dance')}
+            </button>
+          )}
+          {AREA_RULES[area].smoke && (
+            <button
+              type="button"
+              className="mini-button emote-dance"
+              aria-pressed={smoking}
+              onClick={() => {
+                useGameStore.getState().setSmoking(!smoking);
+                setOpen(false);
+              }}
+            >
+              {t(smoking ? 'radial.smoke.stop' : 'radial.smoke')}
             </button>
           )}
         </div>

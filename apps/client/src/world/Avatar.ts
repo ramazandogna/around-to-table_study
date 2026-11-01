@@ -21,11 +21,13 @@ import {
 } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { t } from '../i18n/t';
-import { ACTIVITY_ICON, DOING_ICON, formatClock, MOOD_ICON } from '../state/study';
+import { ACTIVITY_ICON, DOING_ICON, formatClock, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { CHAIR_INSET, FLOOR_Y, SEAT_HEIGHT, SOFA_SEAT_HEIGHT, TABLE_HEIGHT } from './buildArea';
 import type { Character, CharacterClips, CharacterKit } from './characters';
 import { showEmote } from './emotes';
 import { facing } from './instancing';
+import { SMOKE_DRAG, SMOKE_EXHALE_AT } from './poses';
+import { Cigarette, SmokePuffs } from './smoke';
 import type { TableProps } from './tableProps';
 
 /** Walking pace in tiles (about meters) per second: brisk, so crossing a room takes seconds, not a chore. */
@@ -96,8 +98,15 @@ const POKED_MS = 3200;
 const CELEBRATE_MS = 4500;
 /** A tapped icon row stays open this long. */
 const LINES_OPEN_MS = 6000;
+/** The little phone by the name shakes this long after a message or a buzz. */
+const BUZZ_MS = 4500;
+/** Where the mouth is, in the model's space before it turns. */
+const MOUTH = new Vector3(0, 0.8, 0.3);
+/** How often a wisp rises from the ember between drags. */
+const WISP_SECONDS = 0.7;
 
 const tileCenter = (t: Point) => ({ x: t.x + 0.5, z: t.y + 0.5 });
+const UP = new Vector3(0, 1, 0);
 
 /** The chair or sofa on a tile, or null if there is none. */
 export type SeatLookup = (tile: Point) => Seat | null;
@@ -120,7 +129,7 @@ type LocalStatus = Omit<StudyStatus, 'timer'> & {
 
 type Pose = 'idle' | 'walk' | 'sit';
 
-type Loop = 'idle' | 'walk' | 'sit' | 'study' | 'dance';
+type Loop = 'idle' | 'walk' | 'sit' | 'study' | 'dance' | 'smoke';
 type Gesture = 'poke' | 'nod' | 'wave';
 
 /**
@@ -158,6 +167,13 @@ export class Avatar {
   private sitBlend = 0;
   private stillFor = 0;
   private dancing = false;
+  private smoking = false;
+  private readonly cigarette = new Cigarette();
+  private readonly puffs = new SmokePuffs();
+  private smokeTime = 0;
+  private wispIn = WISP_SECONDS;
+  private readonly phoneBuzz: HTMLSpanElement;
+  private buzzTimer = 0;
   private gesture: AnimationAction | null = null;
   private joltFor = 0;
   private highlighted = false;
@@ -201,6 +217,7 @@ export class Avatar {
 
     this.root.add(this.body);
     this.wear(kit.create(look));
+    this.root.add(this.puffs.group);
 
     const element = document.createElement('div');
     element.className = `avatar-label${isSelf ? ' avatar-label--self' : ''}`;
@@ -224,7 +241,11 @@ export class Avatar {
     nameTag.textContent = name;
     this.badges = document.createElement('span');
     this.badges.className = 'avatar-badges';
-    nameTag.append(this.badges);
+    this.phoneBuzz = document.createElement('span');
+    this.phoneBuzz.className = 'avatar-buzz';
+    this.phoneBuzz.textContent = '📳';
+    this.phoneBuzz.hidden = true;
+    nameTag.append(this.badges, this.phoneBuzz);
     nameTag.addEventListener('click', () => (this.onTap ? this.onTap() : this.toggleDetails()));
     element.append(
       this.emoteIcon,
@@ -242,7 +263,7 @@ export class Avatar {
   }
 
   /** Puts on a character model: its own mixer, with every looping clip playing at weight 0. */
-  private wear({ model, clips }: Character): void {
+  private wear({ model, clips, hand }: Character): void {
     const turned = this.model?.rotation.y ?? this.heading;
     if (this.model) {
       this.mixer.stopAllAction();
@@ -273,7 +294,14 @@ export class Avatar {
       sit: this.mixer.clipAction(clips.sit),
       study: this.mixer.clipAction(clips.study),
       dance: this.mixer.clipAction(clips.dance),
+      smoke: this.mixer.clipAction(clips.smoke),
     };
+    // The cigarette goes into the new body's right hand.
+    const arm = model.getObjectByName('arm-right');
+    if (arm) {
+      this.cigarette.group.position.copy(hand);
+      arm.add(this.cigarette.group);
+    }
     // All of them always play; their weights follow what the body does (see `animate`).
     for (const action of Object.values(this.actions)) action.play().setEffectiveWeight(0);
     this.actions.idle.setEffectiveWeight(1);
@@ -308,6 +336,36 @@ export class Avatar {
   /** Dances in place while standing; walking or sitting down ends it. */
   setDancing(on: boolean): void {
     this.dancing = on;
+    if (on) this.setSmoking(false);
+  }
+
+  get isSmoking(): boolean {
+    return this.smoking;
+  }
+
+  /** Smokes in place while standing; walking or sitting down puts it out. */
+  setSmoking(on: boolean): void {
+    if (on) this.dancing = false;
+    if (on && !this.smoking) {
+      this.smokeTime = 0;
+      this.actions.smoke.reset().play();
+    }
+    this.smoking = on;
+    this.cigarette.group.visible = on;
+  }
+
+  /** The little phone by the name shakes for a moment: a message came in. */
+  buzz(): void {
+    this.phoneBuzz.hidden = false;
+    this.phoneBuzz.classList.remove('avatar-buzz--on');
+    // Restarts the shake when messages come close together.
+    void this.phoneBuzz.offsetWidth;
+    this.phoneBuzz.classList.add('avatar-buzz--on');
+    window.clearTimeout(this.buzzTimer);
+    this.buzzTimer = window.setTimeout(() => {
+      this.phoneBuzz.hidden = true;
+      this.phoneBuzz.classList.remove('avatar-buzz--on');
+    }, BUZZ_MS);
   }
 
   /** Plays a one-off gesture over whatever the body is doing. */
@@ -385,6 +443,8 @@ export class Avatar {
   setLines(lines: StatusLines): void {
     this.lines = lines;
     const rows: [string, string][] = [];
+    // First, so a crowd folded into icons still shows who is up for a chat.
+    if (lines.vibe) rows.push([VIBE_ICON[lines.vibe], t(`vibe.${lines.vibe}`)]);
     if (lines.announcement) rows.push(['📣', lines.announcement]);
     if (lines.doing)
       rows.push([
@@ -617,12 +677,18 @@ export class Avatar {
     this.stillFor = this.isMoving ? 0 : this.stillFor + delta;
     if (this.isMoving) {
       this.pose = 'walk';
-      this.dancing = false;
+      // Someone else's dance or cigarette is the server's to end (on "moved"): their body
+      // may still be catching up here when they start, and should start once it arrives.
+      if (this.isSelf) {
+        this.dancing = false;
+        if (this.smoking) this.setSmoking(false);
+      }
     } else if (this.stillFor >= SETTLE_SECONDS) {
       this.seat = this.context.seats(this.tile);
       if (this.seat) {
         this.face(this.seat.facing.x, this.seat.facing.y);
         this.dancing = false;
+        if (this.smoking) this.setSmoking(false);
       }
       this.pose = this.seat ? 'sit' : 'idle';
     }
@@ -653,7 +719,37 @@ export class Avatar {
     this.body.position.x += (this.spread.x * spreading - this.body.position.x) * ease;
     this.body.position.z += (this.spread.z * spreading - this.body.position.z) * ease;
     this.mixer.update(delta);
+    this.smokeStep(delta);
     return entered;
+  }
+
+  /** The ember glows on a drag; smoke comes out after it, and a wisp rises in between. */
+  private smokeStep(delta: number): void {
+    this.puffs.update(delta);
+    if (!this.smoking) return;
+    const clip = this.clips.smoke.duration;
+    const scale = clip / 5;
+    const before = this.smokeTime;
+    this.smokeTime = (this.smokeTime + delta) % clip;
+    const at = this.smokeTime / scale;
+    const drag = at >= SMOKE_DRAG.from && at <= SMOKE_DRAG.to;
+    this.cigarette.glow(drag ? 1 : 0);
+    const exhale = SMOKE_EXHALE_AT * scale;
+    const crossed =
+      before <= this.smokeTime
+        ? before < exhale && this.smokeTime >= exhale
+        : before < exhale || this.smokeTime >= exhale;
+    if (crossed) {
+      const turn = this.model.rotation.y;
+      const mouth = MOUTH.clone().applyAxisAngle(UP, turn).add(this.body.position);
+      this.puffs.breathe(mouth, turn);
+    }
+    this.wispIn -= delta;
+    if (this.wispIn <= 0 && !drag) {
+      this.wispIn = WISP_SECONDS;
+      const ember = this.cigarette.emberAt(new Vector3());
+      this.puffs.wisp(this.root.worldToLocal(ember));
+    }
   }
 
   /** Follows the route: speeds up, keeps pace through corners and brakes to stop on the last point. */
@@ -765,11 +861,13 @@ export class Avatar {
     const standing = (1 - this.sitBlend) * rest;
     const studying = this.seat?.kind === 'chair';
     const dancing = this.dancing && !this.isMoving ? 1 : 0;
+    const smoking = this.smoking && !this.isMoving ? 1 : 0;
     this.actions.study.setEffectiveWeight(studying ? this.sitBlend * rest : 0);
     this.actions.sit.setEffectiveWeight(studying ? 0 : this.sitBlend * rest);
     this.actions.walk.setEffectiveWeight(standing * walking);
     this.actions.dance.setEffectiveWeight(standing * (1 - walking) * dancing);
-    this.actions.idle.setEffectiveWeight(standing * (1 - walking) * (1 - dancing));
+    this.actions.smoke.setEffectiveWeight(standing * (1 - walking) * smoking);
+    this.actions.idle.setEffectiveWeight(standing * (1 - walking) * (1 - dancing - smoking));
     this.actions.walk.timeScale = WALK_TEMPO_AT_FULL_PACE * Math.max(pace, 0.55);
   }
 
@@ -831,6 +929,9 @@ export class Avatar {
     this.stopEmote?.();
     window.clearTimeout(this.pokeTimer);
     window.clearTimeout(this.linesOpenTimer);
+    window.clearTimeout(this.buzzTimer);
+    this.cigarette.dispose();
+    this.puffs.dispose();
     this.mixer.stopAllAction();
     for (const material of this.materials) material.dispose();
     for (const geometry of this.geometries) geometry.dispose();

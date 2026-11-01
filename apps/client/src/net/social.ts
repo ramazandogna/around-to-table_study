@@ -1,7 +1,7 @@
 import { AREA_RULES, type Friend } from '@att/shared';
 import { play } from '../audio/sound';
 import { useGameStore } from '../state/store';
-import { SocialConnection } from './SocialConnection';
+import { SocialConnection, type Presence } from './SocialConnection';
 import type { GuestSession } from './session';
 
 /**
@@ -11,10 +11,7 @@ import type { GuestSession } from './session';
 export function startSocial(session: GuestSession): () => void {
   const connection = new SocialConnection({
     token: session.token,
-    area: () => useGameStore.getState().area,
-    studying: () => useGameStore.getState().seated,
-    look: () => useGameStore.getState().look,
-    room: () => useGameStore.getState().room?.room.code ?? null,
+    presence: () => presence(useGameStore.getState()),
     onMessage: (message) => {
       const store = useGameStore.getState();
       switch (message.t) {
@@ -29,15 +26,25 @@ export function startSocial(session: GuestSession): () => void {
           if (mine) break;
           const reading = store.phoneOpen && store.phoneWith === other;
           if (reading) connection.read(other);
-          // In the library the phone stays silent; the badge waits for the way out.
-          else if (AREA_RULES[store.area].dmAllowed) {
+          else {
+            // Where it may not ring (the library, a focus block) the phone only buzzes by the name.
             store.setNotice('dm', nameOf(store.friends, other));
+            store.buzz();
             if (mayRing()) play('phone');
           }
           break;
         }
         case 'history':
           store.setConversation(message.with, message.messages);
+          store.setSeen(message.with, message.seenUpTo);
+          break;
+        case 'seen':
+          store.setSeen(message.by, message.upTo);
+          break;
+        case 'buzzed':
+          store.setNotice('buzzed', message.name);
+          store.buzz();
+          if (mayRing()) play('phone');
           break;
         case 'friendEvent':
           // In quiet rooms a request only shows as a badge on the friends button.
@@ -73,22 +80,14 @@ export function startSocial(session: GuestSession): () => void {
   });
   useGameStore.getState().setSocial(connection);
   const unsubscribe = useGameStore.subscribe((state, before) => {
-    const petChanged = state.look !== before.look;
-    const roomChanged = state.room?.room.code !== before.room?.room.code;
     if (
-      (state.seated !== before.seated || petChanged || roomChanged) &&
-      state.area === before.area
+      state.area !== before.area ||
+      state.seated !== before.seated ||
+      state.look !== before.look ||
+      state.lines !== before.lines ||
+      state.room?.room.code !== before.room?.room.code
     ) {
-      connection.where(state.area, state.seated, state.look, state.room?.room.code ?? null);
-    }
-    if (state.area === before.area) return;
-    connection.where(state.area, state.seated, state.look, state.room?.room.code ?? null);
-    if (!AREA_RULES[state.area].dmAllowed) {
-      state.closePhone();
-    } else if (!AREA_RULES[before.area].dmAllowed) {
-      // Leaving the quiet room: tell the player what arrived while they studied.
-      const waiting = unreadMessages(state.friends);
-      if (waiting > 0) state.setNotice('dm_waiting', String(waiting));
+      connection.where(presence(state));
     }
   });
   return () => {
@@ -111,6 +110,16 @@ export function mayRing(): boolean {
 /** Phone messages waiting across all friends. */
 export function unreadMessages(friends: readonly Friend[]): number {
   return friends.reduce((sum, f) => sum + f.unread, 0);
+}
+
+function presence(state: ReturnType<typeof useGameStore.getState>): Presence {
+  return {
+    area: state.area,
+    studying: state.seated,
+    look: state.look,
+    room: state.room?.room.code ?? null,
+    lines: state.lines,
+  };
 }
 
 function nameOf(friends: readonly Friend[], id: string): string {

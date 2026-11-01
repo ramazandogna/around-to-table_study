@@ -25,6 +25,7 @@ import { facing, instance, type Placement } from './instancing';
 import type { Furniture, ModelTemplate } from './models';
 import { hangPaintings } from './paintings';
 import { buildRenovation } from './renovation';
+import { dartCabinet, jukeboxModel, tableGames } from './smokingProps';
 
 /** Top of the floor tiles; furniture stands on this. */
 export const FLOOR_Y = 0.05;
@@ -74,7 +75,7 @@ const noise = (x: number, y: number, salt = 0) => {
 /** Something to look at up close: a shelf of books, a painting, the renovation. */
 export type Examinable = {
   id: string;
-  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'game' | 'topic';
+  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'game' | 'topic' | 'table' | 'jukebox';
   /** Index into the content list for its kind. */
   index: number;
   /** Where to stand to look at it. */
@@ -181,6 +182,10 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
   const bookcaseTopics: (string | null)[] = [];
   const books: Placement[] = [];
   const noticeBoards: Point[] = [];
+  const gameTables: Placement[] = [];
+  /** Lights that pulse with time, e.g. the jukebox's. */
+  const glows: ((time: number) => void)[] = [];
+  let clock = 0;
   const shelves = shelfRuns(grid);
 
   for (let y = 1; y < H - 1; y++) {
@@ -205,6 +210,51 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
             kind: 'game',
             index: MACHINES.indexOf(machine),
             stand: { x, y: y + 1 },
+          });
+          break;
+        }
+        case TILE.dartboard: {
+          // On the north wall, played from the tile in front.
+          const cabinet = dartCabinet(materials);
+          cabinet.position.set(cx, FLOOR_Y, cz);
+          cabinet.userData.examine = 'table:darts';
+          root.add(cabinet);
+          pickables.push(cabinet);
+          examinables.set('table:darts', {
+            id: 'table:darts',
+            kind: 'table',
+            index: 0,
+            stand: { x, y: y + 1 },
+          });
+          break;
+        }
+        case TILE.gameTable: {
+          gameTables.push({ x: cx, z: cz, y: FLOOR_Y });
+          const games = tableGames(materials);
+          games.position.set(cx, FLOOR_Y + furniture.tableRound.size.y, cz);
+          games.userData.examine = 'table:games';
+          root.add(games);
+          pickables.push(games);
+          examinables.set('table:games', {
+            id: 'table:games',
+            kind: 'table',
+            index: 1,
+            stand: { x, y: y + 1 },
+          });
+          break;
+        }
+        case TILE.jukebox: {
+          const box = jukeboxModel(materials);
+          box.root.position.set(cx, FLOOR_Y, cz);
+          box.root.userData.examine = 'jukebox';
+          root.add(box.root);
+          pickables.push(box.root);
+          glows.push(box.glow);
+          examinables.set('jukebox', {
+            id: 'jukebox',
+            kind: 'jukebox',
+            index: 0,
+            stand: { x: x + 1, y },
           });
           break;
         }
@@ -333,6 +383,7 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
   add('desk', desks);
   add('loungeSofa', sofas);
   add('tableRound', sideTables);
+  add('tableRound', gameTables);
   const shelfGroup = instance(furniture.bookcaseClosedWide, bookcases);
   for (const mesh of shelfGroup.children) mesh.userData.examineByInstance = bookcaseTopics;
   root.add(shelfGroup);
@@ -398,7 +449,11 @@ export function buildArea(grid: AreaGrid, furniture: Furniture, arcade?: ArcadeK
 
   return {
     root,
-    update: doors.update,
+    update: (delta, people) => {
+      doors.update(delta, people);
+      clock += delta;
+      for (const glow of glows) glow(clock);
+    },
     examinables,
     pickables,
     dispose: () => {

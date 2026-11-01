@@ -168,3 +168,67 @@ export function createWaveGesture(): AnimationClip {
   ];
   return new AnimationClip('wave', 1.25, tracks);
 }
+
+/** When in the smoking cycle the smoke comes out, in seconds. */
+export const SMOKE_EXHALE_AT = 3.1;
+/** When in the smoking cycle the cigarette is at the lips (the ember glows). */
+export const SMOKE_DRAG = { from: 1.6, to: 2.5 } as const;
+
+/**
+ * Smoking while standing: the cigarette held low by the right hand, raised to
+ * the lips for a slow drag, lowered again, then a breath of smoke out with the
+ * chin up a little. The rest of the body keeps its idle breathing (its tracks
+ * are repeated to fill the cycle).
+ */
+export function createSmokeCycle(idle: AnimationClip): AnimationClip {
+  const repeats = Math.max(1, Math.round(5 / idle.duration));
+  const length = idle.duration * repeats;
+  const tracks: KeyframeTrack[] = idle.tracks
+    .filter((track) => !/^(arm-right|head)\./.test(track.name))
+    .map((track) => repeat(track, idle.duration, repeats));
+  const low: Direction = [0.5, -0.7, 0.5];
+  const lips: Direction = [-0.5, 0.5, 0.7];
+  const at = (share: number) => (share / 5) * length;
+  tracks.push(
+    arms('arm-right', [
+      [0, low],
+      [at(1.2), low],
+      [at(SMOKE_DRAG.from), lips],
+      [at(SMOKE_DRAG.to), lips],
+      [at(2.9), low],
+      [length, low],
+    ]),
+    turns('head', [
+      [0, 0],
+      [at(SMOKE_DRAG.from), -4],
+      [at(SMOKE_DRAG.to), -8],
+      [at(SMOKE_EXHALE_AT), -14, 6],
+      [at(3.9), -2],
+      [length, 0],
+    ]),
+  );
+  return new AnimationClip('smoke', length, tracks);
+}
+
+/** A track played `times` over in a row, so a short loop fills a longer clip. */
+function repeat(track: KeyframeTrack, duration: number, times: number): KeyframeTrack {
+  const keys = track.times.length;
+  const size = track.getValueSize();
+  const timesOut: number[] = [];
+  const valuesOut: number[] = [];
+  for (let n = 0; n < times; n++) {
+    for (let i = 0; i < keys; i++) {
+      const time = (track.times[i] ?? 0) + n * duration;
+      // The first key of a later round sits where the last one of the round before ended.
+      if (n > 0 && i === 0 && time <= (timesOut[timesOut.length - 1] ?? -1)) continue;
+      timesOut.push(time);
+      valuesOut.push(...Array.from(track.values.slice(i * size, (i + 1) * size)));
+    }
+  }
+  const TrackType = track.constructor as new (
+    name: string,
+    times: number[],
+    values: number[],
+  ) => KeyframeTrack;
+  return new TrackType(track.name, timesOut, valuesOut);
+}

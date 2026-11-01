@@ -18,7 +18,15 @@ export type SoundName =
   /** A study timer done: a little rising tune. */
   | 'finish'
   /** A cat saying goodbye at the library door. */
-  | 'mew';
+  | 'mew'
+  /** A pet being petted: a low, soft rumble. */
+  | 'purr'
+  /** A lighter's flick and the flame catching. */
+  | 'lighter'
+  /** A dart hitting the board. */
+  | 'dart'
+  /** Dice rattling and landing. */
+  | 'dice';
 
 /** How the player's own footsteps sound; chosen in the wardrobe, kept on this device. */
 export const FOOTSTEPS = ['soft', 'wood', 'sneaker'] as const;
@@ -110,6 +118,7 @@ function thump(
   volume: number,
   pitch: number,
   type: BiquadFilterType = 'lowpass',
+  at = 0,
 ) {
   const length = Math.floor(ctx.sampleRate * 0.06);
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
@@ -123,7 +132,7 @@ function thump(
   const gain = ctx.createGain();
   gain.gain.value = volume;
   source.connect(filter).connect(gain).connect(out);
-  source.start();
+  source.start(ctx.currentTime + at);
 }
 
 export function play(name: SoundName): void {
@@ -183,6 +192,34 @@ export function play(name: SoundName): void {
         type: 'triangle',
         to: 560,
       });
+      break;
+    case 'purr':
+      // A purr is a fast flutter of a very low note.
+      for (let i = 0; i < 9; i++) {
+        tone(a, { frequency: 48, at: i * 0.07, duration: 0.06, volume: 0.07, type: 'sawtooth' });
+      }
+      break;
+    case 'lighter':
+      thump(a, 0.12, 4200, 'highpass');
+      thump(a, 0.06, 2600, 'bandpass');
+      tone(a, {
+        frequency: 180,
+        at: 0.05,
+        duration: 0.25,
+        volume: 0.02,
+        type: 'triangle',
+        to: 120,
+      });
+      break;
+    case 'dart':
+      thump(a, 0.3, 900, 'bandpass');
+      tone(a, { frequency: 220, duration: 0.08, volume: 0.04, type: 'square', to: 140 });
+      break;
+    case 'dice':
+      // Rattling in the hand, then bouncing to a stop on the felt.
+      for (let i = 0; i < 6; i++) {
+        thump(a, 0.12 - i * 0.012, 2400 - i * 180, 'bandpass', i * (0.05 + i * 0.012));
+      }
       break;
   }
 }

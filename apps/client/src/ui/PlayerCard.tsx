@@ -2,7 +2,7 @@ import { AREA_RULES } from '@att/shared';
 import { useState, type FormEvent } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore, type Selected } from '../state/store';
-import { DOING_ICON, MOOD_ICON } from '../state/study';
+import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { Choice, Panel } from './Panel';
 
 const FRIEND_LABEL = {
@@ -62,6 +62,11 @@ function Card({ id, name, lines }: Selected) {
         ✕
       </button>
       <ul className="card-lines">
+        {lines.vibe && (
+          <li className="card-vibe">
+            {VIBE_ICON[lines.vibe]} {t(`vibe.${lines.vibe}`)}
+          </li>
+        )}
         {lines.announcement && <li>📣 {lines.announcement}</li>}
         {lines.doing && (
           <li>
@@ -114,6 +119,17 @@ function Card({ id, name, lines }: Selected) {
               close();
             }}
           />
+          {friendship === 'friend' && rules.phone && (
+            <Choice
+              icon="📱"
+              label={t('card.phone')}
+              hint={t('card.phone.hint')}
+              onSelect={() => {
+                close();
+                store.openPhone(id);
+              }}
+            />
+          )}
           {room && (
             <Choice
               icon="🔑"

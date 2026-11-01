@@ -1,17 +1,30 @@
-import type { Appearance, AreaId, SocialClientMessage, SocialServerMessage } from '@att/shared';
+import type {
+  Appearance,
+  AreaId,
+  SocialClientMessage,
+  SocialServerMessage,
+  StatusLines,
+} from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
 import { isPong, keepAlive } from './heartbeat';
+
+/** What friends (and the building's counts) know about the player. */
+export type Presence = {
+  area: AreaId;
+  /** Whether the player sits at a table, for the building's "studying" count. */
+  studying: boolean;
+  /** The player's look, for the pet waiting at the library door. */
+  look: Appearance | null;
+  /** The private room's code, when in one. */
+  room: string | null;
+  /** The status lines, shortened on friends' phones. */
+  lines: StatusLines;
+};
 
 type Options = {
   token: string;
   /** Read on every (re)connect, so friends always see the current room. */
-  area: () => AreaId;
-  /** Whether the player sits at a table, for the building's "studying" count. */
-  studying: () => boolean;
-  /** The player's look, for the pet waiting at the library door. */
-  look: () => Appearance | null;
-  /** The private room's code, when in one. */
-  room: () => string | null;
+  presence: () => Presence;
   onMessage: (message: SocialServerMessage) => void;
 };
 
@@ -27,9 +40,7 @@ export class SocialConnection {
     };
     this.socket = new ReconnectingWebSocket(url, [], { maxRetries: Infinity });
     this.stopBeating = keepAlive(this.socket);
-    this.socket.addEventListener('open', () =>
-      this.where(options.area(), options.studying(), options.look(), options.room()),
-    );
+    this.socket.addEventListener('open', () => this.where(options.presence()));
     this.socket.addEventListener('message', (event) => {
       if (typeof event.data !== 'string' || isPong(event.data)) return;
       try {
@@ -40,13 +51,17 @@ export class SocialConnection {
     });
   }
 
-  where(area: AreaId, studying: boolean, look: Appearance | null, room: string | null): void {
+  where({ area, studying, look, room, lines }: Presence): void {
     const pet = look?.pet;
     this.send({
       t: 'where',
       area,
       studying,
       ...(room ? { room } : {}),
+      vibe: lines.vibe,
+      mood: lines.mood,
+      doing: lines.doing,
+      note: lines.announcement,
       pet: pet ?? null,
       ...(pet && look.petColor !== undefined ? { petColor: look.petColor } : {}),
       ...(pet && look.petSex ? { petSex: look.petSex } : {}),
@@ -73,6 +88,11 @@ export class SocialConnection {
 
   read(other: string): void {
     this.send({ t: 'read', with: other });
+  }
+
+  /** Makes a friend's phone buzz: "come say hi". */
+  buzz(to: string): void {
+    this.send({ t: 'buzz', to });
   }
 
   close(): void {

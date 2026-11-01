@@ -4,6 +4,7 @@ import {
   EMPTY_LINES,
   isValidAppearance,
   MOODS,
+  VIBES,
   type Appearance,
   type StatusLines,
 } from '@att/shared';
@@ -101,6 +102,7 @@ export function loadLines(): StatusLines {
       doingNote: text(stored.doingNote),
       mood: pick(MOODS, stored.mood),
       moodNote: text(stored.moodNote),
+      vibe: pick(VIBES, stored.vibe),
     }) ?? EMPTY_LINES
   );
 }

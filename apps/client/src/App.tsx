@@ -1,4 +1,4 @@
-import { normalizeRoomCode } from '@att/shared';
+import { EMPTY_LINES, normalizeRoomCode } from '@att/shared';
 import { useEffect } from 'react';
 
 import { unlockAudio } from './audio/sound';
@@ -10,6 +10,8 @@ import { Coach } from './ui/Coach';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Discovery } from './ui/Discovery';
 import { Games } from './ui/Games';
+import { JukeboxPanel, JukeboxPlayer } from './ui/Jukebox';
+import { TableGames } from './ui/TableGames';
 import { InviteToast, RoomChip, RoomsPanel } from './ui/Rooms';
 import { NoticeBoard } from './ui/NoticeBoard';
 import { PlayerCard } from './ui/PlayerCard';
@@ -42,6 +44,41 @@ export function App() {
     history.replaceState(null, '', location.pathname);
     useGameStore.getState().openRooms(code);
   }, [session, look]);
+
+  // A friend link (…/?friend=<id>) sends that person a request once the phone is connected.
+  const social = useGameStore((s) => s.social);
+  useEffect(() => {
+    if (!social || !session) return;
+    const id = new URLSearchParams(location.search).get('friend');
+    if (!id) return;
+    history.replaceState(null, '', location.pathname);
+    if (id === session.id) return;
+    // The socket opens a moment after it is made; the request waits for it.
+    const timer = window.setTimeout(() => {
+      social.befriend(id);
+      useGameStore.getState().setNotice('friend_link');
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [social, session]);
+
+  // Status lines set for a while clear themselves when the time is up.
+  const linesUntil = useGameStore((s) => s.linesUntil);
+  useEffect(() => {
+    if (!linesUntil) return;
+    const clear = () => {
+      const store = useGameStore.getState();
+      store.setLines(EMPTY_LINES);
+      store.setNotice('lines_expired');
+    };
+    const left = linesUntil - Date.now();
+    if (left <= 0) {
+      clear();
+      return;
+    }
+    // Timers far off are checked again later rather than set once for days.
+    const timer = window.setTimeout(clear, Math.min(left, 2 ** 31 - 1));
+    return () => window.clearTimeout(timer);
+  }, [linesUntil]);
 
   // Browsers keep sound off until the first touch or key press.
   useEffect(() => {
@@ -79,6 +116,9 @@ export function App() {
       <NoticeBoard />
       <Discovery />
       <Games />
+      <TableGames />
+      <JukeboxPanel />
+      <JukeboxPlayer />
       <RoomsPanel />
       <InviteToast />
       <RadialMenu />

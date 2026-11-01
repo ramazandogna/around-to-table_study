@@ -25,7 +25,7 @@ export function FriendsPanel() {
   const open = useGameStore((s) => s.friendsOpen);
   const friends = useGameStore((s) => s.friends);
   const social = useGameStore((s) => s.social);
-  const dmAllowed = useGameStore((s) => AREA_RULES[s.area].dmAllowed);
+  const dmAllowed = useGameStore((s) => AREA_RULES[s.area].phone);
   if (!open) return null;
 
   const incoming = friends.filter((f) => f.state === 'incoming');

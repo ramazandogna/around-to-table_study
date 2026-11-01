@@ -7,6 +7,8 @@ import type {
   ServerMessage,
   StatusLines,
   StudyStatus,
+  TableAction,
+  TableKind,
 } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
 import { isPong, keepAlive } from './heartbeat';
@@ -92,6 +94,31 @@ export class AreaConnection {
   }
 
   /** The study timer ran out; the server checks it really did. */
+  smoke(on: boolean): void {
+    this.send({ t: 'smoke', on });
+  }
+
+  /** Pets someone's pet; `owner` is whose it is. */
+  pat(owner: string): void {
+    this.send({ t: 'pat', owner });
+  }
+
+  table(kind: TableKind, action: TableAction): void {
+    this.send({ t: 'table', kind, action });
+  }
+
+  queueTune(link: string): void {
+    this.send({ t: 'tune', link });
+  }
+
+  skipTune(id: string): void {
+    this.send({ t: 'skip', id });
+  }
+
+  tuneLength(id: string, seconds: number): void {
+    this.send({ t: 'tuneLength', id, seconds });
+  }
+
   finished(): void {
     this.send({ t: 'finished' });
   }

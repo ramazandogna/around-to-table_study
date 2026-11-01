@@ -9,6 +9,7 @@ import {
   type Mesh,
 } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { t } from '../i18n/t';
 import { FLOOR_Y } from './buildArea';
 import { showEmote } from './emotes';
 import type { PetClips, PetDress, PetKit } from './pets';
@@ -23,7 +24,9 @@ import type { PetClips, PetDress, PetKit } from './pets';
  * - wait: sits in one spot (the library door) until its person comes back
  *
  * Where a pet goes follows its person, so everyone sees it in the same place;
- * its little antics are picked by each screen on its own.
+ * its little antics are picked by each screen on its own: chattering in its
+ * own language ("mrrp?"), begging up on its hind legs, rolling over. Being
+ * petted (by anyone, seen by everyone) makes it purr with hearts.
  */
 
 /** How far behind its person the pet walks, in seconds of their path. */
@@ -44,6 +47,17 @@ const CLUMSY_CHANCE = 0.3;
 const REST_SECONDS: readonly [number, number] = [1.5, 4.5];
 const WAIT_IDLE_SECONDS: readonly [number, number] = [6, 14];
 const LABEL_HEIGHT = 0.62;
+/** Half a pet's length and height (they are about 0.42 tall), for turning it about the right point. */
+const HALF_LENGTH = 0.18;
+const HALF_HEIGHT = 0.2;
+/** A chatter bubble stays up this long. */
+const CHATTER_MS = 2600;
+/** Seconds between chatters, at the least and the most. */
+const CHATTER_EVERY: readonly [number, number] = [14, 34];
+/** How long being petted lasts: it leans into the hand, purring. */
+const PETTED_SECONDS = 2.2;
+/** Where on a pet a tap counts as on it, around its middle. */
+export const PET_PICK = { radius: 0.3, height: 0.5 } as const;
 
 type Mode = 'follow' | 'wander' | 'wait';
 /** What a wandering pet is busy with. */
@@ -57,7 +71,11 @@ type Task =
   /** Walks straight into something, bounces back and shakes its head. */
   | { kind: 'bump'; phase: 'walk' | 'recoil'; to: FloorXZ; from: FloorXZ; left: number }
   /** Crouches at a speck of dust and pounces. */
-  | { kind: 'pounce'; phase: 'crouch' | 'jump'; to: FloorXZ; left: number };
+  | { kind: 'pounce'; phase: 'crouch' | 'jump'; to: FloorXZ; left: number }
+  /** Up on its hind legs, front paws in the air, hopping a little. */
+  | { kind: 'beg'; left: number }
+  /** Rolls over onto its back and all the way round. */
+  | { kind: 'roll'; left: number };
 
 type FloorXZ = { x: number; z: number };
 
@@ -102,6 +120,13 @@ export class Pet {
   private readonly tag: HTMLSpanElement;
   private readonly emoteHost: HTMLDivElement;
   private stopEmote: (() => void) | null = null;
+  private readonly bubble: HTMLDivElement;
+  private bubbleTimer = 0;
+  private chatterIn: number;
+  private pettedFor = 0;
+  /** Up on its hind legs (0 down, 1 up), eased so it never snaps. */
+  private rear = 0;
+  private rearWanted = 0;
 
   constructor(
     kit: PetKit,
@@ -134,11 +159,45 @@ export class Pet {
     this.tag = document.createElement('span');
     this.tag.className = 'pet-tag';
     this.tag.hidden = true;
-    element.append(this.emoteHost, this.tag);
+    this.bubble = document.createElement('div');
+    this.bubble.className = 'pet-bubble';
+    this.bubble.hidden = true;
+    element.append(this.bubble, this.emoteHost, this.tag);
     this.label = new CSS2DObject(element);
     this.label.center.set(0.5, 1);
     this.label.position.set(0, LABEL_HEIGHT, 0);
     this.root.add(this.label);
+    this.chatterIn = this.between(CHATTER_EVERY);
+  }
+
+  /** The pet's middle on the floor and its size, for telling a tap on it. */
+  get pickBox(): { x: number; z: number; radius: number; bottom: number; top: number } {
+    return {
+      x: this.root.position.x,
+      z: this.root.position.z,
+      radius: PET_PICK.radius,
+      bottom: FLOOR_Y,
+      top: FLOOR_Y + PET_PICK.height,
+    };
+  }
+
+  /** Someone pets it: it stops, leans in and purrs, with hearts. */
+  pat(): void {
+    this.pettedFor = PETTED_SECONDS;
+    this.tilt.rotation.z = 0;
+    this.emote('heart');
+    this.play('yes');
+    this.chatter(t(`pet.purr.${this.kind}`));
+    if (this.mode === 'wander') this.task = { kind: 'rest', left: PETTED_SECONDS };
+  }
+
+  /** A word in its own language over its head, e.g. "mrrp?". */
+  chatter(text?: string): void {
+    const words = t(`pet.say.${this.kind}`).split('|');
+    this.bubble.textContent = text ?? words[Math.floor(this.random() * words.length)] ?? '';
+    this.bubble.hidden = false;
+    window.clearTimeout(this.bubbleTimer);
+    this.bubbleTimer = window.setTimeout(() => (this.bubble.hidden = true), CHATTER_MS);
   }
 
   get position(): FloorXZ {
@@ -185,7 +244,21 @@ export class Pet {
 
   update(delta: number, owner: Owner | null): void {
     this.clock += delta;
-    if (this.mode === 'wait' || !owner) this.waitStep(delta);
+    this.chatterIn -= delta;
+    if (this.chatterIn <= 0) {
+      this.chatterIn = this.between(CHATTER_EVERY);
+      this.chatter();
+    }
+    this.rear = MathUtils.damp(this.rear, this.rearWanted, 9, delta);
+    // Up on the hind legs: tipped back around the back paws, which stay on the floor.
+    const up = this.rear * 0.95;
+    this.tilt.rotation.x = -up;
+    this.tilt.position.set(0, HALF_LENGTH * Math.sin(up), -HALF_LENGTH * (1 - Math.cos(up)));
+    if (this.pettedFor > 0) {
+      // Held still under the hand, whatever it was up to.
+      this.pettedFor -= delta;
+      this.speed = 0;
+    } else if (this.mode === 'wait' || !owner) this.waitStep(delta);
     else this.followStep(delta, owner);
     this.animate();
     const turn =
@@ -216,6 +289,7 @@ export class Pet {
       // Its person walks off: whatever it was doing, it hurries after them.
       this.mode = 'follow';
       this.tilt.rotation.z = 0;
+      this.rearWanted = 0;
     }
 
     if (this.mode === 'wander') {
@@ -308,6 +382,34 @@ export class Pet {
           if (task.left <= 0) this.task = { kind: 'rest', left: this.between(REST_SECONDS) };
         }
         return;
+      case 'beg': {
+        task.left -= delta;
+        this.speed = 0;
+        this.rearWanted = task.left > 0.35 ? 1 : 0;
+        // Little hops while up, paws paddling the air.
+        this.tilt.position.y += Math.max(0, Math.sin(task.left * 14)) * 0.03 * this.rear;
+        if (task.left <= 0) {
+          this.rearWanted = 0;
+          this.play('yes');
+          this.task = { kind: 'rest', left: this.between(REST_SECONDS) };
+        }
+        return;
+      }
+      case 'roll': {
+        task.left -= delta;
+        this.speed = 0;
+        // Onto its back and all the way round, slow at the top, turning about its middle.
+        const share = 1 - Math.max(0, task.left) / 1.6;
+        const turn = share * Math.PI * 2 - Math.sin(share * Math.PI * 2) * 0.35;
+        this.tilt.rotation.z = turn;
+        this.tilt.position.y = HALF_HEIGHT * (1 - Math.cos(turn));
+        if (task.left <= 0) {
+          this.tilt.rotation.z = 0;
+          this.play('yes');
+          this.task = { kind: 'rest', left: this.between(REST_SECONDS) };
+        }
+        return;
+      }
     }
   }
 
@@ -320,8 +422,10 @@ export class Pet {
         : { kind: 'rest', left: this.between(REST_SECONDS) };
     }
     const pick = this.random();
-    if (pick < 0.3) return { kind: 'tail', left: 1.4 };
-    if (pick < 0.55) return { kind: 'stumble', phase: 'trot', to: spot, left: 1.2 };
+    if (pick < 0.18) return { kind: 'tail', left: 1.4 };
+    if (pick < 0.32) return { kind: 'stumble', phase: 'trot', to: spot, left: 1.2 };
+    if (pick < 0.48) return { kind: 'beg', left: 1.8 };
+    if (pick < 0.62) return { kind: 'roll', left: 1.6 };
     if (pick < 0.8) {
       const wall = this.wallNear();
       if (wall) return { kind: 'bump', phase: 'walk', to: wall, from: this.position, left: 2 };
@@ -392,8 +496,17 @@ export class Pet {
     this.waitTimer -= delta;
     if (this.waitTimer > 0) return;
     this.waitTimer = this.between(WAIT_IDLE_SECONDS);
-    if (this.random() < 0.5) this.play('eat');
-    else this.emote('sleepy');
+    const pick = this.random();
+    if (pick < 0.4) this.play('eat');
+    else if (pick < 0.75) this.emote('sleepy');
+    // Bored at the door: a little hop up to look for its person.
+    else this.rearFor(1.1);
+  }
+
+  /** Rears up for a moment, outside the wandering tasks (waiting at the door). */
+  private rearFor(seconds: number): void {
+    this.rearWanted = 1;
+    window.setTimeout(() => (this.rearWanted = 0), seconds * 1000);
   }
 
   private play(name: 'yes' | 'no' | 'eat'): void {
@@ -432,6 +545,7 @@ export class Pet {
 
   dispose(): void {
     this.stopEmote?.();
+    window.clearTimeout(this.bubbleTimer);
     this.mixer.stopAllAction();
     this.label.element.remove();
     // Each pet has its own geometry (for its colour); materials are the kit's,

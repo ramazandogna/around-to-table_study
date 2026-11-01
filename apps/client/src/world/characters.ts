@@ -12,7 +12,7 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { dressMesh, mapOutfit, type OutfitMap } from './outfit';
-import { createDanceCycle, createStudyPose, createWaveGesture } from './poses';
+import { createDanceCycle, createSmokeCycle, createStudyPose, createWaveGesture } from './poses';
 
 const PATH = 'models/characters/';
 /** Standing height in tiles (a tile is about a meter): small and chibi, like the furniture kit. */
@@ -27,13 +27,19 @@ export type CharacterClips = {
   /** Sitting at a table with the forearms on it. */
   study: AnimationClip;
   dance: AnimationClip;
+  /** Standing with a cigarette, a drag now and then. */
+  smoke: AnimationClip;
   /** One-off gestures. */
   poke: AnimationClip;
   nod: AnimationClip;
   wave: AnimationClip;
 };
 
-export type Character = { model: Group; clips: CharacterClips };
+/**
+ * `hand`: the tip of the right hand in the right arm's own space, where
+ * something held (a cigarette) is attached.
+ */
+export type Character = { model: Group; clips: CharacterClips; hand: Vector3 };
 
 export type CharacterKit = {
   /** A fresh copy of a character, scaled to the world, with its animations. */
@@ -42,7 +48,7 @@ export type CharacterKit = {
   seatedHipHeight: number;
 };
 
-type Loaded = { scene: Group; clips: CharacterClips; outfit: OutfitMap };
+type Loaded = { scene: Group; clips: CharacterClips; outfit: OutfitMap; hand: Vector3 };
 
 let kit: Promise<CharacterKit> | null = null;
 
@@ -80,15 +86,18 @@ async function loadKit(): Promise<CharacterKit> {
       if (!head || !body) throw new Error(`Character ${id} has no head or body`);
       const animations = gltf.animations;
       const sit = clipNamed(animations, 'sit');
+      const idle = clipNamed(animations, 'idle');
       return {
         scene,
         outfit: mapOutfit(head, body),
+        hand: measureHand(scene),
         clips: {
-          idle: clipNamed(animations, 'idle'),
+          idle,
           walk: clipNamed(animations, 'walk'),
           sit,
           study: createStudyPose(sit),
           dance: createDanceCycle(),
+          smoke: createSmokeCycle(idle),
           poke: clipNamed(animations, 'interact-right'),
           nod: clipNamed(animations, 'emote-yes'),
           wave: createWaveGesture(),
@@ -109,9 +118,24 @@ async function loadKit(): Promise<CharacterKit> {
         const mesh = child as SkinnedMesh;
         if (mesh.isSkinnedMesh) dressMesh(mesh, source.outfit.get(mesh.name), look);
       });
-      return { model, clips: source.clips };
+      return { model, clips: source.clips, hand: source.hand };
     },
   };
+}
+
+/**
+ * Where the right hand ends, in the right arm's space. The rig rests in a
+ * T-pose with the right arm along -x, so the hand's tip is the model's
+ * furthest point that way, level with the shoulder.
+ */
+function measureHand(scene: Group): Vector3 {
+  scene.updateMatrixWorld(true);
+  const arm = scene.getObjectByName('arm-right');
+  if (!arm) return new Vector3();
+  const shoulder = arm.getWorldPosition(new Vector3());
+  const box = new Box3().setFromObject(scene);
+  const tip = new Vector3(box.min.x + 0.02, shoulder.y, shoulder.z);
+  return arm.worldToLocal(tip);
 }
 
 /** How high the hip joints are above the model's origin in the sit pose, in world units. */

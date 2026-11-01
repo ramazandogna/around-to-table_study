@@ -1,4 +1,4 @@
-import type { Activity, Doing, Mood } from '@att/shared';
+import type { Activity, Doing, Mood, Vibe } from '@att/shared';
 
 export const ACTIVITY_ICON: Record<Activity, string> = {
   focus: '☕',
@@ -16,6 +16,13 @@ export const DOING_ICON: Record<Doing, string> = {
   drawing: '🎨',
   resting: '🛋️',
   team: '🤝',
+};
+
+/** How open someone is to company, as a coloured dot: green for a chat, blue for a study buddy, grey for quiet. */
+export const VIBE_ICON: Record<Vibe, string> = {
+  chat: '🟢',
+  buddy: '🔵',
+  quiet: '🤫',
 };
 
 export const MOOD_ICON: Record<Mood, string> = {

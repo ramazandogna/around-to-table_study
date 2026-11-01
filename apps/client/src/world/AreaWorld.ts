@@ -6,6 +6,7 @@ import {
   TILE,
   eventNow,
   createAreaGrid,
+  onDuty,
   findPath,
   resolveWalkTarget,
   smoothPath,
@@ -32,12 +33,13 @@ import type { CharacterKit } from './characters';
 import { MACHINES, type ArcadeKit } from './arcade';
 import { cursorFor, type CursorKind } from './cursors';
 import { buildEventDecor, type EventDecor } from './eventDecor';
-import { Librarian } from './Librarian';
+import { closedSign, Staff } from './Staff';
 import { Pet, type PetContext } from './Pet';
 import type { PetDress, PetKit } from './pets';
 import type { IsoView } from './IsoView';
 import { minimap, type MapPerson } from './minimap';
 import type { Furniture } from './models';
+import type { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createTableProps } from './tableProps';
 import { createHoverMarker, type HoverKind } from './hoverMarker';
 import { createSeatMarkers } from './seatMarkers';
@@ -105,6 +107,13 @@ const SEAT_PICK_HEIGHT = 0.82;
 const SEAT_PICK_RADIUS = 0.3;
 /** Pets sit this far apart beside the library door. */
 const PET_SPACING = 0.42;
+/** How often the shifts are checked, to change who sits at the desk. */
+const SHIFT_CHECK_SECONDS = 20;
+
+/** The viewer's hour of the day with its minutes, for the shifts. */
+const localHour = (now = new Date()) => now.getHours() + now.getMinutes() / 60;
+/** The right mouse button. */
+const RIGHT_BUTTON = 2;
 
 /** Something to do once the player has walked over to it. */
 type Pending =
@@ -112,12 +121,15 @@ type Pending =
   | { kind: 'examine'; examinable: Examinable }
   | { kind: 'desk'; tile: Point }
   /** The elevator up to the private rooms. */
-  | { kind: 'elevator' };
+  | { kind: 'elevator' }
+  /** Petting someone's pet (by its person's id; 'self' for the player's own). */
+  | { kind: 'pat'; owner: string };
 
 /** What the mouse is over: a person, something to look at, or a tile. */
 type Target =
   | { kind: 'self' }
   | { kind: 'person'; id: string }
+  | { kind: 'pet'; owner: string }
   | { kind: 'examine'; examinable: Examinable }
   | { kind: 'tile'; tile: Point };
 
@@ -158,7 +170,10 @@ export class AreaWorld {
   private readonly pets = new Map<string, Pet>();
   /** In the hall: pets sitting at the library door while their people study, by person. */
   private readonly waiting = new Map<string, Pet>();
-  private librarian: Librarian | null = null;
+  /** Whoever works at this room's desk on this shift, or a "back at" sign when nobody does. */
+  private staff: Staff | null = null;
+  private deskSign: CSS2DObject | null = null;
+  private shiftTimer = SHIFT_CHECK_SECONDS;
   /** The room dressed up while an event is on, and which event that is. */
   private decor: EventDecor | null = null;
   private eventId: string | null = null;
@@ -197,6 +212,16 @@ export class AreaWorld {
       }
       if (state.friends !== before.friends) this.markFriends();
       if (state.dancing !== before.dancing) this.dance(state.dancing);
+      if (state.smoking !== before.smoking) this.smoke(state.smoking);
+      if (state.buzzAt !== before.buzzAt) this.player?.buzz();
+      if (state.travel && state.travel !== before.travel) this.travel(state.travel);
+      // Asking the reception for a room: the receptionist walks over to call the elevator.
+      if (
+        (state.roomsOpen && !before.roomsOpen) ||
+        (state.room && state.room !== before.room && this.areaId === 'hall')
+      ) {
+        this.staff?.escort();
+      }
       if (state.lines !== before.lines) {
         this.player?.setLines(state.lines);
         this.connection?.setLines(state.lines);
@@ -215,6 +240,7 @@ export class AreaWorld {
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
     view.canvas.addEventListener('pointerdown', this.onPointerDown);
+    view.canvas.addEventListener('contextmenu', this.onContextMenu);
     view.canvas.addEventListener('pointermove', this.onPointerMove);
     view.canvas.addEventListener('pointerleave', this.onPointerLeave);
     view.add(this.hover.mesh);
@@ -263,8 +289,7 @@ export class AreaWorld {
       useGameStore.getState().setNotice('pet_waits');
       play('mew');
     }
-    this.librarian = Librarian.create(this.assets.characters, this.grid, this.context);
-    if (this.librarian) this.view.add(this.librarian.avatar.root);
+    this.seatStaff();
     this.seatWaitingPets(useGameStore.getState().waitingPets);
 
     const store = useGameStore.getState();
@@ -293,6 +318,7 @@ export class AreaWorld {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
     this.view.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.view.canvas.removeEventListener('contextmenu', this.onContextMenu);
     this.view.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.view.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.view.remove(this.hover.mesh);
@@ -352,8 +378,7 @@ export class AreaWorld {
     for (const pet of [...this.pets.values(), ...this.waiting.values()]) pet.dispose();
     this.pets.clear();
     this.waiting.clear();
-    this.librarian?.dispose();
-    this.librarian = null;
+    this.removeStaff();
     this.decor?.dispose();
     this.decor = null;
     this.eventId = null;
@@ -386,6 +411,7 @@ export class AreaWorld {
     const studying = player.seatKind === 'chair';
     if (studying !== store.seated) store.setSeated(studying);
     if (store.dancing && !player.isDancing) store.setDancing(false);
+    if (store.smoking && !player.isSmoking) store.setSmoking(false);
     if (store.radial && player.isMoving) store.setRadial(null);
     // Walking off puts the book back.
     if (store.discovery && player.isMoving) store.setDiscovery(null);
@@ -395,7 +421,12 @@ export class AreaWorld {
     this.updateBoard(player);
     this.updateHover();
     for (const other of this.others.values()) other.update(delta);
-    this.librarian?.update(delta);
+    this.staff?.update(delta);
+    this.shiftTimer -= delta;
+    if (this.shiftTimer <= 0) {
+      this.shiftTimer = SHIFT_CHECK_SECONDS;
+      if ((this.staff?.id ?? null) !== onDuty(this.areaId, localHour())) this.seatStaff();
+    }
     this.updatePets(delta);
     this.updateEvent(delta);
     this.arrangeCrowd(delta);
@@ -451,8 +482,10 @@ export class AreaWorld {
         const route = this.routeFor(other, message.to);
         if (route) other.follow(route);
         else other.teleport(message.to);
-        // Standing up clears the table, as on the server.
+        // Standing up clears the table and walking ends a dance or a cigarette, as on the server.
         other.clearActivity();
+        other.setDancing(false);
+        other.setSmoking(false);
         break;
       }
       case 'grew':
@@ -460,6 +493,29 @@ export class AreaWorld {
         break;
       case 'danced':
         if (message.id !== selfId) this.others.get(message.id)?.setDancing(message.on);
+        break;
+      case 'smoked':
+        if (message.id !== selfId) this.others.get(message.id)?.setSmoking(message.on);
+        break;
+      case 'patted': {
+        const petter = message.id === selfId ? this.player : this.others.get(message.id);
+        const pet = this.petOf(message.owner === selfId ? 'self' : message.owner);
+        if (petter && pet) {
+          petter.face(pet.position.x - petter.position.x, pet.position.z - petter.position.z);
+          petter.play('poke');
+        }
+        pet?.pat();
+        if (pet) play('purr');
+        break;
+      }
+      case 'table':
+        store.setTable(message.kind, message.table);
+        break;
+      case 'tableError':
+        // Only "not your turn" and the like: the table panel shows whose turn it is anyway.
+        break;
+      case 'jukebox':
+        store.setJukebox(message.state);
         break;
       case 'status':
         if (message.id !== selfId) this.others.get(message.id)?.setStatus(message.status);
@@ -552,6 +608,33 @@ export class AreaWorld {
     useGameStore.getState().setPlayersHere(this.others.size + 1);
   }
 
+  /** Puts whoever is on shift behind this room's desk, or a sign when the desk is closed. */
+  private seatStaff(): void {
+    this.removeStaff();
+    this.staff = Staff.create(this.assets.characters, this.grid, this.context, localHour());
+    if (this.staff) {
+      this.view.add(this.staff.avatar.root);
+      return;
+    }
+    this.deskSign = closedSign(this.grid, t('staff.closed'));
+    if (this.deskSign) this.view.add(this.deskSign);
+  }
+
+  private removeStaff(): void {
+    this.staff?.dispose();
+    this.staff = null;
+    if (this.deskSign) {
+      this.deskSign.element.remove();
+      this.deskSign.removeFromParent();
+      this.deskSign = null;
+    }
+  }
+
+  /** A pet in the room by its person ('self' for the player's), walking along or waiting at the door. */
+  private petOf(owner: string): Pet | null {
+    return this.pets.get(owner) ?? this.waiting.get(owner) ?? null;
+  }
+
   private addOther(player: PlayerSnapshot): void {
     this.others.get(player.id)?.dispose();
     const avatar = new Avatar(
@@ -566,6 +649,7 @@ export class AreaWorld {
     avatar.setLines(player.lines);
     avatar.setFriend(this.isFriend(player.id));
     avatar.setDancing(player.dancing);
+    avatar.setSmoking(player.smoking ?? false);
     avatar.onTap = () => this.approach(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
@@ -593,7 +677,10 @@ export class AreaWorld {
         this.view.add(this.decor.root);
       }
     }
-    if (live && useGameStore.getState().musicOn) playMusic(EVENT_THEMES[live.event.theme].music);
+    // A song on the jukebox takes the place of the event's own music.
+    const { musicOn, jukebox, jukeboxOn } = useGameStore.getState();
+    const jukeboxPlaying = jukebox.now !== null && jukeboxOn;
+    if (live && musicOn && !jukeboxPlaying) playMusic(EVENT_THEMES[live.event.theme].music);
     else stopMusic();
   }
 
@@ -711,6 +798,9 @@ export class AreaWorld {
 
   private readonly onBlur = () => this.heldKeys.clear();
 
+  /** The right button has its own menu in the world; the browser's would only get in the way. */
+  private readonly onContextMenu = (event: MouseEvent) => event.preventDefault();
+
   private readonly onPointerDown = (event: PointerEvent) => {
     unlockAudio();
     const store = useGameStore.getState();
@@ -718,6 +808,10 @@ export class AreaWorld {
     if (store.radial) store.setRadial(null);
     const target = this.targetAt(event.clientX, event.clientY);
     if (!target) return;
+    if (event.button === RIGHT_BUTTON) {
+      this.rightClick(event, target);
+      return;
+    }
     switch (target.kind) {
       case 'self': {
         // Tapping yourself opens the ring of things you can do.
@@ -729,6 +823,10 @@ export class AreaWorld {
         // Tapping someone walks over to them and opens what you can do together.
         this.ripple(event, 'talk');
         this.approach(target.id);
+        return;
+      case 'pet':
+        this.ripple(event, 'talk');
+        this.goToPet(target.owner);
         return;
       case 'examine':
         this.ripple(event, 'look');
@@ -753,6 +851,43 @@ export class AreaWorld {
     }
   };
 
+  /**
+   * The right button does things at once, without walking: on yourself the
+   * ring of actions, on someone their card, on a pet a stroke (if it is near),
+   * and anywhere else the ring too, so it is always one click away.
+   */
+  private rightClick(event: PointerEvent, target: Target): void {
+    const store = useGameStore.getState();
+    switch (target.kind) {
+      case 'person':
+        this.ripple(event, 'talk');
+        this.select(target.id);
+        return;
+      case 'pet':
+        this.ripple(event, 'talk');
+        this.goToPet(target.owner);
+        return;
+      default: {
+        const at = target.kind === 'self' ? this.selfScreenPoint() : null;
+        store.setRadial(at ?? { x: event.clientX, y: event.clientY });
+      }
+    }
+  }
+
+  /** Walks up to a pet and pets it; right next to it, at once. */
+  private goToPet(owner: string): void {
+    const pet = this.petOf(owner);
+    const player = this.player;
+    if (!pet || !player) return;
+    const tile = { x: Math.floor(pet.position.x), y: Math.floor(pet.position.z) };
+    const near = Math.hypot(pet.position.x - player.position.x, pet.position.z - player.position.z);
+    if (near < 1.3 && !player.isMoving) {
+      this.arrive(player, { kind: 'pat', owner });
+      return;
+    }
+    this.goTo(tile, { kind: 'pat', owner });
+  }
+
   private readonly onPointerMove = (event: PointerEvent) => {
     this.pointer = event.pointerType === 'mouse' ? { x: event.clientX, y: event.clientY } : null;
   };
@@ -766,6 +901,9 @@ export class AreaWorld {
     const person = this.avatarAt(clientX, clientY);
     if (person === 'self') return { kind: 'self' };
     if (person) return { kind: 'person', id: person };
+    // Pets are small and walk under feet: they come right after people.
+    const pet = this.petAt(clientX, clientY);
+    if (pet) return { kind: 'pet', owner: pet };
     // A chair or sofa anywhere on it, back and seat alike, before what stands behind it.
     const seat = this.seatOnScreen(clientX, clientY);
     const examinable = seat ? null : this.examinableAt(clientX, clientY);
@@ -795,6 +933,19 @@ export class AreaWorld {
     if (this.player) check('self', this.player);
     for (const [id, other] of this.others) check(id, other);
     return (best as { id: string | 'self' } | null)?.id ?? null;
+  }
+
+  /** Whose pet is under a screen point ('self' for the player's own), the front-most one. */
+  private petAt(clientX: number, clientY: number): string | null {
+    let best: { owner: string; depth: number } | null = null;
+    for (const [owner, pet] of [...this.pets, ...this.waiting]) {
+      const box = pet.pickBox;
+      const depth = box.x + box.z;
+      if (this.onScreen(box, clientX, clientY) && (!best || depth > best.depth)) {
+        best = { owner, depth };
+      }
+    }
+    return best?.owner ?? null;
   }
 
   /** Whether a screen point falls on an upright box in the world (a body, a chair). */
@@ -960,6 +1111,16 @@ export class AreaWorld {
           play('pop');
           return;
         }
+        if (examinable.kind === 'table') {
+          lookAt({ x: examinable.stand.x, y: examinable.stand.y - 1 });
+          store.setTableOpen(examinable.index === 0 ? 'darts' : 'menu');
+          return;
+        }
+        if (examinable.kind === 'jukebox') {
+          lookAt({ x: examinable.stand.x - 1, y: examinable.stand.y });
+          store.setJukeboxOpen(true);
+          return;
+        }
         if (examinable.kind === 'game') {
           const machine = MACHINES[examinable.index];
           lookAt({ x: examinable.stand.x, y: examinable.stand.y - 1 });
@@ -991,7 +1152,31 @@ export class AreaWorld {
       case 'elevator':
         store.openRooms();
         return;
+      case 'pat': {
+        const pet = this.petOf(pending.owner);
+        if (!pet) return;
+        player.face(pet.position.x - player.position.x, pet.position.z - player.position.z);
+        const selfId = store.session?.id;
+        const owner = pending.owner === 'self' ? selfId : pending.owner;
+        if (owner) this.connection?.pat(owner);
+        return;
+      }
     }
+  }
+
+  /** Lights a cigarette or puts it out, where the room allows it. */
+  private smoke(on: boolean): void {
+    const player = this.player;
+    if (!player || player.isSmoking === on) return;
+    if (on && (!AREA_RULES[this.areaId].smoke || player.isSeated)) {
+      const store = useGameStore.getState();
+      store.setSmoking(false);
+      store.setNotice('no_smoke');
+      return;
+    }
+    player.setSmoking(on);
+    if (on) play('lighter');
+    this.connection?.smoke(on);
   }
 
   /** Starts or stops dancing, where the room allows it. */
@@ -1198,6 +1383,7 @@ export class AreaWorld {
       case 'self':
         return 'self';
       case 'person':
+      case 'pet':
         return 'talk';
       case 'examine':
         return 'look';
@@ -1228,6 +1414,8 @@ export class AreaWorld {
         return t('tip.self');
       case 'person':
         return t('tip.person', { name: this.others.get(target.id)?.name ?? '' });
+      case 'pet':
+        return t('tip.pet');
       case 'examine': {
         const { examinable } = target;
         if (examinable.kind === 'shelf') {
@@ -1235,6 +1423,9 @@ export class AreaWorld {
         }
         if (examinable.kind === 'flaw') return t('tip.flaw');
         if (examinable.kind === 'topic') return t('tip.topic');
+        if (examinable.kind === 'table')
+          return t(examinable.index === 0 ? 'tip.darts' : 'tip.gameTable');
+        if (examinable.kind === 'jukebox') return t('tip.jukebox');
         if (examinable.kind === 'game')
           return t(`tip.game.${MACHINES[examinable.index] ?? 'arcade'}`);
         return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
@@ -1439,10 +1630,23 @@ export class AreaWorld {
     this.connection?.move(back);
   }
 
-  private goThrough(to: AreaId): void {
+  private goThrough(to: AreaId, from: AreaId = this.areaId): void {
     this.leaving = true;
     this.fader.classList.add('world-fader--dark');
-    const from = this.areaId;
     window.setTimeout(() => this.enter(to, from), FADE_MS);
+  }
+
+  /**
+   * Goes to another public room straight from the phone, as if walking there:
+   * between the library and the smoking room that is through the hall, so the
+   * player comes in at the door from the hall.
+   */
+  private travel(to: AreaId): void {
+    const store = useGameStore.getState();
+    store.setTravel(null);
+    const player = this.player;
+    if (!player || this.leaving || to === this.areaId || isRoomArea(to)) return;
+    const from = this.areaId === 'hall' || to === 'hall' ? this.areaId : 'hall';
+    this.leaveSeat(player, () => this.goThrough(to, from));
   }
 }

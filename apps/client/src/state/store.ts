@@ -1,6 +1,11 @@
 import {
   DM_HISTORY,
+  EMPTY_JUKEBOX,
   EMPTY_LINES,
+  JUKEBOX,
+  type JukeboxState,
+  type Table,
+  type TableKind,
   type Activity,
   type Appearance,
   type AreaId,
@@ -42,7 +47,6 @@ export type Notice =
   | 'unknown_user'
   | 'too_many'
   | 'dm'
-  | 'dm_waiting'
   | 'phone_silent'
   | 'not_friends'
   | 'seat_taken'
@@ -65,7 +69,23 @@ export type Notice =
   /** Someone's invite to a private room could not be sent or used. */
   | 'room_gone'
   /** An invite to the player's room went out (the value is who to). */
-  | 'room_invited';
+  | 'room_invited'
+  /** A friend buzzed the player's phone (the value is who). */
+  | 'buzzed'
+  /** The player's buzz went out (the value is who to). */
+  | 'buzz_sent'
+  /** Someone's friend link was opened: a request went to them (the value is who). */
+  | 'friend_link'
+  /** The jukebox could not take a song. */
+  | 'tune_bad'
+  | 'tune_full'
+  | 'tune_long'
+  /** A song went into the queue. */
+  | 'tune_added'
+  /** No smoking outside the smoking room. */
+  | 'no_smoke'
+  /** The status lines ran out and were cleared. */
+  | 'lines_expired';
 
 /** One line in the room chat panel. */
 export type ChatLine = {
@@ -130,6 +150,38 @@ export type Discovery = {
   pick: number;
 };
 
+/** What opened at the smoking room's game corner: one game, or the list of them. */
+export type TableOpen = TableKind | 'menu';
+
+const JUKEBOX_KEY = 'att.jukebox';
+const LINES_UNTIL_KEY = 'att.linesUntil';
+
+/** The jukebox on this device: listening or not, and how loud (never past the room's cap). */
+function loadJukeboxPrefs(): { on: boolean; volume: number } {
+  try {
+    const stored = JSON.parse(localStorage.getItem(JUKEBOX_KEY) ?? 'null') as {
+      on?: boolean;
+      volume?: number;
+    } | null;
+    const volume = Number(stored?.volume ?? JUKEBOX.defaultVolume);
+    return {
+      on: stored?.on ?? true,
+      volume: Math.min(JUKEBOX.maxVolume, Math.max(0, Number.isFinite(volume) ? volume : 0)),
+    };
+  } catch {
+    return { on: true, volume: JUKEBOX.defaultVolume };
+  }
+}
+
+function loadLinesUntil(): number | null {
+  try {
+    const until = Number(localStorage.getItem(LINES_UNTIL_KEY));
+    return until > 0 ? until : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Where the ring of actions around the player opens, in screen pixels. */
 export type Radial = { x: number; y: number };
 
@@ -181,6 +233,24 @@ type GameState = {
   introOpen: boolean;
   /** The player dances (where the room allows it). */
   dancing: boolean;
+  /** The player smokes (in the smoking room). */
+  smoking: boolean;
+  /** The smoking room's game tables, as the server last said. */
+  tables: Partial<Record<TableKind, Table>>;
+  tableOpen: TableOpen | null;
+  jukebox: JukeboxState;
+  jukeboxOpen: boolean;
+  /** Listening to the jukebox on this device, and how loud. */
+  jukeboxOn: boolean;
+  jukeboxVolume: number;
+  /** When the phone last buzzed, for the little shaking phone by the player's name. */
+  buzzAt: number;
+  /** Per friend: the newest of the player's messages they have read. */
+  seen: Record<string, number>;
+  /** When the status lines clear by themselves; null keeps them. */
+  linesUntil: number | null;
+  /** A room the player asked to go to from the phone (to a friend); the world takes them. */
+  travel: AreaId | null;
   muted: boolean;
   /** People sitting at the table in this room right now, the player included. */
   studying: number;
@@ -245,6 +315,17 @@ type GameState = {
   setDiscovery: (discovery: Discovery | null) => void;
   setIntroOpen: (open: boolean) => void;
   setDancing: (dancing: boolean) => void;
+  setSmoking: (smoking: boolean) => void;
+  setTable: (kind: TableKind, table: Table | null) => void;
+  setTableOpen: (open: TableOpen | null) => void;
+  setJukebox: (state: JukeboxState) => void;
+  setJukeboxOpen: (open: boolean) => void;
+  /** Saves on this device whether to listen and how loud. */
+  setJukeboxPrefs: (prefs: { on?: boolean; volume?: number }) => void;
+  /** Shakes the phone by the player's name. */
+  buzz: () => void;
+  setSeen: (friend: string, upTo: number) => void;
+  setTravel: (area: AreaId | null) => void;
   setMuted: (muted: boolean) => void;
   setStudying: (count: number) => void;
   setTyping: (typing: boolean) => void;
@@ -252,8 +333,8 @@ type GameState = {
   addChatLine: (line: Omit<ChatLine, 'key' | 'at'> & { at?: number }) => void;
   setChatOpen: (open: boolean) => void;
   setSelected: (selected: Selected | null) => void;
-  /** Saves the lines on this device and shows them in the world. */
-  setLines: (lines: StatusLines) => void;
+  /** Saves the lines on this device and shows them in the world; `until` clears them later. */
+  setLines: (lines: StatusLines, until?: number | null) => void;
   setStatusOpen: (open: boolean) => void;
   setEmoteOpen: (open: boolean) => void;
   ask: (confirm: Confirm | null) => void;
@@ -315,6 +396,17 @@ export const useGameStore = create<GameState>((set) => ({
   discovery: null,
   introOpen: false,
   dancing: false,
+  smoking: false,
+  tables: {},
+  tableOpen: null,
+  jukebox: EMPTY_JUKEBOX,
+  jukeboxOpen: false,
+  jukeboxOn: loadJukeboxPrefs().on,
+  jukeboxVolume: loadJukeboxPrefs().volume,
+  buzzAt: 0,
+  seen: {},
+  linesUntil: loadLinesUntil(),
+  travel: null,
   muted: isMuted(),
   studying: 0,
   typing: false,
@@ -353,7 +445,12 @@ export const useGameStore = create<GameState>((set) => ({
       radial: null,
       discovery: null,
       dancing: false,
+      smoking: false,
       game: null,
+      tables: {},
+      tableOpen: null,
+      jukebox: EMPTY_JUKEBOX,
+      jukeboxOpen: false,
     }),
   setConnection: (connection) => set({ connection }),
   setSocial: (social) => set({ social }),
@@ -394,7 +491,36 @@ export const useGameStore = create<GameState>((set) => ({
   setRadial: (radial) => set({ radial }),
   setDiscovery: (discovery) => set({ discovery }),
   setIntroOpen: (introOpen) => set({ introOpen }),
-  setDancing: (dancing) => set({ dancing }),
+  setDancing: (dancing) => set(dancing ? { dancing, smoking: false } : { dancing }),
+  setSmoking: (smoking) => set(smoking ? { smoking, dancing: false } : { smoking }),
+  setTable: (kind, table) =>
+    set((state) => {
+      // A table nobody sits at any more drops out of the list.
+      const tables = Object.fromEntries(
+        Object.entries({ ...state.tables, [kind]: table }).filter(([, t]) => t),
+      ) as Partial<Record<TableKind, Table>>;
+      return { tables };
+    }),
+  setTableOpen: (tableOpen) => set({ tableOpen }),
+  setJukebox: (jukebox) => set({ jukebox }),
+  setJukeboxOpen: (jukeboxOpen) => set({ jukeboxOpen }),
+  setJukeboxPrefs: (prefs) =>
+    set((state) => {
+      const on = prefs.on ?? state.jukeboxOn;
+      const volume = Math.min(JUKEBOX.maxVolume, Math.max(0, prefs.volume ?? state.jukeboxVolume));
+      try {
+        localStorage.setItem(JUKEBOX_KEY, JSON.stringify({ on, volume }));
+      } catch {
+        // Private mode: the choice lasts for this visit.
+      }
+      return { jukeboxOn: on, jukeboxVolume: volume };
+    }),
+  buzz: () => set({ buzzAt: Date.now() }),
+  setTravel: (travel) => set({ travel }),
+  setSeen: (friend, upTo) =>
+    set((state) =>
+      (state.seen[friend] ?? 0) >= upTo ? {} : { seen: { ...state.seen, [friend]: upTo } },
+    ),
   setMuted: (muted) => {
     setSoundMuted(muted);
     set({ muted });
@@ -414,9 +540,15 @@ export const useGameStore = create<GameState>((set) => ({
     })),
   setChatOpen: (chatOpen) => set({ chatOpen, unread: 0 }),
   setSelected: (selected) => set({ selected }),
-  setLines: (lines) => {
+  setLines: (lines, until = null) => {
     saveLines(lines);
-    set({ lines });
+    try {
+      if (until) localStorage.setItem(LINES_UNTIL_KEY, String(until));
+      else localStorage.removeItem(LINES_UNTIL_KEY);
+    } catch {
+      // Private mode: the lines just stay.
+    }
+    set({ lines, linesUntil: until });
   },
   setStatusOpen: (statusOpen) => set({ statusOpen }),
   setEmoteOpen: (emoteOpen) => set({ emoteOpen }),
@@ -482,6 +614,8 @@ export const useGameStore = create<GameState>((set) => ({
       session: null,
       look: null,
       lines: EMPTY_LINES,
+      linesUntil: null,
+      seen: {},
       selected: null,
       confirm: null,
       phoneOpen: false,
