@@ -11,8 +11,18 @@ import {
   type OutfitPart,
   type PetKind,
 } from './character';
-import { DOINGS, EMOTES, MOODS, STATUS_LIMITS, type Emote, type StatusLines } from './status';
+import { JUKEBOX, type JukeboxState } from './jukebox';
+import {
+  DOINGS,
+  EMOTES,
+  MOODS,
+  STATUS_LIMITS,
+  VIBES,
+  type Emote,
+  type StatusLines,
+} from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
+import { TABLE_GAMES, type Table, type TableError, type TableKind } from './tables';
 import type { AreaId, Point } from './world';
 
 const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
@@ -56,7 +66,22 @@ const statusLines = z.object({
   doingNote: z.string().max(STATUS_LIMITS.note * 2),
   mood: z.enum(MOODS).nullable(),
   moodNote: z.string().max(STATUS_LIMITS.note * 2),
+  vibe: z.enum(VIBES).nullable().optional(),
 });
+
+const userId = z.string().min(1).max(64);
+const tableAction = z.discriminatedUnion('a', [
+  z.object({ a: z.literal('open') }),
+  z.object({ a: z.literal('join') }),
+  z.object({ a: z.literal('leave') }),
+  z.object({ a: z.literal('start') }),
+  z.object({ a: z.literal('throw'), x: z.number().finite(), y: z.number().finite() }),
+  z.object({ a: z.literal('roll') }),
+  z.object({ a: z.literal('hold') }),
+  z.object({ a: z.literal('guess'), n: z.number().int().min(0).max(1000) }),
+  z.object({ a: z.literal('nudge') }),
+]);
+const tuneId = z.string().min(1).max(32);
 
 export const clientMessageSchema = z.discriminatedUnion('t', [
   /** First message on every (re)connect. */
@@ -78,6 +103,25 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('emote'), emote: z.enum(EMOTES) }),
   /** Starts or stops dancing, where the area allows it. Walking stops it too. */
   z.object({ t: z.literal('dance'), on: z.boolean() }),
+  /** Lights a cigarette or puts it out, where the area allows it. Walking puts it out too. */
+  z.object({ t: z.literal('smoke'), on: z.boolean() }),
+  /** Pets someone's pet (`owner` is whose pet it is); everyone sees it purr. */
+  z.object({ t: z.literal('pat'), owner: userId }),
+  /** Something done at one of the room's game tables. */
+  z.object({ t: z.literal('table'), kind: z.enum(TABLE_GAMES), action: tableAction }),
+  /** Queues a song on the jukebox: a YouTube link or video id. */
+  z.object({ t: z.literal('tune'), link: z.string().min(1).max(200) }),
+  /** Asks to skip the song playing (its id), or takes back your own queued one. */
+  z.object({ t: z.literal('skip'), id: tuneId }),
+  /** A player found how long the song playing is, in seconds. */
+  z.object({
+    t: z.literal('tuneLength'),
+    id: tuneId,
+    seconds: z
+      .number()
+      .positive()
+      .max(JUKEBOX.maxSeconds * 2),
+  }),
   /** The sender's study timer ran out: everyone in the room sees them celebrate. */
   z.object({ t: z.literal('finished') }),
   /** Asks someone in the same area to come to the sender's private room. */
@@ -107,6 +151,7 @@ export type PlayerSnapshot = {
   status: StudyStatus;
   lines: StatusLines;
   dancing: boolean;
+  smoking: boolean;
 };
 
 export type ErrorCode =
@@ -122,7 +167,13 @@ export type ErrorCode =
   /** This area does not allow that, e.g. whispers in the library. */
   | 'not_allowed'
   /** Someone else already sits there. */
-  | 'seat_taken';
+  | 'seat_taken'
+  /** Not a YouTube link, or a video that cannot be played here. */
+  | 'tune_bad'
+  /** The queue is full, or the sender already has songs waiting. */
+  | 'tune_full'
+  /** The video is longer than the jukebox takes. */
+  | 'tune_long';
 
 export type ServerMessage =
   | {
@@ -150,6 +201,14 @@ export type ServerMessage =
   /** Sent to the person poked and to whoever poked them. */
   | { t: 'poked'; from: string; to: string }
   | { t: 'danced'; id: string; on: boolean }
+  | { t: 'smoked'; id: string; on: boolean }
+  /** Someone (`id`) petted the pet of `owner`. */
+  | { t: 'patted'; id: string; owner: string }
+  /** A game table changed (null: nobody sits at it any more). */
+  | { t: 'table'; kind: TableKind; table: Table | null }
+  | { t: 'tableError'; kind: TableKind; code: TableError }
+  /** The jukebox's queue and song; sent on arrival and whenever it changes. */
+  | { t: 'jukebox'; state: JukeboxState }
   /** Sent to both the sender and the receiver. */
   | { t: 'whispered'; from: string; to: string; text: string; at: number }
   /** Someone's study timer ran out. */

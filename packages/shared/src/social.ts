@@ -9,6 +9,7 @@ import {
   type PetSex,
 } from './character';
 import { containsLink } from './rules';
+import { DOINGS, MOODS, STATUS_LIMITS, VIBES, type Doing, type Mood, type Vibe } from './status';
 import { normalizeChat } from './text';
 import type { AreaId } from './world';
 
@@ -52,6 +53,14 @@ export const socialClientSchema = z.discriminatedUnion('t', [
       .string()
       .regex(/^[A-Z2-9]{6}$/)
       .optional(),
+    /** The status lines, shortened, for friends' phones. */
+    vibe: z.enum(VIBES).nullable().optional(),
+    mood: z.enum(MOODS).nullable().optional(),
+    doing: z.enum(DOINGS).nullable().optional(),
+    note: z
+      .string()
+      .max(STATUS_LIMITS.announcement * 2)
+      .optional(),
   }),
   /** Sends a request, or accepts theirs if they already asked. */
   z.object({ t: z.literal('befriend'), to: userId }),
@@ -70,6 +79,8 @@ export const socialClientSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('history'), with: userId }),
   /** Marks a conversation read, e.g. when a message arrives while it is open. */
   z.object({ t: z.literal('read'), with: userId }),
+  /** Makes a friend's phone buzz wherever they are: "come say hi". */
+  z.object({ t: z.literal('buzz'), to: userId }),
 ]);
 
 export type SocialClientMessage = z.infer<typeof socialClientSchema>;
@@ -85,6 +96,17 @@ export type Friend = {
   area: AreaId | null;
   /** Phone messages from them not read yet. */
   unread: number;
+  /** The rest is only shared between friends, while they are online. */
+  studying?: boolean;
+  vibe?: Vibe | null;
+  mood?: Mood | null;
+  doing?: Doing | null;
+  /** Their announcement line. */
+  note?: string;
+  /** The private room they are in, so a friend can ask to come. */
+  room?: string | null;
+  /** When they were last online, for friends who are not. */
+  seenAt?: number | null;
 };
 
 export type DirectMessage = {
@@ -124,8 +146,15 @@ export type SocialServerMessage =
   | { t: 'friendEvent'; kind: 'request' | 'accepted'; id: string; name: string }
   /** A phone message, sent to both ends so every open tab shows it. */
   | { t: 'dm'; message: DirectMessage }
-  /** The newest messages of one conversation, oldest first. */
-  | { t: 'history'; with: string; messages: DirectMessage[] }
+  /**
+   * The newest messages of one conversation, oldest first; `seenUpTo` is the
+   * newest of the player's own messages the friend has read.
+   */
+  | { t: 'history'; with: string; messages: DirectMessage[]; seenUpTo: number }
+  /** A friend read the player's messages up to this one. */
+  | { t: 'seen'; by: string; upTo: number }
+  /** A friend buzzed the player's phone. */
+  | { t: 'buzzed'; from: string; name: string }
   /**
    * How lively the building is: everyone online, how many sit at a table, and
    * the pets waiting at the library door for their people.

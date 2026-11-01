@@ -14,14 +14,21 @@ export type AreaRules = {
   effectsVisible: boolean;
   /** Friend requests and mentions may play a sound. */
   notifySound: boolean;
-  /** Whispers (private messages) can be sent. */
+  /** Whispers to someone standing in the same room can be sent. */
   dmAllowed: boolean;
+  /**
+   * The phone works: messages to friends anywhere in the building. Everywhere,
+   * the library too, where it only buzzes (see `notifySound`).
+   */
+  phone: boolean;
   /** A room chat panel next to the bubbles; everywhere but the library. */
   chatLog: boolean;
   /** People may dance here. */
   dance: boolean;
   /** Pets may come in; elsewhere they wait at the door. */
   pets: boolean;
+  /** People may light a cigarette here. */
+  smoke: boolean;
 };
 
 /** Private rooms are for the people who were invited: they talk freely, like the smoking room. */
@@ -36,6 +43,8 @@ const PRIVATE_ROOM: AreaRules = {
   chatLog: true,
   dance: true,
   pets: true,
+  phone: true,
+  smoke: false,
 };
 
 export const AREA_RULES: Record<AreaId, AreaRules> = {
@@ -54,6 +63,8 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     chatLog: false,
     dance: false,
     pets: false,
+    phone: true,
+    smoke: false,
   },
   hall: {
     maxChars: 200,
@@ -66,6 +77,8 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     chatLog: true,
     dance: true,
     pets: true,
+    phone: true,
+    smoke: false,
   },
   smoking: {
     maxChars: 300,
@@ -78,6 +91,8 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     chatLog: true,
     dance: true,
     pets: true,
+    phone: true,
+    smoke: true,
   },
 };
 

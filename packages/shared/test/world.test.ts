@@ -137,7 +137,7 @@ describe('findPath', () => {
   });
 
   it('walks around the reception desk', () => {
-    const path = findPath(grid, { x: 11, y: 8 }, { x: 13, y: 8 });
+    const path = findPath(grid, { x: 11, y: 8 }, { x: 14, y: 8 });
     expect(path?.length).toBeGreaterThan(2);
     expect(path?.every((p) => grid.isWalkable(p))).toBe(true);
   });
@@ -159,7 +159,7 @@ describe('findPath', () => {
   });
 
   it('never cuts the corner of a blocked tile', () => {
-    const path = findPath(grid, { x: 11, y: 8 }, { x: 13, y: 8 }) ?? [];
+    const path = findPath(grid, { x: 11, y: 8 }, { x: 14, y: 8 }) ?? [];
     let from = { x: 11, y: 8 };
     for (const step of path) {
       if (step.x !== from.x && step.y !== from.y) {
@@ -210,12 +210,12 @@ describe('smoothPath', () => {
 
   it('keeps corners where a straight line would hit something', () => {
     const from = { x: 11, y: 8 };
-    const path = findPath(grid, from, { x: 13, y: 8 }) ?? [];
+    const path = findPath(grid, from, { x: 14, y: 8 }) ?? [];
     const route = smoothPath(grid, { x: 11.5, y: 8.5 }, path);
     expect(route.length).toBeGreaterThan(1);
     let at = { x: 11.5, y: 8.5 };
     for (const point of route) {
-      expect(hasClearLine(grid, at, point, { x: 13, y: 8 })).toBe(true);
+      expect(hasClearLine(grid, at, point, { x: 14, y: 8 })).toBe(true);
       at = point;
     }
   });

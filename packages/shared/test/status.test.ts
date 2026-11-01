@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { cleanStatusLines, EMPTY_LINES, hasStatusLines, parseClientMessage } from '../src';
 
 describe('status lines', () => {
+  it('keeps the vibe, and takes lines without one from older clients', () => {
+    expect(cleanStatusLines({ ...EMPTY_LINES, vibe: 'buddy' })?.vibe).toBe('buddy');
+    const older: Partial<typeof EMPTY_LINES> = { ...EMPTY_LINES };
+    delete older.vibe;
+    expect(cleanStatusLines(older as typeof EMPTY_LINES)?.vibe).toBeNull();
+    expect(hasStatusLines({ ...EMPTY_LINES, vibe: 'chat' })).toBe(true);
+  });
+
   it('trims and cuts every line to its length', () => {
     const lines = cleanStatusLines({
       announcement: '  we need   3 more people for our tuesday room, please  ',
@@ -16,6 +24,7 @@ describe('status lines', () => {
       doingNote: '1984 by george orwel',
       mood: null,
       moodNote: '',
+      vibe: null,
     });
   });
 

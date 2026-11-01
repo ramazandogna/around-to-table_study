@@ -21,6 +21,14 @@ export type Doing = (typeof DOINGS)[number];
 export const MOODS = ['happy', 'calm', 'focused', 'tired', 'sad', 'excited', 'anxious'] as const;
 export type Mood = (typeof MOODS)[number];
 
+/**
+ * How open someone is to company right now, over their head and on their
+ * friends' phones: up for a chat, looking for someone to study with, or
+ * heads down (say hi later).
+ */
+export const VIBES = ['chat', 'buddy', 'quiet'] as const;
+export type Vibe = (typeof VIBES)[number];
+
 export const STATUS_LIMITS = { announcement: 40, note: 20 } as const;
 
 export type StatusLines = {
@@ -30,7 +38,11 @@ export type StatusLines = {
   doingNote: string;
   mood: Mood | null;
   moodNote: string;
+  vibe: Vibe | null;
 };
+
+/** Lines as they come over the wire: older clients send no vibe. */
+export type IncomingLines = Omit<StatusLines, 'vibe'> & { vibe?: Vibe | null | undefined };
 
 export const EMPTY_LINES: StatusLines = {
   announcement: '',
@@ -38,10 +50,11 @@ export const EMPTY_LINES: StatusLines = {
   doingNote: '',
   mood: null,
   moodNote: '',
+  vibe: null,
 };
 
 /** Trims and shortens every line; null when any of them carries a link (no ads over heads). */
-export function cleanStatusLines(lines: StatusLines): StatusLines | null {
+export function cleanStatusLines(lines: IncomingLines): StatusLines | null {
   const clean = (text: string, max: number) => normalizeChat(text, max) ?? '';
   const result: StatusLines = {
     announcement: clean(lines.announcement, STATUS_LIMITS.announcement),
@@ -49,13 +62,16 @@ export function cleanStatusLines(lines: StatusLines): StatusLines | null {
     doingNote: lines.doing ? clean(lines.doingNote, STATUS_LIMITS.note) : '',
     mood: lines.mood,
     moodNote: lines.mood ? clean(lines.moodNote, STATUS_LIMITS.note) : '',
+    vibe: lines.vibe ?? null,
   };
   const texts = [result.announcement, result.doingNote, result.moodNote];
   return texts.some(containsLink) ? null : result;
 }
 
 export function hasStatusLines(lines: StatusLines): boolean {
-  return lines.announcement !== '' || lines.doing !== null || lines.mood !== null;
+  return (
+    lines.announcement !== '' || lines.doing !== null || lines.mood !== null || lines.vibe !== null
+  );
 }
 
 /** Quick feelings shown over the head for a moment. */

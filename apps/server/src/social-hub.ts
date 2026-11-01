@@ -39,12 +39,20 @@ type Member = {
   /** When the socket connected, for telling vanished ones apart (see `alarm`). */
   since?: number;
   /** The private room they are in, if any. */
-  room?: string;
+  room?: string | undefined;
+  /** Their status lines in short, for friends' phones. */
+  lines?: Pick<Friend, 'vibe' | 'mood' | 'doing' | 'note'>;
   changes: RateWindow;
   messages: RateWindow;
 };
 
-type FriendRow = { other: string; name: string; accepted: number; requested_by: string };
+type FriendRow = {
+  other: string;
+  name: string;
+  accepted: number;
+  requested_by: string;
+  seen_at: number;
+};
 
 type MessageRow = { id: number; sender: string; text: string; at: number };
 
@@ -313,8 +321,13 @@ export class SocialHub extends DurableObject<Env> {
 
   private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void {
     if (message.t === 'where') {
-      const moved = me.area !== message.area;
-      ws.serializeAttachment({
+      const lines = {
+        vibe: message.vibe ?? null,
+        mood: message.mood ?? null,
+        doing: message.doing ?? null,
+        note: message.note?.slice(0, 80) ?? '',
+      };
+      const next: Member = {
         ...me,
         area: message.area,
         studying: message.studying ?? false,
@@ -325,11 +338,16 @@ export class SocialHub extends DurableObject<Env> {
           petSex: message.petSex,
           petAccessory: message.petAccessory,
         },
-      });
+        lines,
+      };
+      ws.serializeAttachment(next);
       this.tellWorld();
-      if (!moved && me.area) return;
-      this.sendList(me.id);
-      this.tellFriends(me.id);
+      const moved = me.area !== message.area;
+      // Friends' phones show where they are, whether they study and how they are.
+      const visible = (m: Member) =>
+        JSON.stringify([m.area, m.studying ?? false, m.room ?? null, m.lines ?? null]);
+      if (moved || !me.area) this.sendList(me.id);
+      if (moved || !me.area || visible(me) !== visible(next)) this.tellFriends(me.id);
       return;
     }
     if (message.t === 'dm') return this.dm(ws, me, message.to, message.text);
@@ -338,11 +356,12 @@ export class SocialHub extends DurableObject<Env> {
       this.markRead(me.id, message.with);
       return this.sendList(me.id);
     }
+    if (message.t === 'buzz') return this.buzz(ws, me, message.to);
     const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
     if (!changes) return send(ws, { t: 'error', code: 'rate_limited' });
     ws.serializeAttachment({ ...me, changes });
     if (message.t === 'befriend') this.befriend(ws, me, message.to);
-    else this.unfriend(me.id, message.id);
+    else if (message.t === 'unfriend') this.unfriend(me.id, message.id);
   }
 
   private befriend(ws: WebSocket, me: Member, to: string): void {
@@ -383,8 +402,7 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   private dm(ws: WebSocket, me: Member, to: string, raw: string): void {
-    // The library is quiet: the phone can only receive there.
-    if (me.area && !AREA_RULES[me.area].dmAllowed) {
+    if (me.area && !AREA_RULES[me.area].phone) {
       return send(ws, { t: 'error', code: 'phone_silent' });
     }
     if (!this.areFriends(me.id, to)) return send(ws, { t: 'error', code: 'not_friends' });
@@ -446,19 +464,48 @@ export class SocialHub extends DurableObject<Env> {
         text: row.text,
         at: row.at,
       }));
-    send(ws, { t: 'history', with: other, messages });
+    const seenUpTo =
+      this.sql
+        .exec<{ id: number | null }>(
+          'SELECT MAX(id) AS id FROM messages WHERE a = ? AND b = ? AND sender = ? AND read = 1',
+          a,
+          b,
+          me,
+        )
+        .toArray()[0]?.id ?? 0;
+    send(ws, { t: 'history', with: other, messages, seenUpTo });
     this.markRead(me, other);
     this.sendList(me);
   }
 
+  /** Marks what the other sent as read, and tells them how far it was read. */
   private markRead(me: string, other: string): void {
     const [a, b] = friendPair(me, other);
+    const newest = this.sql
+      .exec<{ id: number | null }>(
+        'SELECT MAX(id) AS id FROM messages WHERE a = ? AND b = ? AND sender = ? AND read = 0',
+        a,
+        b,
+        other,
+      )
+      .toArray()[0]?.id;
+    if (!newest) return;
     this.sql.exec(
       'UPDATE messages SET read = 1 WHERE a = ? AND b = ? AND sender = ? AND read = 0',
       a,
       b,
       other,
     );
+    this.sendTo(other, { t: 'seen', by: me, upTo: newest });
+  }
+
+  /** A buzz on a friend's phone: "come say hi". It shares the messages' budget. */
+  private buzz(ws: WebSocket, me: Member, to: string): void {
+    if (!this.areFriends(me.id, to)) return send(ws, { t: 'error', code: 'not_friends' });
+    const messages = takeToken(me.messages, Date.now(), MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
+    if (!messages) return send(ws, { t: 'error', code: 'rate_limited' });
+    ws.serializeAttachment({ ...me, messages });
+    this.sendTo(to, { t: 'buzzed', from: me.id, name: me.name });
   }
 
   private areFriends(me: string, other: string): boolean {
@@ -502,6 +549,7 @@ export class SocialHub extends DurableObject<Env> {
       // Already closed.
     }
     if (!me) return;
+    this.sql.exec('UPDATE users SET seen_at = ? WHERE id = ?', Date.now(), me.id);
     this.closing = ws;
     this.tellFriends(me.id);
     this.closing = null;
@@ -560,7 +608,8 @@ export class SocialHub extends DurableObject<Env> {
   private rows(id: string): FriendRow[] {
     return this.sql
       .exec<FriendRow>(
-        `SELECT u.id AS other, u.name AS name, f.accepted AS accepted, f.requested_by AS requested_by
+        `SELECT u.id AS other, u.name AS name, f.accepted AS accepted,
+                f.requested_by AS requested_by, u.seen_at AS seen_at
          FROM friends f JOIN users u ON u.id = CASE WHEN f.a = ? THEN f.b ELSE f.a END
          WHERE f.a = ? OR f.b = ?
          ORDER BY u.name`,
@@ -573,21 +622,30 @@ export class SocialHub extends DurableObject<Env> {
 
   private list(id: string): Friend[] {
     const unread = this.unreadFor(id);
-    return this.rows(id).map((row) => ({
-      id: row.other,
-      name: row.name,
-      state: row.accepted ? 'friend' : row.requested_by === id ? 'outgoing' : 'incoming',
-      area: row.accepted ? this.areaOf(row.other) : null,
-      unread: row.accepted ? (unread.get(row.other) ?? 0) : 0,
-    }));
+    return this.rows(id).map((row): Friend => {
+      const state = row.accepted ? 'friend' : row.requested_by === id ? 'outgoing' : 'incoming';
+      const base = { id: row.other, name: row.name, state, area: null, unread: 0 } as const;
+      if (!row.accepted) return base;
+      const member = this.presenceOf(row.other);
+      if (!member?.area)
+        return { ...base, unread: unread.get(row.other) ?? 0, seenAt: row.seen_at };
+      return {
+        ...base,
+        area: member.area,
+        unread: unread.get(row.other) ?? 0,
+        studying: member.studying ?? false,
+        room: member.room ?? null,
+        ...member.lines,
+      };
+    });
   }
 
-  /** Where someone is right now, from any of their open sockets. */
-  private areaOf(id: string): AreaId | null {
+  /** Someone as they are right now, from any of their open sockets. */
+  private presenceOf(id: string): Member | null {
     for (const ws of this.ctx.getWebSockets(id)) {
       if (ws === this.closing) continue;
       const member = ws.deserializeAttachment() as Member | null;
-      if (member?.area) return member.area;
+      if (member?.area) return member;
     }
     return null;
   }

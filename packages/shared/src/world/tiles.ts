@@ -27,6 +27,12 @@ export const TILE = {
   arcade: 'G',
   clawMachine: 'J',
   vendingMachine: 'V',
+  /** A dartboard in its cabinet against the wall: two to four people play darts. */
+  dartboard: 'X',
+  /** A round card table with dice: the smoking room's table games. */
+  gameTable: 'D',
+  /** The jukebox: people queue songs for the room. */
+  jukebox: 'U',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];

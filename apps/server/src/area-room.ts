@@ -1,6 +1,16 @@
 import {
   AREA_RULES,
   applyAreaRules,
+  EMPTY_JUKEBOX,
+  JUKEBOX,
+  parseYouTubeId,
+  skipsNeeded,
+  songOver,
+  TABLE_GAMES,
+  tableAction,
+  type JukeboxState,
+  type TableKind,
+  type TableRecord,
   cleanRoomName,
   cleanStatusLines,
   EMPTY_LINES,
@@ -42,6 +52,7 @@ type Connection = {
   lines: StatusLines;
   lastEmoteAt: number;
   dancing: boolean;
+  smoking: boolean;
   /** When the socket connected, for telling vanished ones apart (see `sweep`). */
   since: number;
 };
@@ -59,6 +70,10 @@ const CLOSE_REPLACED = 4000;
 const POKE_COOLDOWN_MS = 10_000;
 const EMOTE_COOLDOWN_MS = 1_500;
 const OPENED_KEY = 'opened';
+const JUKEBOX_KEY = 'jukebox';
+const tableKey = (kind: TableKind) => `table:${kind}`;
+/** Songs queued per person per minute, on top of the queue's own limits. */
+const TUNES_PER_MINUTE = 4;
 /** How often sockets that went quiet are looked for while anyone is connected. */
 const SWEEP_MS = 30_000;
 
@@ -72,6 +87,11 @@ export class AreaRoom extends DurableObject<Env> {
   private grids = new Map<AreaId, AreaGrid>();
   /** Renovation strips opened so far; loaded from storage on the first message. */
   private opened: number | null = null;
+  /** The game tables, loaded from storage on the first message (they outlive hibernation). */
+  private tables: Map<TableKind, TableRecord> | null = null;
+  private jukebox: JukeboxState | null = null;
+  /** When each person last queued songs, for `TUNES_PER_MINUTE`. */
+  private readonly tuneWindows = new Map<string, RateWindow>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -103,6 +123,7 @@ export class AreaRoom extends DurableObject<Env> {
       lines: EMPTY_LINES,
       lastEmoteAt: 0,
       dancing: false,
+      smoking: false,
       since: Date.now(),
     });
     await this.armSweep();
@@ -114,6 +135,7 @@ export class AreaRoom extends DurableObject<Env> {
     const me = this.load(ws);
     if (!message || !me) return this.send(ws, { t: 'error', code: 'bad_message' });
     this.opened ??= (await this.ctx.storage.get<number>(OPENED_KEY)) ?? 0;
+    await this.loadPlay();
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
     const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
     this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
@@ -134,7 +156,22 @@ export class AreaRoom extends DurableObject<Env> {
       const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
       if (!me || isStale(now, me.since ?? 0, ping)) this.leave(ws);
     }
+    await this.loadPlay();
+    this.advanceIfOver(now);
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
+  }
+
+  /** Loads the tables and the jukebox once per wake-up. */
+  private async loadPlay(): Promise<void> {
+    if (!this.tables) {
+      const stored = await this.ctx.storage.get<TableRecord>(TABLE_GAMES.map(tableKey));
+      this.tables = new Map();
+      for (const kind of TABLE_GAMES) {
+        const record = stored.get(tableKey(kind));
+        if (record) this.tables.set(kind, record);
+      }
+    }
+    this.jukebox ??= (await this.ctx.storage.get<JukeboxState>(JUKEBOX_KEY)) ?? EMPTY_JUKEBOX;
   }
 
   /** Someone started over: everyone they were before leaves the room at once. */
@@ -142,10 +179,14 @@ export class AreaRoom extends DurableObject<Env> {
     for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) this.leave(ws);
   }
 
+  /** Wakes up to sweep quiet sockets, or sooner when the jukebox's song ends. */
   private async armSweep(): Promise<void> {
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now() + SWEEP_MS);
-    }
+    const playing = this.jukebox?.now;
+    const songEnd =
+      playing?.seconds != null ? playing.startedAt + (playing.seconds + 4) * 1000 : Infinity;
+    const wanted = Math.min(Date.now() + SWEEP_MS, songEnd);
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current > wanted) await this.ctx.storage.setAlarm(wanted);
   }
 
   override async webSocketError(ws: WebSocket): Promise<void> {
@@ -183,6 +224,13 @@ export class AreaRoom extends DurableObject<Env> {
         });
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
         this.grow(me.area);
+        if (me.area === 'smoking') {
+          this.advanceIfOver(now);
+          for (const [kind, record] of this.tables ?? []) {
+            this.send(ws, { t: 'table', kind, table: record.table });
+          }
+          this.send(ws, { t: 'jukebox', state: this.jukebox ?? EMPTY_JUKEBOX });
+        }
         return;
       }
       case 'move': {
@@ -202,7 +250,7 @@ export class AreaRoom extends DurableObject<Env> {
         // Standing up clears what was on the table and walking stops a dance;
         // everyone else does the same on "moved".
         const study = { ...me.study, activity: null };
-        this.save(ws, { ...me, moves, tile: message.to, study, dancing: false });
+        this.save(ws, { ...me, moves, tile: message.to, study, dancing: false, smoking: false });
         this.broadcast({ t: 'moved', id: me.id, to: message.to }, ws);
         return;
       }
@@ -260,8 +308,56 @@ export class AreaRoom extends DurableObject<Env> {
         if (message.on && !AREA_RULES[me.area].dance) {
           return this.send(ws, { t: 'error', code: 'not_allowed' });
         }
-        this.save(ws, { ...me, dancing: message.on });
+        // One thing at a time: dancing puts the cigarette out.
+        this.save(ws, { ...me, dancing: message.on, smoking: false });
+        if (me.smoking) this.broadcast({ t: 'smoked', id: me.id, on: false });
         this.broadcast({ t: 'danced', id: me.id, on: message.on });
+        return;
+      }
+      case 'smoke': {
+        if (!me.joined || me.smoking === message.on) return;
+        if (message.on && !AREA_RULES[me.area].smoke) {
+          return this.send(ws, { t: 'error', code: 'not_allowed' });
+        }
+        this.save(ws, { ...me, smoking: message.on, dancing: false });
+        if (me.dancing) this.broadcast({ t: 'danced', id: me.id, on: false });
+        this.broadcast({ t: 'smoked', id: me.id, on: message.on });
+        return;
+      }
+      case 'pat': {
+        // Shares the emote's budget: a stroke every second or so.
+        if (!me.joined || now - me.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
+        this.save(ws, { ...me, lastEmoteAt: now });
+        this.broadcast({ t: 'patted', id: me.id, owner: message.owner });
+        return;
+      }
+      case 'table': {
+        if (!me.joined || me.area !== 'smoking' || !this.tables) return;
+        this.playTable(ws, me, message.kind, message.action, now);
+        return;
+      }
+      case 'tune': {
+        if (!me.joined || me.area !== 'smoking') return;
+        void this.addTune(ws, me, message.link);
+        return;
+      }
+      case 'skip': {
+        if (!me.joined || me.area !== 'smoking') return;
+        this.skipTune(me, message.id, now);
+        return;
+      }
+      case 'tuneLength': {
+        const jukebox = this.jukebox;
+        const playing = jukebox?.now;
+        if (!me.joined || !jukebox || !playing) return;
+        if (playing.id !== message.id || playing.seconds !== null) return;
+        if (message.seconds > JUKEBOX.maxSeconds) {
+          this.nextTune(now);
+          this.send(ws, { t: 'error', code: 'tune_long' });
+          return;
+        }
+        this.setJukebox({ ...jukebox, now: { ...playing, seconds: message.seconds } });
+        void this.armSweep();
         return;
       }
       case 'finished': {
@@ -328,6 +424,105 @@ export class AreaRoom extends DurableObject<Env> {
     }
   }
 
+  private playTable(
+    ws: WebSocket,
+    me: Connection,
+    kind: TableKind,
+    action: Parameters<typeof tableAction>[2],
+    now: number,
+  ): void {
+    const tables = this.tables;
+    if (!tables) return;
+    const before = tables.get(kind) ?? null;
+    const { record, error } = tableAction(kind, before, action, {
+      id: me.id,
+      name: me.name,
+      now,
+      random: Math.random,
+    });
+    if (error) return this.send(ws, { t: 'tableError', kind, code: error });
+    if (record === before) return;
+    if (record) {
+      tables.set(kind, record);
+      void this.ctx.storage.put(tableKey(kind), record);
+    } else {
+      tables.delete(kind);
+      void this.ctx.storage.delete(tableKey(kind));
+    }
+    this.broadcast({ t: 'table', kind, table: record?.table ?? null });
+  }
+
+  /** Queues a song after asking YouTube whether the video exists and may be embedded. */
+  private async addTune(ws: WebSocket, me: Connection, link: string): Promise<void> {
+    const video = parseYouTubeId(link);
+    if (!video) return this.send(ws, { t: 'error', code: 'tune_bad' });
+    const now = Date.now();
+    const window = takeToken(
+      this.tuneWindows.get(me.id) ?? { start: 0, count: 0 },
+      now,
+      TUNES_PER_MINUTE,
+      60_000,
+    );
+    if (!window) return this.send(ws, { t: 'error', code: 'rate_limited' });
+    this.tuneWindows.set(me.id, window);
+    const state = this.jukebox ?? EMPTY_JUKEBOX;
+    const mine = state.queue.filter((tune) => tune.by === me.id).length;
+    if (state.queue.length >= JUKEBOX.queue || mine >= JUKEBOX.perPerson) {
+      return this.send(ws, { t: 'error', code: 'tune_full' });
+    }
+    const title = await videoTitle(video);
+    if (title === null) return this.send(ws, { t: 'error', code: 'tune_bad' });
+    const tune = { id: crypto.randomUUID().slice(0, 8), video, title, by: me.id, byName: me.name };
+    // The queue may have moved on while YouTube answered.
+    const latest = this.jukebox ?? EMPTY_JUKEBOX;
+    if (latest.now) this.setJukebox({ ...latest, queue: [...latest.queue, tune] });
+    else
+      this.setJukebox({
+        now: { ...tune, startedAt: Date.now(), seconds: null, skips: [] },
+        queue: [],
+      });
+  }
+
+  /**
+   * The person who queued a song may skip it or take it back; anyone else asks,
+   * and half the room asking skips it.
+   */
+  private skipTune(me: Connection, id: string, now: number): void {
+    const state = this.jukebox ?? EMPTY_JUKEBOX;
+    const queued = state.queue.find((tune) => tune.id === id);
+    if (queued) {
+      if (queued.by !== me.id) return;
+      this.setJukebox({ ...state, queue: state.queue.filter((tune) => tune.id !== id) });
+      return;
+    }
+    const playing = state.now;
+    if (!playing || playing.id !== id) return;
+    if (playing.by === me.id) return this.nextTune(now);
+    const skips = playing.skips.includes(me.id) ? playing.skips : [...playing.skips, me.id];
+    if (skips.length >= skipsNeeded(this.players(now).length)) return this.nextTune(now);
+    this.setJukebox({ ...state, now: { ...playing, skips } });
+  }
+
+  private advanceIfOver(now: number): void {
+    const playing = this.jukebox?.now;
+    if (playing && songOver(playing, now)) this.nextTune(now);
+  }
+
+  /** Starts the next song in the queue, or stops when there is none. */
+  private nextTune(now: number): void {
+    const [next, ...rest] = (this.jukebox ?? EMPTY_JUKEBOX).queue;
+    this.setJukebox({
+      now: next ? { ...next, startedAt: now, seconds: null, skips: [] } : null,
+      queue: rest,
+    });
+  }
+
+  private setJukebox(state: JukeboxState): void {
+    this.jukebox = state;
+    void this.ctx.storage.put(JUKEBOX_KEY, state);
+    this.broadcast({ t: 'jukebox', state });
+  }
+
   /** The socket of someone else in this area who may be disturbed, or null after telling the sender why not. */
   private reach(ws: WebSocket, me: Connection, id: string): WebSocket | null {
     const target =
@@ -381,6 +576,12 @@ export class AreaRoom extends DurableObject<Env> {
     if (me?.joined) {
       this.save(ws, { ...me, joined: false });
       this.broadcast({ t: 'left', id: me.id }, ws);
+      // Whoever leaves the room gets up from its tables too.
+      for (const [kind, record] of this.tables ?? []) {
+        if (record.table.players.some((p) => p.id === me.id)) {
+          this.playTable(ws, me, kind, { a: 'leave' }, Date.now());
+        }
+      }
     }
     try {
       ws.close();
@@ -447,6 +648,7 @@ export class AreaRoom extends DurableObject<Env> {
           lines: EMPTY_LINES,
           lastEmoteAt: 0,
           dancing: false,
+          smoking: false,
           ...stored,
         } as Connection)
       : null;
@@ -468,6 +670,7 @@ function snapshot(c: Connection, now: number): PlayerSnapshot {
     status: publicStudy(c.study, now),
     lines: c.lines,
     dancing: c.dancing,
+    smoking: c.smoking,
   };
 }
 
@@ -477,4 +680,22 @@ function publicStudy(study: StoredStudy, now: number): StudyStatus {
     ...study,
     timer: timer ? { remainingMs: Math.max(0, timer.endsAt - now), totalMs: timer.totalMs } : null,
   };
+}
+
+/**
+ * A video's title from YouTube's oEmbed, which also tells videos that may not
+ * be embedded (null). When YouTube cannot be reached the song is still taken.
+ */
+async function videoTitle(video: string): Promise<string | null> {
+  const page = `https://www.youtube.com/watch?v=${video}`;
+  try {
+    const response = await fetch(
+      `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(page)}`,
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as { title?: unknown };
+    return typeof body.title === 'string' ? body.title.slice(0, 120) : 'YouTube';
+  } catch {
+    return 'YouTube';
+  }
 }
