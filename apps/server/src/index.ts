@@ -27,17 +27,54 @@ const ROOM_PATH = /^\/api\/rooms\/([A-Za-z2-9]+)(\/enter)?$/;
 
 const error = (code: string, status: number) => Response.json({ error: code }, { status });
 
+/**
+ * The key tokens are signed with. The access password is part of it, so a new
+ * password (every deploy) ends every session and room pass made before it.
+ */
 function secretOf(env: Env): string | null {
   return env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET_LENGTH
-    ? env.SESSION_SECRET
+    ? `${env.SESSION_SECRET}:${env.ACCESS_PASSWORD ?? ''}`
     : null;
+}
+
+/** Compares two strings in time that does not depend on where they differ. */
+function sameText(a: string, b: string): boolean {
+  const left = new TextEncoder().encode(a);
+  const right = new TextEncoder().encode(b);
+  let diff = left.length ^ right.length;
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+/**
+ * Whether the door needs the password, and whether a token the browser holds
+ * still opens it (after a new password, it does not).
+ */
+async function access(request: Request, env: Env): Promise<Response> {
+  const secret = secretOf(env);
+  const token = new URL(request.url).searchParams.get('token') ?? '';
+  const valid = !!secret && !!token && (await verifySession(token, secret)) !== null;
+  return Response.json({ required: !!env.ACCESS_PASSWORD, valid });
 }
 
 async function createGuest(request: Request, env: Env): Promise<Response> {
   const secret = secretOf(env);
   if (!secret) return error('server_misconfigured', 500);
 
-  const body = (await request.json().catch(() => null)) as { name?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as {
+    name?: unknown;
+    password?: unknown;
+  } | null;
+  if (env.ACCESS_PASSWORD) {
+    const address = request.headers.get('cf-connecting-ip') ?? 'local';
+    if (!(await env.SOCIAL.getByName('hub').passwordTry(address))) {
+      return error('too_many_tries', 429);
+    }
+    const password = typeof body?.password === 'string' ? body.password.trim() : '';
+    if (!sameText(password, env.ACCESS_PASSWORD)) return error('wrong_password', 403);
+  }
   const name = typeof body?.name === 'string' ? normalizeName(body.name) : null;
   if (!name) return error('invalid_name', 400);
 
@@ -206,6 +243,7 @@ export default {
 
     if (pathname === '/api/health') return Response.json(createHealthResponse());
     if (pathname === '/api/guest' && request.method === 'POST') return createGuest(request, env);
+    if (pathname === '/api/access') return access(request, env);
 
     if (pathname === '/api/leave' && request.method === 'POST') return leave(request, env);
     if (pathname === '/api/rooms' || pathname.startsWith('/api/rooms/'))

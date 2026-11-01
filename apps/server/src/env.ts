@@ -11,4 +11,9 @@ export interface Env {
    * can make others admins. Set with `wrangler secret put ADMIN_IDS`.
    */
   ADMIN_IDS?: string;
+  /**
+   * The early beta's access password, new with every deploy (see
+   * scripts/deploy.mjs). Unset (local development) leaves the door open.
+   */
+  ACCESS_PASSWORD?: string;
 }

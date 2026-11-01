@@ -2,6 +2,7 @@ import {
   AREA_RULES,
   applyAreaRules,
   cleanRoomRules,
+  DATA_EPOCH,
   EMPTY_JUKEBOX,
   isRoomArea,
   type RoomRules,
@@ -73,6 +74,7 @@ const CLOSE_REPLACED = 4000;
 const POKE_COOLDOWN_MS = 10_000;
 const EMOTE_COOLDOWN_MS = 1_500;
 const OPENED_KEY = 'opened';
+const EPOCH_KEY = 'epoch';
 const JUKEBOX_KEY = 'jukebox';
 const tableKey = (kind: TableKind) => `table:${kind}`;
 /** Songs queued per person per minute, on top of the queue's own limits. */
@@ -111,6 +113,12 @@ export class AreaRoom extends DurableObject<Env> {
     super(ctx, env);
     // Heartbeats are answered without waking the object; their time tells live sockets from gone ones.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT.ping, HEARTBEAT.pong));
+    // A new data epoch starts the room over: grown desks, tables, the jukebox, chat cooldowns.
+    void ctx.blockConcurrencyWhile(async () => {
+      if ((await ctx.storage.get<number>(EPOCH_KEY)) === DATA_EPOCH) return;
+      await ctx.storage.deleteAll();
+      await ctx.storage.put(EPOCH_KEY, DATA_EPOCH);
+    });
   }
 
   override async fetch(request: Request): Promise<Response> {

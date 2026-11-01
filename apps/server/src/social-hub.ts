@@ -1,6 +1,8 @@
 import {
   AREA_RULES,
   blockKind,
+  DATA_EPOCH,
+  PASSWORD_TRIES,
   checkProposal,
   cleanDm,
   cleanOffset,
@@ -137,10 +139,13 @@ export class SocialHub extends DurableObject<Env> {
   /** A socket being closed may still be listed for a moment; it no longer counts as online. */
   private closing: WebSocket | null = null;
   private worldTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Access password tries per address (kept while the hub is awake). */
+  private readonly passwordTries = new Map<string, RateWindow>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.startOverIfNeeded();
     // Heartbeats are answered without waking the hub; their time tells live sockets from gone ones.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT.ping, HEARTBEAT.pong));
     this.sql.exec(`
@@ -292,6 +297,49 @@ export class SocialHub extends DurableObject<Env> {
       if (!me || isStale(now, me.since ?? 0, ping)) this.leave(ws);
     }
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
+  }
+
+  /**
+   * A new data epoch starts the building over: every table is dropped once
+   * and made again below, empty.
+   */
+  private startOverIfNeeded(): void {
+    this.sql.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    const row = this.sql
+      .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'epoch'")
+      .toArray()[0];
+    if (Number(row?.value ?? 1) >= DATA_EPOCH) return;
+    for (const table of [
+      'users',
+      'friends',
+      'messages',
+      'rooms',
+      'admins',
+      'blocks',
+      'focus_blocks',
+      'events',
+      'shouts',
+      'room_bans',
+    ]) {
+      this.sql.exec(`DROP TABLE IF EXISTS ${table}`);
+    }
+    this.sql.exec(
+      "INSERT INTO meta (key, value) VALUES ('epoch', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      String(DATA_EPOCH),
+    );
+  }
+
+  /** One more try at the access password from an address; false once it tried too often. */
+  async passwordTry(address: string): Promise<boolean> {
+    const window = takeToken(
+      this.passwordTries.get(address) ?? { start: 0, count: 0 },
+      Date.now(),
+      PASSWORD_TRIES,
+      10 * 60_000,
+    );
+    if (!window) return false;
+    this.passwordTries.set(address, window);
+    return true;
   }
 
   /**

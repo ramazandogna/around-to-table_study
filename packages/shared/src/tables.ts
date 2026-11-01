@@ -5,6 +5,7 @@
  * sent the same state. One table of each game per room.
  *
  * - darts: three darts each, the aim sways across the board; most points wins
+ *   (or, alone, a practice round for a score)
  * - pig: roll as often as you dare, a 1 loses the turn's points; first to 50
  * - guess: a number from 1 to 100, "higher" or "lower" after each try
  */
@@ -13,6 +14,11 @@ export const TABLE_GAMES = ['darts', 'pig', 'guess'] as const;
 export type TableKind = (typeof TABLE_GAMES)[number];
 
 export const TABLE_PLAYERS = { min: 2, max: 4 } as const;
+
+/** Darts can be played alone, for practice; the dice and the number game need company. */
+export function minPlayers(kind: TableKind): number {
+  return kind === 'darts' ? 1 : TABLE_PLAYERS.min;
+}
 /** A turn left alone this long is played for the absent player (a miss, a hold, a pass). */
 export const TURN_MS = 40_000;
 export const DARTS_PER_TURN = 3;
@@ -156,7 +162,7 @@ export function tableAction(
       if (table.players.length === 0) return { record: null };
       if (table.host === ctx.id) table.host = table.players[0]?.id ?? '';
       if (table.phase === 'playing') {
-        if (table.players.length < TABLE_PLAYERS.min) {
+        if (table.players.length < minPlayers(table.kind)) {
           // Left alone at the table: the one who stayed wins.
           table.phase = 'over';
           table.winners = table.players.map((p) => p.id);
@@ -173,7 +179,7 @@ export function tableAction(
     case 'start': {
       if (table.phase !== 'lobby') return { record, error: 'started' };
       if (seat < 0) return { record, error: 'not_seated' };
-      if (table.players.length < TABLE_PLAYERS.min) return { record, error: 'too_few' };
+      if (table.players.length < minPlayers(kind)) return { record, error: 'too_few' };
       table.phase = 'playing';
       table.turn = 0;
       table.turnStartedAt = ctx.now;

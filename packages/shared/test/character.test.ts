@@ -38,14 +38,15 @@ describe('appearance', () => {
     expect(isValidAppearance({ character: 2, skin: 1.5 })).toBe(false);
   });
 
-  it('only lets the pets that are ready walk along', () => {
-    expect(isValidAppearance({ character: 0, pet: 'cat' })).toBe(true);
-    expect(isValidAppearance({ character: 0, pet: 'dog' })).toBe(false);
+  it('lets every pet there is walk along, and nothing else', () => {
+    for (const pet of ['cat', 'dog', 'corgi', 'dachshund', 'shiba', 'rabbit', 'turtle']) {
+      expect(isValidAppearance({ character: 0, pet })).toBe(true);
+    }
     expect(isValidAppearance({ character: 0, pet: 'dragon' })).toBe(false);
-    const hello = { t: 'hello', look: { character: 0, pet: 'cat', top: 2 } };
+    const hello = { t: 'hello', look: { character: 0, pet: 'turtle', top: 2 } };
     expect(parseClientMessage(JSON.stringify(hello))).toEqual(hello);
-    const dog = { t: 'hello', look: { character: 0, pet: 'dog' } };
-    expect(parseClientMessage(JSON.stringify(dog))).toBeNull();
+    const dragon = { t: 'hello', look: { character: 0, pet: 'dragon' } };
+    expect(parseClientMessage(JSON.stringify(dragon))).toBeNull();
   });
 
   it('dresses the pet from fixed lists', () => {

@@ -16,3 +16,13 @@ export const TILE_SIZE = 16;
 export const HEARTBEAT = { ping: 'ping', pong: 'pong' } as const;
 export const HEARTBEAT_MS = 25_000;
 export const STALE_MS = 100_000;
+
+/**
+ * Bumped to start the building over: on the first wake-up after a deploy with
+ * a higher number, the server forgets every guest, friendship, message, room
+ * and number, and browsers forget their character. Accounts come later.
+ */
+export const DATA_EPOCH = 2;
+
+/** Access password attempts per address in ten minutes, before waiting. */
+export const PASSWORD_TRIES = 8;

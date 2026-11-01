@@ -59,8 +59,18 @@ describe('dart scores', () => {
 });
 
 describe('table games', () => {
-  it('needs two people to start and seats at most four', () => {
-    const alone = play('darts', [
+  it('lets darts be played alone, needs two for the others, and seats at most four', () => {
+    const solo = play('darts', [
+      ['ann', { a: 'open' }],
+      ['ann', { a: 'start' }],
+      ['ann', { a: 'throw', x: 0, y: 0 }],
+      ['ann', { a: 'throw', x: 0, y: 0.3 }],
+      ['ann', { a: 'throw', x: 0, y: 2 }],
+    ]);
+    expect(solo.errors[1]).toBeUndefined();
+    expect(solo.record?.table.phase).toBe('over');
+    expect(solo.record?.table.scores).toEqual([70]);
+    const alone = play('pig', [
       ['ann', { a: 'open' }],
       ['ann', { a: 'start' }],
     ]);

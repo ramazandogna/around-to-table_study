@@ -58,12 +58,13 @@ export const PALETTES: Record<OutfitPart, readonly string[]> = {
 };
 
 /**
- * Pets that walk along with their person. Only the ones in PETS_AVAILABLE can
- * be picked for now; the rest are shown as coming soon.
+ * Pets that walk along with their person: a cat, four dogs (a beagle, a corgi
+ * and a dachshund, small, and a shiba), a rabbit and a turtle. Each has its own
+ * ways (see the client's Pet). Ones not in PETS_AVAILABLE show as coming soon.
  */
-export const PETS = ['cat', 'dog', 'rabbit'] as const;
+export const PETS = ['cat', 'dog', 'corgi', 'dachshund', 'shiba', 'rabbit', 'turtle'] as const;
 export type PetKind = (typeof PETS)[number];
-export const PETS_AVAILABLE: readonly PetKind[] = ['cat'];
+export const PETS_AVAILABLE: readonly PetKind[] = PETS;
 
 /** A pet's fur, as hex. Left out, the pet keeps its own colour. Only ever append. */
 export const PET_COLORS = [
