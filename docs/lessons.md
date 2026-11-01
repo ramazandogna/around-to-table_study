@@ -9,6 +9,9 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Check HUD panels against the world labels.** Three's label renderer gives every label its own z-index, so names and signs drew over panels on phones until the label layer got a stacking context of its own.
 - **Test crowds, not just pairs.** Four players on one spot showed what two never did: bubbles stacking and folding, and lines folding into icons.
 - **Locale-aware text from day one.** Lowercasing "IŞIK" letter by letter gave "işık"; the whole message has to be handled at once.
+- **Test on a slow frame, not only a fast one.** The seated "running" legs came from a blend that slipped back towards standing on every other frame; at 60 fps that was an 8 % shiver, on a phone at low frame rate it was half the pose. Logging the blend frame by frame found it, where screenshots on a fast machine never would.
+- **Reproduce a mobile bug on a phone engine before fixing it.** Empty emote buttons could not be reproduced in Chromium or WebKit; the icons that really looked empty were the HUD's 🏷️ and 📜.
+- **A presence count needs a heartbeat.** Hibernated WebSockets stay "open" long after a phone sleeps; test the sweep with a socket that never pings and wait the full timeout.
 
 ## 3D and art
 - **Learn a model's texture layout by rendering it.** Put a labeled grid (and then labeled bands) on the model and look at it from four sides; guessing from the shipped skins was wrong about the torso and arms.
@@ -19,6 +22,9 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Make art decisions before polishing.** Furniture size, chair height and poses are tuned to the character, so a room is polished after its characters are chosen, not before.
 - **Avoid import cycles in `shared`.** Protocol schemas need the status lists and the status code needs text cleanup, so cleanup lives in its own `text.ts`; a cycle would break at load time, not at compile time.
 - **Keep systems apart from art.** Appearance, status and rules are data in `shared`; how they are drawn lives in one client module, so swapping models does not touch the rest.
+- **Look at the atlas before recolouring a model.** Mini Characters are two meshes on one colour atlas with shared swatches, so recolouring had to work per vertex; mapping every swatch to its bone and height first showed which parts could be told apart.
+- **Check a rule on every model, not one.** The recolour looked right on the first character; rendering all twelve side by side found a crutch and a fringe it got wrong.
+- **Read a model's facing from a screenshot.** The laptop's front is the back of its screen, so "turn it to face the person" pointed the screen at the room.
 
 ## Layout and design
 - **Lay rooms out by how people move.** Entrance and main destination on one straight line, service desks facing arrivals, side rooms off the main path, arriving and leaving never crossing.

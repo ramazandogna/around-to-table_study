@@ -2,10 +2,36 @@
 
 Non-obvious technical decisions, newest first.
 
+## 2026-11-01: Presence is kept honest with a heartbeat
+- **Decision:** Both sockets send `ping` every 25 s. The Durable Objects answer it with `setWebSocketAutoResponse`, so they never wake up for it, and an alarm every 30 s drops any socket that has been quiet for more than 100 s (`isStale` in `shared`). "Start over" also calls `POST /api/leave` with this device's token, which closes that guest's sockets everywhere at once.
+- **Why:** The building counted "4 here" while nobody could be seen. Hibernated sockets of phones put to sleep or tabs that vanished without a close frame stayed open for a long time, and starting over only forgot the guest on the device.
+- **Trade-offs:** A phone left in the background disappears from the room after about two minutes and walks back to its chair when it returns. There is no admin "reset the world" button: the sweep makes it unnecessary, and a button for everyone would be abused. If one is ever needed, it should only answer to a secret.
+
+## 2026-11-01: Outfit colours are vertex colours on the white swatch
+- **Decision:** The look keeps its character and adds optional palette indexes for `skin`, `hair`, `top`, `bottom` and `shoes` (left out = as drawn) and an optional `pet`. `world/outfit.ts` sorts every vertex of a character into one of those parts once, from the bone it follows, its height and its colour swatch. A recoloured vertex points its UV at the atlas's white swatch and takes its colour from vertex colours, and each avatar gets its own geometry.
+- **Why:** Each Mini Character is just two meshes on one shared colour atlas, and parts often share a swatch (trousers and a belt), so repainting swatches would recolour the wrong things. Working per vertex keeps eyes, glasses, hats, soles and a crutch as drawn. Old `{ character }` looks stay valid.
+- **Limits:** Hair can be recoloured but not reshaped (each character has one haircut). Where a model draws shoes and trousers in one swatch (two of the men), the shoes are taken as everything below ankle height.
+
+## 2026-11-01: Pets follow their person, and wait outside the library
+- **Decision:** Pets are Kenney "Cube Pets" (CC0), in the same style as the characters. Only the cat can be chosen for now; the dog and the rabbit are shown as "coming soon". `world/Pet.ts` holds the behaviour every kind shares: it follows its person's path about a second behind, potters about when they stand still (stumbling, chasing its tail, bumping into things, pouncing), and waits. `AREA_RULES.pets` keeps them out of the library. The social hub tells the hall which pets are waiting at the library door.
+- **Why:** A pet needs no messages of its own: where it goes follows its person, and its kind travels in the look. Its little antics are picked by each screen on its own, which nobody can tell apart.
+
+## 2026-11-01: The librarian runs on the clock
+- **Decision:** The librarian is an `Avatar` driven by `world/Librarian.ts`. What she does (at her desk, off to a shelf, back, dozing) is worked out from the wall clock in rounds of 150 s, so every visitor sees the same thing with nothing sent. She sits on a staff chair (`Q`) that nobody else can walk onto, and she is not counted in any numbers.
+- **Why:** Simulating her on the server would wake the room's Durable Object every few seconds for nothing. Screens whose clocks differ by a few seconds see her a few seconds apart, which does not matter for a librarian.
+
+## 2026-11-01: A finished session is celebrated, and checked by the server
+- **Decision:** A soft bell rings at each quarter of a study timer for its owner alone, even in the quiet library. At the end the client sends `finished`; the server accepts it only when that person's timer has really run out (with 5 s of grace), clears the timer and broadcasts it. Everyone in the room sees a big burst of stars, the one exception to the library's small, still emotes.
+- **Why:** Finishing is the moment the library is for, and checking it on the server means nobody can celebrate on a loop.
+
+## 2026-11-01: Room chat lines carry the server's time
+- **Decision:** `said` and `whispered` include `at`, the server's clock. The chat shows "name · time" above a run of lines from one person within three minutes.
+- **Why:** Lines without a time were hard to follow once the room had been quiet for a while.
+
 ## 2026-11-01: Kenney Mini Characters replace the painted character
 - **Decision:** Players pick one of the twelve Kenney "Mini Characters" (CC0; six women, six men, each with its own face, hair and outfit). The look is `{ character: index }`. The models came from a GitHub mirror of Kenney's CC0 library, since kenney.nl refuses automated downloads.
 - **Why:** The old single unisex body with a painted skin could not show clearly different women and men. The new kit ships real walk, sit and gesture clips. Studying at a desk, dancing and waving are posed on its simple rig in `poses.ts`.
-- **Trade-off:** Colour customisation is gone for now; looks from before are invalid, so returning players pick a character once.
+- **Trade-off:** Looks from before are invalid, so returning players pick a character once. Colours came back on top of this kit (see "Outfit colours are vertex colours").
 
 ## 2026-11-01: The library grows a desk at a time
 - **Decision:** Library seats are desks for two (12 seats at launch). The renovation zone opens in strips. Whenever more people are in the room than open chairs, the next strip (a desk for two) opens, is stored in the room's Durable Object, broadcast as `grew`, and never closes again.
