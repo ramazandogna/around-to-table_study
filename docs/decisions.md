@@ -261,3 +261,11 @@ Non-obvious technical decisions, newest first.
 ## Landing page motion (site)
 
 The landing page is a game's front door, so it moves: a lamp-dot cursor that leaves paw prints (mouse and trackpad only), cards that lean toward the pointer, sections that rise in on scroll, the five reasons as a self-advancing picker, the beta steps lit one after another, and a pets section where each pet greets you in its own way. Everything stops for visitors who ask their system for reduced motion. The language is a small dropdown instead of a four-way switch, so the bar stays one row on a phone; the links move into a menu sheet below the large-screen breakpoint. Pets are shown with the same emoji icons the game's creator uses, not renders.
+
+## Night stays bright enough to study by
+
+Evening and night used to drop the light to a third, which made the rooms hard to read. Night now keeps most of the daylight but turns it cool and blue, with the lamps warm on top: it reads as night without hiding anyone. The game is also an installable web app (a manifest, no service worker: it needs the server to be useful, so there is nothing to keep offline).
+
+## Footsteps on the landing page
+
+Hovering something that moves gives the game's soft footstep and a click gives a firmer one, synthesised the same way as in the game. Browsers allow sound only after the first click or tap, and a speaker button (in the menu on phones) turns it off for good.

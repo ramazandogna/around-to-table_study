@@ -145,9 +145,11 @@ html.own-cursor * {
 }
 
 /* --- Showing up: on load, and when scrolled into view --- */
-.hero-in,
 .word {
   display: inline-block;
+}
+.hero-in,
+.word {
   animation: rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   animation-delay: calc(var(--i, 0) * 90ms);
 }
@@ -465,7 +467,7 @@ html.own-cursor * {
     box-shadow 0.25s;
 }
 .reason:hover {
-  transform: translateX(6px);
+  border-color: var(--color-hair);
 }
 .reason--on {
   border-color: var(--color-accent);
@@ -797,7 +799,6 @@ html.own-cursor * {
 }
 .step--on {
   background: rgb(255 247 230 / 0.85);
-  transform: translateX(6px);
   box-shadow: 0 10px 24px -14px rgb(59 31 14 / 0.45);
 }
 .step-dot {
@@ -825,7 +826,6 @@ html.own-cursor * {
   border-color: var(--color-accent);
   background: var(--color-accent);
   color: var(--color-on-accent);
-  transform: scale(1.2);
   animation: ping 1.4s ease-out infinite;
 }
 @keyframes ping {
@@ -833,7 +833,7 @@ html.own-cursor * {
     box-shadow: 0 0 0 0 rgb(201 103 47 / 0.5);
   }
   100% {
-    box-shadow: 0 0 0 12px rgb(201 103 47 / 0);
+    box-shadow: 0 0 0 8px rgb(201 103 47 / 0);
   }
 }
 .step-body p {
@@ -859,5 +859,25 @@ html.own-cursor * {
   .step-body p {
     max-height: none;
     opacity: 1;
+  }
+}
+
+/* The invite line: the key sits beside the first line of text, not above it. */
+.invite {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.invite svg {
+  margin-top: 0.15em;
+}
+
+/* On phones the speaker lives in the menu sheet, so the name keeps its room. */
+.sound-button {
+  display: none;
+}
+@media (min-width: 640px) {
+  .sound-button {
+    display: inline-flex;
   }
 }

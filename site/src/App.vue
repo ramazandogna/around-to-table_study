@@ -19,7 +19,10 @@ import {
   Smartphone,
   SunMoon,
   Timer,
+  Sparkles,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-vue-next';
 import { BaseBadge, BaseButton } from 'rei-kit';
@@ -29,11 +32,13 @@ import Cursor from './Cursor.vue';
 import { extra, PET_ICON, PETS } from './extra';
 import { copy, language, LANGUAGES, type Language } from './i18n';
 import { fine, still, vMagnetic, vReveal, vTilt } from './motion';
+import { listenForSteps, soundOn } from './sound';
 
 /** Where the game lives, and where suggestions go. */
 const GAME_URL = 'https://around-the-table.ramazandogna.workers.dev/';
 const MAIL = 'doganrmzn40@gmail.com';
 const GITHUB = 'https://github.com/ramazandogna';
+const REI_KIT = 'https://ramazandogna.github.io/rei-kit/';
 
 const base = import.meta.env.BASE_URL;
 const pillarIcons = [Users, Coffee, KeyRound, BookOpen, CalendarDays];
@@ -115,7 +120,10 @@ const step = ref(0);
 const stepsHover = ref(false);
 let stepTimer = 0;
 
+let stopSteps: (() => void) | null = null;
+
 onMounted(() => {
+  stopSteps = listenForSteps();
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('pointerdown', closeAll);
   window.addEventListener('keydown', escape);
@@ -130,6 +138,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopSteps?.();
   window.removeEventListener('scroll', onScroll);
   window.removeEventListener('pointerdown', closeAll);
   window.removeEventListener('keydown', escape);
@@ -169,6 +178,16 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
 
         <div class="ms-auto flex shrink-0 items-center gap-1.5 lg:ms-2">
           <!-- The language: one small button and a list, the same on every screen. -->
+          <button
+            type="button"
+            class="lang-button sound-button"
+            :aria-label="soundOn ? 'Sound off' : 'Sound on'"
+            :aria-pressed="soundOn"
+            @click="soundOn = !soundOn"
+          >
+            <Volume2 v-if="soundOn" class="size-4" aria-hidden="true" />
+            <VolumeX v-else class="size-4" aria-hidden="true" />
+          </button>
           <div class="lang relative">
             <button
               type="button"
@@ -246,6 +265,9 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
           <a :href="suggestLink" class="sheet-link" @click="menuOpen = false"
             >✉️ {{ copy.nav.feedback }}</a
           >
+          <button type="button" class="sheet-link text-start" @click="soundOn = !soundOn">
+            {{ soundOn ? '🔊' : '🔇' }} {{ soundOn ? 'Sound on' : 'Sound off' }}
+          </button>
         </div>
       </Transition>
     </header>
@@ -308,8 +330,9 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
                 </span>
               </BaseTooltip>
             </div>
-            <p class="hero-in text-ink-soft flex items-center gap-2 text-sm" style="--i: 7">
-              <KeyRound class="size-4" aria-hidden="true" /> {{ copy.hero.invite }}
+            <p class="hero-in invite text-ink-soft text-sm" style="--i: 7">
+              <KeyRound class="size-4 shrink-0" aria-hidden="true" />
+              <span>{{ copy.hero.invite }}</span>
             </p>
           </div>
 
@@ -548,6 +571,9 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
         </a>
         <a :href="suggestLink" class="nav-link flex items-center gap-2 break-all">
           <Mail class="size-4 shrink-0" aria-hidden="true" /> {{ MAIL }}
+        </a>
+        <a :href="REI_KIT" class="nav-link flex items-center gap-2" rel="noopener">
+          <Sparkles class="size-4 shrink-0" aria-hidden="true" /> {{ copy.footer.kit }}
         </a>
         <span>{{ copy.footer.credits }}</span>
       </div>
