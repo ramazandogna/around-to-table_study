@@ -29,8 +29,9 @@ export const DAYLIGHT: Record<
   morning: { sun: 2.0, sunColor: 0xfff1dc, sky: 1.5, skyColor: 0xf4f6ff, ground: 0x5a4636 },
   day: { sun: 2.4, sunColor: 0xfffaf0, sky: 1.7, skyColor: 0xfff8ec, ground: 0x5a4636 },
   afternoon: { sun: 2.2, sunColor: 0xffd59a, sky: 1.4, skyColor: 0xffe2b0, ground: 0x6a4a30 },
-  evening: { sun: 0.8, sunColor: 0xffa66b, sky: 0.95, skyColor: 0xc9b8e8, ground: 0x3e3040 },
-  night: { sun: 0.35, sunColor: 0x9fb4e6, sky: 0.6, skyColor: 0x8a9cd0, ground: 0x241e2c },
+  evening: { sun: 1.6, sunColor: 0xffb27a, sky: 1.3, skyColor: 0xe6d6f0, ground: 0x4e3e48 },
+  // Night stays bright enough to study by: cooler and bluer, with the lamps warm on top.
+  night: { sun: 1.25, sunColor: 0xb8c8f0, sky: 1.2, skyColor: 0xc4ccf0, ground: 0x3a3448 },
 };
 
 /** How bright the lamps are: off by day, warm in the evening, all on at night. */
