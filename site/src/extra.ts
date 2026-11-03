@@ -17,7 +17,7 @@ type Pet = { name: string; trait: string };
 
 /** The copy the livelier page added: the pets, the ticker and a few labels. */
 export type Extra = {
-  nav: { pets: string; menu: string; language: string };
+  nav: { pets: string; menu: string; language: string; terms: string; privacy: string };
   ticker: string[];
   pillarsHint: string;
   pets: { title: string; lead: string; hint: string; list: [Pet, Pet, Pet, Pet, Pet, Pet, Pet] };
@@ -26,7 +26,7 @@ export type Extra = {
 };
 
 const en: Extra = {
-  nav: { pets: 'Pets', menu: 'Menu', language: 'Language' },
+  nav: { pets: 'Pets', menu: 'Menu', language: 'Language', terms: 'Terms', privacy: 'Privacy' },
   ticker: [
     '🍅 Pomodoro with friends',
     '🎯 Darts in the smoking room',
@@ -57,7 +57,7 @@ const en: Extra = {
 };
 
 const tr: Extra = {
-  nav: { pets: 'Petler', menu: 'Menü', language: 'Dil' },
+  nav: { pets: 'Petler', menu: 'Menü', language: 'Dil', terms: 'Koşullar', privacy: 'Gizlilik' },
   ticker: [
     '🍅 Arkadaşlarla pomodoro',
     '🎯 Sigara odasında dart',
@@ -88,7 +88,7 @@ const tr: Extra = {
 };
 
 const zh: Extra = {
-  nav: { pets: '宠物', menu: '菜单', language: '语言' },
+  nav: { pets: '宠物', menu: '菜单', language: '语言', terms: '使用条款', privacy: '隐私' },
   ticker: [
     '🍅 和朋友一起番茄钟',
     '🎯 吸烟室里玩飞镖',
@@ -119,7 +119,13 @@ const zh: Extra = {
 };
 
 const ja: Extra = {
-  nav: { pets: 'ペット', menu: 'メニュー', language: '言語' },
+  nav: {
+    pets: 'ペット',
+    menu: 'メニュー',
+    language: '言語',
+    terms: '利用規約',
+    privacy: 'プライバシー',
+  },
   ticker: [
     '🍅 友だちとポモドーロ',
     '🎯 喫煙室でダーツ',

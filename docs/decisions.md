@@ -269,3 +269,47 @@ Evening and night used to drop the light to a third, which made the rooms hard t
 ## Footsteps on the landing page
 
 Hovering something that moves gives the game's soft footstep and a click gives a firmer one, synthesised the same way as in the game. Browsers allow sound only after the first click or tap, and a speaker button (in the menu on phones) turns it off for good.
+
+## Round E: lights, language, crowds and manners
+
+- **Night is lit from inside.** Evening and night keep about 90% of the day's floor brightness in warm lamp colour; night shows in the windows and the lamps. No pendant lights were added: the general light was the cause, not missing fixtures.
+- **Library lamps have switches.** Each floor lamp in the library is its own object with its own shade. The server stores only which lamps are *flipped* against the house rule (off before 15:30, on after), and every screen applies the rule by its own clock, so players in different time zones agree on what was switched. The librarian walks over after two minutes and puts a flipped lamp back with a word.
+- **Turkish.** `tr.json` mirrors `en.json`; a test fails on a missing key or a changed `{slot}`. A Turkish device starts in Turkish; the 🌐 button switches and reloads, because signs in the 3D scene are drawn once. The language survives a data epoch reset.
+- **Six dances** go over the wire as an index into `DANCES`; the dance button opens a ring of its own.
+- **Crowds.** Three or more people within 0.9 tiles share one name tag ("Selin +3", friends and yourself excluded). A tap on overlapping people opens a "who?" ring before their own ring.
+- **Idle.** 2 minutes without input shows 💤 to everyone; after 5 the character wanders to shelves, paintings, the lost-and-found box, the jukebox. Studying at a desk is never idle. Sitting down on a sofa while idle is not done yet.
+- **Pets walk the owner's path** (breadcrumbs), at their own speed, with a short pause when the owner sets off and sniff stops on long walks (not the turtle). They only appear next to their person beyond 30 tiles (a reconnect).
+- **Find by name** searches people online now; blocked pairs never see each other. Friend requests are limited to 20 per 10 minutes.
+- **Swear filter** (EN + TR, our own list) masks words in chat, phone and building chat, and refuses names, room names, event titles and status lines. Whole-word matching with a few stems; "sık", "got", "pic", "sıkışık" are deliberately not on it. Three masked messages in 10 minutes make the next one wait a minute.
+- **Terms and privacy** are static pages (EN + TR) at `/terms.html` and `/privacy.html`, marked as a draft that a lawyer must check.
+- **Rooms are opened at the reception.** The create tab sends the player to the desk; the form there offers Silent / Chat / Game as presets of the existing rules, then hands over the key with the link.
+- **Event decorations** start 15 minutes before an event; the music waits for the start, and the hall shows a sign over the door to the venue.
+
+## Round F: the conference hall, and the gaps from round E
+
+- **The hall's left wall** has the smoking room's door up in its corner and the conference hall's double door lower down. The two west-wall paintings moved to the wall between and below them.
+- **The conference hall** is its own area (`conference`), as big as the library, reached from the hall. It is self-contained (no library rules), so it can move to a separate building later by changing only the door.
+  - A raised stage (tiles `^`, 0.3 above the floor; people and pets step up onto it), a microphone (`I`), a 16:9 screen on the back wall that rises above it, and rows of theatre chairs (`W`) facing the stage with an aisle. Theatre chairs are sat on like sofas (no question asked) at chair height; all are one instanced mesh per part.
+  - Standing at the microphone shows a 🎤 by the name. Real voice is out of scope.
+- **Who may come in.** The conference hall is closed except from 15 minutes before an approved event held there until it ends: then everyone may come in and the person who proposed it presents. Admins, and a local server with no access password, may always come in and present. The worker asks the social hub before letting anyone in (`conferenceRole`); the client checks the same rule first and explains why the door stays shut.
+- **The big screen is not a screen share.** The presenter, standing on the stage, opens one thing and every screen in the hall loads it itself:
+  - A **picture**: an https link to an image file from an allow list (imgur, Wikimedia, Unsplash, GitHub, ibb, Twitter's image host).
+  - A **YouTube video**: reduced to its 11-character id and played in YouTube's own privacy-enhanced player without its controls.
+  - A **sound**: an https link to an audio file from an allow list (Wikimedia, archive.org, GitHub, Free Music Archive, Pixabay), with a volume of each listener's own.
+  - Nothing is fetched or relayed by the worker.
+  - The server keeps `{kind, src, caption, startedAt, pausedAt}` in storage; the position is computed from the server's clock, sent with every change, so a late joiner lands on the right second and a paused video stays paused.
+  - Captions are masked for swears.
+  - 20 changes a minute per presenter.
+  - PDFs and uploads are left for later: they need storage and are hard to read on a phone. The message has room for new kinds.
+- **The screen sits on the wall.** The page with the picture or the player is laid over the 3D screen with a 2D transform onto its four projected corners (the camera has no perspective, so it is a parallelogram), and follows the camera. When the screen is smaller than YouTube's 200-pixel minimum (a phone, zoomed out), it opens as a card instead; anyone can enlarge it or hide it on their own screen.
+- **Event proposals pick a theme** (meetup, Turkish day, Thai day, Chinese day); the theme dresses the room. The conference hall can host events.
+- **Crowds.** With 12 or more people around, those off the screen are not drawn and those more than 9 tiles away lose their shadow and name tag (friends keep the tag). Measured on a software renderer this saves only 1–2 ms a frame; on a real GPU (WebKit, iPhone 13 profile) 30 people already ran at 60 fps. The cost on the software renderer is the lit pixels of each visible body, not shadows or tags.
+- **The phone's welcome note and notices stand beside the joystick**, not under it. The top-left menu on phones was already one button.
+- **A daily goal** (30 minutes to 4 hours, one hour by default) is kept on the device next to the streak, shown as a bar in the study ring and at the end of a session, and cheered once a day. Nobody else sees it; there is no ranking.
+- **Pets come in through the door** after their person, a slow pet later than a quick one; other people's pets do the same when they arrive.
+- **Idle.** After a minute without input the character looks around now and then and sometimes yawns or thinks (others see the emote). Of the wanders after five minutes, about a third go to sit on a sofa or armchair.
+- **Faces in name searches.** The social hub keeps each person's look; one small hidden renderer draws a face from it once per look.
+- **Library desk lamps have switches too**, after the floor lamps in the same index list, with the same house rule and librarian.
+- **The house rule keeps the library lit at night:** lamps are due on from 15:30 until 07:00 (before, the rule switched them off after midnight). From 22:00 to 09:00 no librarian is on duty, so nobody puts a switched lamp back; the morning librarian does.
+- **Picking someone out of a crowd** shows a soft ring on the floor under them while the "who?" ring points at them, and under whoever's ring of actions is open.
+- **With a key from the reception** the player walks to the elevator and rides up; from anywhere else (an invite, a link) they go up at once.

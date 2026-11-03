@@ -575,6 +575,20 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
         <a :href="REI_KIT" class="nav-link flex items-center gap-2" rel="noopener">
           <Sparkles class="size-4 shrink-0" aria-hidden="true" /> {{ copy.footer.kit }}
         </a>
+        <a
+          :href="`${GAME_URL}terms.html${language === 'tr' ? '#tr' : ''}`"
+          class="nav-link"
+          rel="noopener"
+        >
+          {{ extra.nav.terms }}
+        </a>
+        <a
+          :href="`${GAME_URL}privacy.html${language === 'tr' ? '#tr' : ''}`"
+          class="nav-link"
+          rel="noopener"
+        >
+          {{ extra.nav.privacy }}
+        </a>
         <span>{{ copy.footer.credits }}</span>
       </div>
     </footer>

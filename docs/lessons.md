@@ -59,3 +59,31 @@ What building the prototype taught us, as rules for the next phases. Newest firs
 - **Feedback works best one topic per message**, with a screenshot, "expected vs. saw" and a priority (must / nice).
 - **Prefer what deploys without manual setup.** A Durable Object's own SQLite needed no new resource, while D1 would have blocked the deploy until someone created a database by hand.
 - **Restart the dev server cleanly.** A leftover `workerd` process locks the local SQLite file; stop every `wrangler`/`workerd` process before starting again.
+
+## Durable Object memory does not survive hibernation
+
+The library lamps first lived in a `Set` on the AreaRoom. With the WebSocket hibernation API the object is evicted between messages, so the set came back empty and the librarian's "put it back" was ignored. Anything a room must remember goes to `ctx.storage` (as `opened` already did). Found by a two-browser test, not by reading the code.
+
+## Clean-ups that forget everything also forget preferences
+
+The data epoch reset removed every `att.*` key, including the language just chosen. Keep a list of keys that belong to the person, not the building.
+
+## Test selectors that match text match hints too
+
+`:has-text("Game")` picked the "Silent" preset because its hint says "no games". Select by the most specific text, or by a test id.
+
+## Measure before optimising a crowd
+
+The plan was to drop shadows and name tags in crowds. Turning them off by hand first showed they cost 3 ms of 27; the bodies themselves cost the rest on a software renderer, and nothing at all on a real GPU. The cheap level of detail stays, but the number in the report is the measured one.
+
+## A screen in an orthographic scene is a parallelogram
+
+Laying a page over a 3D surface with its bounding box covered people standing in front of it. With no perspective the projected corners form a parallelogram, and one CSS `matrix()` from three corners fits the page exactly.
+
+## Long labels squeeze form fields
+
+The Turkish "Ne zaman (senin saatinle)" left the date field a few pixels wide in a row of three. Labels above fields hold up in every language.
+
+## A fixed fake clock can stall the page
+
+Playwright's `clock.setFixedTime` froze the loader; shifting `Date` by an offset (time still runs) is what the clock tests need.
