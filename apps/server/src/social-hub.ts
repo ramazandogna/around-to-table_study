@@ -1,8 +1,17 @@
 import {
   AREA_RULES,
+  type Appearance,
+  isValidAppearance,
+  conferenceRole,
+  type ConferenceRole,
+  THEME_IDS,
+  type ThemeId,
   blockKind,
   DATA_EPOCH,
   PASSWORD_TRIES,
+  FIND_LIMIT,
+  FRIEND_REQUESTS,
+  type FoundPerson,
   checkProposal,
   cleanDm,
   cleanOffset,
@@ -55,6 +64,8 @@ type Member = {
   pet?: PetKind | null;
   /** How the pet looks, for drawing it at the door. */
   petLook?: Pick<WaitingPet, 'petColor' | 'petSex' | 'petAccessory'>;
+  /** Their character's look, for a face in name searches. */
+  look?: Appearance;
   /** When the socket connected, for telling vanished ones apart (see `alarm`). */
   since?: number;
   /** The private room they are in, if any. */
@@ -111,6 +122,7 @@ type EventRow = {
   by: string;
   by_name: string;
   status: ProposedEvent['status'];
+  theme: string | null;
 };
 
 /** Approved events stay listed this long after they ended. */
@@ -141,6 +153,8 @@ export class SocialHub extends DurableObject<Env> {
   private worldTimer: ReturnType<typeof setTimeout> | null = null;
   /** Access password tries per address (kept while the hub is awake). */
   private readonly passwordTries = new Map<string, RateWindow>();
+  /** Friend requests per person (kept while the hub is awake). */
+  private readonly requestTries = new Map<string, RateWindow>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -227,6 +241,7 @@ export class SocialHub extends DurableObject<Env> {
       'ALTER TABLE users ADD COLUMN messages_sent INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE users ADD COLUMN tz INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE rooms ADD COLUMN rules TEXT',
+      'ALTER TABLE events ADD COLUMN theme TEXT',
     ]) {
       try {
         this.sql.exec(column);
@@ -487,6 +502,7 @@ export class SocialHub extends DurableObject<Env> {
           petSex: message.petSex,
           petAccessory: message.petAccessory,
         },
+        ...(message.look && isValidAppearance(message.look) ? { look: message.look } : {}),
         lines,
         tz: cleanOffset(message.tz),
       };
@@ -509,6 +525,7 @@ export class SocialHub extends DurableObject<Env> {
       if (moved || !me.area || visible(me) !== visible(next)) this.tellFriends(me.id);
       return;
     }
+    if (message.t === 'find') return this.find(ws, me, message.q);
     if (message.t === 'dm') return this.dm(ws, me, message.to, message.text);
     if (message.t === 'history') return this.history(ws, me.id, message.with);
     if (message.t === 'read') {
@@ -556,8 +573,49 @@ export class SocialHub extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Everyone in the building whose name holds the search (any case, Turkish
+   * letters too), so a friend can be found in a crowd by name. People who
+   * blocked each other never show.
+   */
+  private find(ws: WebSocket, me: Member, q: string): void {
+    const want = q.trim().toLocaleLowerCase('tr');
+    if (!want) return;
+    const people = new Map<string, FoundPerson>();
+    const friends = new Set(
+      this.list(me.id)
+        .filter((f) => f.state === 'friend')
+        .map((f) => f.id),
+    );
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === this.closing) continue;
+      const member = socket.deserializeAttachment() as Member | null;
+      if (!member?.area || member.id === me.id || people.has(member.id)) continue;
+      if (!member.name.toLocaleLowerCase('tr').includes(want)) continue;
+      if (this.blockedBetween(me.id, member.id)) continue;
+      people.set(member.id, {
+        id: member.id,
+        name: member.name,
+        area: member.area,
+        friend: friends.has(member.id),
+        ...(member.look ? { look: member.look } : {}),
+      });
+      if (people.size >= FIND_LIMIT) break;
+    }
+    send(ws, { t: 'found', q, people: [...people.values()] });
+  }
+
   private befriend(ws: WebSocket, me: Member, to: string): void {
     if (to === me.id) return;
+    // Friend requests are rate-limited, so a name search cannot be used to spam.
+    const window = takeToken(
+      this.requestTries.get(me.id) ?? { start: 0, count: 0 },
+      Date.now(),
+      FRIEND_REQUESTS.count,
+      FRIEND_REQUESTS.windowMs,
+    );
+    if (!window) return send(ws, { t: 'error', code: 'rate_limited' });
+    this.requestTries.set(me.id, window);
     if (this.blockedBetween(me.id, to)) return send(ws, { t: 'error', code: 'blocked' });
     const them = this.sql
       .exec<{ name: string }>('SELECT name FROM users WHERE id = ?', to)
@@ -872,6 +930,14 @@ export class SocialHub extends DurableObject<Env> {
       .filter(Boolean);
   }
 
+  /**
+   * Who `id` is in the conference hall now (see `conferenceRole`): the worker
+   * asks before letting anyone in. `open` is a local server with no password.
+   */
+  async conferenceRole(id: string, open: boolean): Promise<ConferenceRole> {
+    return conferenceRole(id, this.eventsFor(id), Date.now(), { open: open || this.isAdmin(id) });
+  }
+
   private isAdmin(id: string): boolean {
     return (
       this.ownerIds().includes(id) ||
@@ -1126,7 +1192,7 @@ export class SocialHub extends DurableObject<Env> {
   private eventRows(): EventRow[] {
     return this.sql
       .exec<EventRow>(
-        'SELECT id, title, description, area, start, minutes, by, by_name, status FROM events WHERE start + minutes * 60000 > ? ORDER BY start',
+        'SELECT id, title, description, area, start, minutes, by, by_name, status, theme FROM events WHERE start + minutes * 60000 > ? ORDER BY start',
         Date.now() - EVENT_KEEP_MS,
       )
       .toArray();
@@ -1149,6 +1215,9 @@ export class SocialHub extends DurableObject<Env> {
         by: row.by,
         byName: row.by_name,
         status: row.status,
+        ...(row.theme && THEME_IDS.includes(row.theme as ThemeId)
+          ? { theme: row.theme as ThemeId }
+          : {}),
       }));
   }
 
@@ -1172,6 +1241,7 @@ export class SocialHub extends DurableObject<Env> {
       area: ProposedEvent['area'];
       start: number;
       minutes: number;
+      theme?: ThemeId | undefined;
     },
   ): void {
     const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
@@ -1195,7 +1265,7 @@ export class SocialHub extends DurableObject<Env> {
     if (waiting >= EVENT_LIMITS.pendingPerPerson)
       return send(ws, { t: 'error', code: 'too_many_events' });
     this.sql.exec(
-      "INSERT INTO events (id, title, description, area, start, minutes, by, by_name, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+      "INSERT INTO events (id, title, description, area, start, minutes, by, by_name, status, theme) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
       crypto.randomUUID(),
       title,
       description,
@@ -1204,6 +1274,7 @@ export class SocialHub extends DurableObject<Env> {
       clean.minutes,
       me.id,
       me.name,
+      clean.theme ?? null,
     );
     this.tellEvents();
   }

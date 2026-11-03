@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { checkProposal, EVENTS, eventNow, upcoming, type ProposedEvent } from '../src';
+import {
+  checkProposal,
+  DECOR_LEAD_MS,
+  EVENTS,
+  eventNow,
+  themeOf,
+  upcoming,
+  type ProposedEvent,
+} from '../src';
 
 // Thursday 2026-11-05, 21:00 in Japan is 12:00 UTC.
 const start = Date.UTC(2026, 10, 5, 12, 0);
@@ -11,6 +19,13 @@ describe('the Thursday meetup', () => {
     expect(eventNow('smoking', start)?.event.id).toBe('thursday-meetup');
     expect(eventNow('smoking', start + 119 * minute)?.start).toBe(start);
     expect(eventNow('smoking', start + 120 * minute)).toBeNull();
+  });
+
+  it('dresses its room 15 minutes early when asked to', () => {
+    expect(eventNow('smoking', start - 16 * minute, EVENTS, [], DECOR_LEAD_MS)).toBeNull();
+    expect(eventNow('smoking', start - 14 * minute, EVENTS, [], DECOR_LEAD_MS)?.start).toBe(start);
+    expect(eventNow('smoking', start + 119 * minute, EVENTS, [], DECOR_LEAD_MS)?.start).toBe(start);
+    expect(eventNow('smoking', start + 120 * minute, EVENTS, [], DECOR_LEAD_MS)).toBeNull();
   });
 
   it('is only in the smoking room', () => {
@@ -64,5 +79,31 @@ describe('proposed events', () => {
     expect(list.some((o) => o.event === pending)).toBe(false);
     expect(eventNow('library', base.start + 1000, EVENTS, [base])?.event).toBe(base);
     expect(eventNow('library', base.start + 121 * 60 * 1000, EVENTS, [base])).toBeNull();
+  });
+});
+
+describe('event themes and the conference hall', () => {
+  const proposal = {
+    title: 'Talk night',
+    description: 'a short talk',
+    area: 'conference' as const,
+    start: 2_000_000_000_000,
+    minutes: 60,
+  };
+
+  it('takes events in the conference hall', () => {
+    expect(checkProposal(proposal, proposal.start - 60_000)).toBeNull();
+  });
+
+  it('dresses a room with the theme the proposer picked, the meetup by default', () => {
+    const event = {
+      ...proposal,
+      id: 'x',
+      by: 'a',
+      byName: 'Ada',
+      status: 'approved' as const,
+    };
+    expect(themeOf(event)).toBe('meetup');
+    expect(themeOf({ ...event, theme: 'turkey' })).toBe('turkey');
   });
 });

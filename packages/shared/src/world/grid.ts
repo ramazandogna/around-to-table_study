@@ -11,6 +11,8 @@ export type Seat = {
   kind: 'chair' | 'sofa';
   /** The way a seated person faces: towards the table, or out into the room. */
   facing: Point;
+  /** A theatre chair in the conference hall: sat on like a sofa, chair-high. */
+  theater?: true;
 };
 
 const DIRECTIONS: readonly Point[] = [
@@ -73,12 +75,19 @@ export class AreaGrid {
   /** True for anything one sits on: chairs and sofas. Only one person fits. */
   isSeat(p: Point): boolean {
     const tile = this.tileAt(p);
-    return tile === TILE.seat || tile === TILE.bench;
+    return tile === TILE.seat || tile === TILE.bench || tile === TILE.theaterSeat;
+  }
+
+  /** The conference hall's stage, where a presenter stands. */
+  isStage(p: Point): boolean {
+    return this.tileAt(p) === TILE.stage;
   }
 
   /** The chair or sofa on a tile, and which way someone sitting there faces. */
   seatAt(p: Point): Seat | null {
     const tile = this.tileAt(p);
+    // Theatre chairs all face the stage, at the north wall.
+    if (tile === TILE.theaterSeat) return { kind: 'sofa', facing: { x: 0, y: -1 }, theater: true };
     if (tile === TILE.bench) {
       // Sofas face the middle of the room, away from the wall behind them.
       return { kind: 'sofa', facing: { x: 0, y: p.y < this.height / 2 ? 1 : -1 } };
@@ -100,6 +109,15 @@ export class AreaGrid {
 
   doorTarget(p: Point): AreaId | null {
     return this.area.doors[this.tileAt(p)] ?? null;
+  }
+
+  /** The area behind a door right next to `p`, if there is one. */
+  doorNextTo(p: Point): AreaId | null {
+    for (const d of DIRECTIONS) {
+      const to = this.doorTarget({ x: p.x + d.x, y: p.y + d.y });
+      if (to) return to;
+    }
+    return null;
   }
 
   neighbors(p: Point): Point[] {

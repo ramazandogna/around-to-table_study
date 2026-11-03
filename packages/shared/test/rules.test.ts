@@ -26,7 +26,12 @@ describe('containsLink', () => {
 describe('applyAreaRules', () => {
   it('quiets and shortens library messages', () => {
     const result = applyAreaRules(`STOP ${'a'.repeat(80)}`, AREA_RULES.library);
-    expect(result).toEqual({ ok: true, text: `stop ${'a'.repeat(45)}`, lowered: true });
+    expect(result).toEqual({
+      ok: true,
+      text: `stop ${'a'.repeat(45)}`,
+      lowered: true,
+      masked: false,
+    });
   });
 
   it('blocks links in the library but not in the smoking room', () => {
@@ -37,11 +42,17 @@ describe('applyAreaRules', () => {
     expect(applyAreaRules('look at example.com', AREA_RULES.smoking).ok).toBe(true);
   });
 
+  it('masks swears and keeps the rest of the message', () => {
+    const result = applyAreaRules('oh shit, I passed', AREA_RULES.smoking);
+    expect(result).toEqual({ ok: true, text: 'oh ****, I passed', lowered: false, masked: true });
+  });
+
   it('keeps caps where they are allowed', () => {
     expect(applyAreaRules('YES', AREA_RULES.smoking)).toEqual({
       ok: true,
       text: 'YES',
       lowered: false,
+      masked: false,
     });
   });
 

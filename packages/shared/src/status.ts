@@ -1,3 +1,4 @@
+import { hasProfanity } from './profanity';
 import { normalizeChat } from './text';
 import { containsLink } from './rules';
 
@@ -65,7 +66,7 @@ export function cleanStatusLines(lines: IncomingLines): StatusLines | null {
     vibe: lines.vibe ?? null,
   };
   const texts = [result.announcement, result.doingNote, result.moodNote];
-  return texts.some(containsLink) ? null : result;
+  return texts.some((text) => containsLink(text) || hasProfanity(text)) ? null : result;
 }
 
 export function hasStatusLines(lines: StatusLines): boolean {
@@ -75,6 +76,10 @@ export function hasStatusLines(lines: StatusLines): boolean {
 }
 
 /** Quick feelings shown over the head for a moment. */
+/** The dances on the dance ring, in order; a dance is sent as its index. */
+export const DANCES = ['bounce', 'sway', 'robot', 'disco', 'twist', 'cheer'] as const;
+export type Dance = (typeof DANCES)[number];
+
 export const EMOTES = [
   'wave',
   'laugh',

@@ -11,6 +11,7 @@ import {
   type OutfitPart,
   type PetKind,
 } from './character';
+import { hasProfanity } from './profanity';
 import { JUKEBOX, type JukeboxState } from './jukebox';
 import {
   DOINGS,
@@ -20,13 +21,15 @@ import {
   VIBES,
   type Emote,
   type StatusLines,
+  DANCES,
 } from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
 import { TABLE_GAMES, type Table, type TableError, type TableKind } from './tables';
 import type { RoomRules } from './rooms';
+import { STAGE_KINDS, STAGE_LIMITS, type StageState } from './stage';
 import type { AreaId, Point } from './world';
 
-const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
+const areaId = z.enum(['hall', 'library', 'smoking', 'conference', 'room3', 'room5', 'room9']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
 const index = (length: number) =>
   z
@@ -34,7 +37,8 @@ const index = (length: number) =>
     .int()
     .min(0)
     .max(length - 1);
-const appearance = z.object({
+/** A character's look as it travels in messages. */
+export const appearanceSchema = z.object({
   character: index(CHARACTERS.length),
   ...(Object.fromEntries(
     OUTFIT_PARTS.map((part) => [part, index(PALETTES[part].length).optional()]),
@@ -92,7 +96,7 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   /** First message on every (re)connect. */
   z.object({
     t: z.literal('hello'),
-    look: appearance,
+    look: appearanceSchema,
     from: areaId.optional(),
     status: studyStatus.optional(),
     lines: statusLines.optional(),
@@ -100,14 +104,26 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('move'), to: point }),
   z.object({ t: z.literal('say'), text: z.string().max(MAX_CHAT_LENGTH) }),
   /** Changes the sender's look, e.g. after the wardrobe. */
-  z.object({ t: z.literal('look'), look: appearance }),
+  z.object({ t: z.literal('look'), look: appearanceSchema }),
   /** Replaces the sender's whole study status. */
   z.object({ t: z.literal('status'), status: studyStatus }),
   /** Replaces the sender's status lines. */
   z.object({ t: z.literal('lines'), lines: statusLines }),
   z.object({ t: z.literal('emote'), emote: z.enum(EMOTES) }),
   /** Starts or stops dancing, where the area allows it. Walking stops it too. */
-  z.object({ t: z.literal('dance'), on: z.boolean() }),
+  z.object({
+    t: z.literal('dance'),
+    on: z.boolean(),
+    /** Which dance (an index into `DANCES`); the first if left out. */
+    move: z
+      .number()
+      .int()
+      .min(0)
+      .max(DANCES.length - 1)
+      .optional(),
+  }),
+  /** Away from the keyboard for a while (a 💤 over the head), or back. */
+  z.object({ t: z.literal('afk'), on: z.boolean() }),
   /** Lights a cigarette or puts it out, where the area allows it. Walking puts it out too. */
   z.object({ t: z.literal('smoke'), on: z.boolean() }),
   /** Pets someone's pet (`owner` is whose pet it is); everyone sees it purr. */
@@ -131,6 +147,29 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('finished') }),
   /** A chair pulled out from its table, or pushed back under it. */
   z.object({ t: z.literal('chair'), tile: point, pulled: z.boolean() }),
+  /**
+   * Flips a library lamp against the house rule (off by day, on from 15:30),
+   * or puts it back. Each screen applies the rule by its own clock.
+   */
+  z.object({ t: z.literal('lamp'), index: z.number().int().min(0).max(63), flipped: z.boolean() }),
+  /** The presenter puts something on the conference hall's big screen. */
+  z.object({
+    t: z.literal('stageShow'),
+    kind: z.enum(STAGE_KINDS),
+    src: z.string().min(1).max(STAGE_LIMITS.src),
+    caption: z
+      .string()
+      .max(STAGE_LIMITS.caption * 2)
+      .optional(),
+  }),
+  /** The presenter plays, pauses or moves the video or sound on the screen (`at` in seconds). */
+  z.object({
+    t: z.literal('stageControl'),
+    action: z.enum(['play', 'pause', 'seek']),
+    at: z.number().min(0).max(STAGE_LIMITS.maxSeconds).optional(),
+  }),
+  /** The presenter takes it off the screen. */
+  z.object({ t: z.literal('stageClear') }),
   /** Asks someone in the same area to come to the sender's private room. */
   z.object({
     t: z.literal('invite'),
@@ -158,10 +197,16 @@ export type PlayerSnapshot = {
   status: StudyStatus;
   lines: StatusLines;
   dancing: boolean;
+  /** Which dance, while dancing (an index into `DANCES`). */
+  danceMove: number;
   smoking: boolean;
+  /** Away from the keyboard: nothing done for a couple of minutes. */
+  afk: boolean;
 };
 
 export type ErrorCode =
+  /** Swore again and again: the next message waits a minute. */
+  | 'swearing'
   | 'bad_message'
   | 'rate_limited'
   | 'blocked'
@@ -186,7 +231,13 @@ export type ErrorCode =
   /** The queue is full, or the sender already has songs waiting. */
   | 'tune_full'
   /** The video is longer than the jukebox takes. */
-  | 'tune_long';
+  | 'tune_long'
+  /** Not a link the stage can show. */
+  | 'stage_link'
+  /** A picture or sound from a host the stage does not take. */
+  | 'stage_host'
+  /** Only the presenter, standing on the stage, can change the screen. */
+  | 'not_presenter';
 
 export type ServerMessage =
   | {
@@ -197,7 +248,17 @@ export type ServerMessage =
       players: PlayerSnapshot[];
       /** How many renovation strips of the room are open. */
       opened: number;
+      /** Library lamps someone switched against the house rule (by index). */
+      lamps: number[];
+      /** In the conference hall: what is on the big screen, and the server's clock now. */
+      stage?: StageState | null;
+      now?: number;
+      /** In the conference hall: whether this person may present. */
+      presenter?: boolean;
     }
+  /** The conference hall's big screen changed; `now` is the server's clock, to keep in step. */
+  | { t: 'staged'; stage: StageState | null; now: number }
+  | { t: 'lamped'; index: number; flipped: boolean }
   /** The room grew: another renovation strip (a desk for two) opened. */
   | { t: 'grew'; opened: number }
   | { t: 'joined'; player: PlayerSnapshot }
@@ -213,8 +274,9 @@ export type ServerMessage =
   | { t: 'emoted'; id: string; emote: Emote }
   /** Sent to the person poked and to whoever poked them. */
   | { t: 'poked'; from: string; to: string }
-  | { t: 'danced'; id: string; on: boolean }
+  | { t: 'danced'; id: string; on: boolean; move: number }
   | { t: 'smoked'; id: string; on: boolean }
+  | { t: 'afked'; id: string; on: boolean }
   /** Someone moved a chair: pulled out from the table, or pushed back under it. */
   | { t: 'chaired'; tile: Point; pulled: boolean }
   /** The owner changed the private room's rules. */
@@ -248,5 +310,5 @@ export const NAME_PATTERN = /^[\p{L}\p{N} _.-]{2,20}$/u;
 
 export function normalizeName(raw: string): string | null {
   const name = raw.normalize('NFC').trim().replace(/\s+/g, ' ');
-  return NAME_PATTERN.test(name) ? name : null;
+  return NAME_PATTERN.test(name) && !hasProfanity(name) ? name : null;
 }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  type Appearance,
   PET_ACCESSORIES,
   PET_COLORS,
   PET_SEXES,
@@ -8,18 +9,30 @@ import {
   type PetKind,
   type PetSex,
 } from './character';
+import { maskProfanity } from './profanity';
+import { appearanceSchema } from './protocol';
 import { containsLink } from './rules';
 import { DOINGS, MOODS, STATUS_LIMITS, VIBES, type Doing, type Mood, type Vibe } from './status';
 import { normalizeChat } from './text';
-import { EVENT_AREAS, EVENT_LIMITS, type ProposedEvent } from './events';
+import { EVENT_AREAS, EVENT_LIMITS, THEME_IDS, type ProposedEvent, type ThemeId } from './events';
 import type { Profile, Role } from './profile';
 import type { AreaId } from './world';
+
+/** Someone found by name: enough to tell two people with the same name apart. */
+export type FoundPerson = {
+  id: string;
+  name: string;
+  area: AreaId;
+  friend: boolean;
+  /** How they look, for a little face next to the name. */
+  look?: Appearance;
+};
 
 /**
  * The social connection: one socket per player, next to the area socket, that
  * carries friends and their presence across every room.
  */
-const areaId = z.enum(['hall', 'library', 'smoking', 'room3', 'room5', 'room9']);
+const areaId = z.enum(['hall', 'library', 'smoking', 'conference', 'room3', 'room5', 'room9']);
 const userId = z.string().min(1).max(64);
 const roomCode = z.string().regex(/^[A-Z2-9]{6}$/);
 
@@ -56,6 +69,8 @@ export const socialClientSchema = z.discriminatedUnion('t', [
       .optional(),
     petSex: z.enum(PET_SEXES).optional(),
     petAccessory: z.enum(PET_ACCESSORIES).optional(),
+    /** The character's look, so people searching by name see a face. */
+    look: appearanceSchema.optional(),
     /** The private room's code, when in one, so the reception can count people inside. */
     room: z
       .string()
@@ -72,6 +87,8 @@ export const socialClientSchema = z.discriminatedUnion('t', [
     /** The player's clock, minutes ahead of UTC: their "today" and "this week". */
     tz: z.number().int().min(-720).max(840).optional(),
   }),
+  /** Looks for people in the building by name, to add one as a friend. */
+  z.object({ t: z.literal('find'), q: z.string().min(1).max(40) }),
   /** Sends a request, or accepts theirs if they already asked. */
   z.object({ t: z.literal('befriend'), to: userId }),
   /** Declines a request, cancels one, or ends a friendship. */
@@ -115,6 +132,8 @@ export const socialClientSchema = z.discriminatedUnion('t', [
     area: z.enum(EVENT_AREAS),
     start: z.number().int(),
     minutes: z.number().int(),
+    /** How the room is dressed (see `EVENT_THEMES`). */
+    theme: z.enum(THEME_IDS as [ThemeId, ...ThemeId[]]).optional(),
   }),
   /** Admins: approves or turns down a proposed event, or takes an approved one off. */
   z.object({
@@ -210,6 +229,8 @@ export type SocialErrorCode =
 export type SocialServerMessage =
   /** The whole list, sent on connect and after every change. */
   | { t: 'friends'; friends: Friend[] }
+  /** People in the building whose name matches a search, for adding a friend. */
+  | { t: 'found'; q: string; people: FoundPerson[] }
   /** Something worth telling the player about. */
   | { t: 'friendEvent'; kind: 'request' | 'accepted'; id: string; name: string }
   /** A phone message, sent to both ends so every open tab shows it. */
@@ -269,5 +290,5 @@ export function cleanDm(raw: string): DmTextResult {
   const text = normalizeChat(raw, DM_MAX_CHARS);
   if (!text) return { ok: false, reason: 'empty' };
   if (containsLink(text)) return { ok: false, reason: 'link' };
-  return { ok: true, text };
+  return { ok: true, text: maskProfanity(text).text };
 }

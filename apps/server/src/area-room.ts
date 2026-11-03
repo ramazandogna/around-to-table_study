@@ -1,5 +1,6 @@
 import {
   AREA_RULES,
+  SWEARS,
   applyAreaRules,
   cleanRoomRules,
   DATA_EPOCH,
@@ -36,6 +37,7 @@ import {
   type StatusLines,
   type StudyStatus,
 } from '@att/shared';
+import { cleanStage, controlStage, STAGE_LIMITS, type StageState } from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
 import { takeToken, type RateWindow } from './rate-limit';
@@ -56,7 +58,15 @@ type Connection = {
   lines: StatusLines;
   lastEmoteAt: number;
   dancing: boolean;
+  danceMove: number;
+  afk: boolean;
+  /** Messages with a swear in them lately (see `SWEARS`). */
+  swears?: RateWindow;
   smoking: boolean;
+  /** In the conference hall: may put things on the big screen (from the stage). */
+  presenter?: boolean;
+  /** Stage changes lately (see `STAGE_LIMITS.perMinute`). */
+  stageChanges?: RateWindow;
   /** When the socket connected, for telling vanished ones apart (see `sweep`). */
   since: number;
 };
@@ -74,8 +84,10 @@ const CLOSE_REPLACED = 4000;
 const POKE_COOLDOWN_MS = 10_000;
 const EMOTE_COOLDOWN_MS = 1_500;
 const OPENED_KEY = 'opened';
+const LAMPS_KEY = 'lamps';
 const EPOCH_KEY = 'epoch';
 const JUKEBOX_KEY = 'jukebox';
+const STAGE_KEY = 'stage';
 const tableKey = (kind: TableKind) => `table:${kind}`;
 /** Songs queued per person per minute, on top of the queue's own limits. */
 const TUNES_PER_MINUTE = 4;
@@ -88,6 +100,8 @@ export const AREA_HEADERS = {
   area: 'x-area',
   /** A private room's rules as JSON, set by the owner. */
   rules: 'x-room-rules',
+  /** In the conference hall: 'presenter' or 'audience'. */
+  role: 'x-conference-role',
 } as const;
 const RULES_KEY = 'rules';
 /** Games a private room's table offers (darts needs the smoking room's cabinet). */
@@ -101,9 +115,13 @@ export class AreaRoom extends DurableObject<Env> {
   private grids = new Map<AreaId, AreaGrid>();
   /** Renovation strips opened so far; loaded from storage on the first message. */
   private opened: number | null = null;
+  /** Library lamps switched against the house rule; the librarian puts them back. Loaded with `opened`. */
+  private flippedLamps: Set<number> | null = null;
   /** The game tables, loaded from storage on the first message (they outlive hibernation). */
   private tables: Map<TableKind, TableRecord> | null = null;
   private jukebox: JukeboxState | null = null;
+  /** The conference hall's big screen; undefined until loaded, null when blank. */
+  private stage: StageState | null | undefined = undefined;
   /** A private room's rules; null in public rooms or until known. */
   private rules: RoomRules | null = null;
   /** When each person last queued songs, for `TUNES_PER_MINUTE`. */
@@ -151,7 +169,10 @@ export class AreaRoom extends DurableObject<Env> {
       lines: EMPTY_LINES,
       lastEmoteAt: 0,
       dancing: false,
+      danceMove: 0,
+      afk: false,
       smoking: false,
+      presenter: request.headers.get(AREA_HEADERS.role) === 'presenter',
       since: Date.now(),
     });
     await this.armSweep();
@@ -170,6 +191,7 @@ export class AreaRoom extends DurableObject<Env> {
       return this.send(ws, { t: 'error', code: 'blocked' });
     }
     this.opened ??= (await this.ctx.storage.get<number>(OPENED_KEY)) ?? 0;
+    this.flippedLamps ??= new Set((await this.ctx.storage.get<number[]>(LAMPS_KEY)) ?? []);
     await this.loadPlay();
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
     const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
@@ -208,6 +230,40 @@ export class AreaRoom extends DurableObject<Env> {
     }
     this.jukebox ??= (await this.ctx.storage.get<JukeboxState>(JUKEBOX_KEY)) ?? EMPTY_JUKEBOX;
     this.rules ??= (await this.ctx.storage.get<RoomRules>(RULES_KEY)) ?? null;
+    if (this.stage === undefined) {
+      this.stage = (await this.ctx.storage.get<StageState>(STAGE_KEY)) ?? null;
+    }
+  }
+
+  /** A new picture, video or sound on the big screen (or none): kept, and everyone told. */
+  private setStage(stage: StageState | null, now: number): void {
+    this.stage = stage;
+    void (stage ? this.ctx.storage.put(STAGE_KEY, stage) : this.ctx.storage.delete(STAGE_KEY));
+    this.broadcast({ t: 'staged', stage, now });
+  }
+
+  /**
+   * Whether this person may change the screen now: a presenter standing on the
+   * stage, within the rate limit. Says why not when they may not.
+   */
+  private mayPresent(ws: WebSocket, me: Connection, now: number): boolean {
+    if (me.area !== 'conference' || !me.joined || !me.tile) return false;
+    if (!me.presenter || !this.grid(me.area).isStage(me.tile)) {
+      this.send(ws, { t: 'error', code: 'not_presenter' });
+      return false;
+    }
+    const stageChanges = takeToken(
+      me.stageChanges ?? { start: 0, count: 0 },
+      now,
+      STAGE_LIMITS.perMinute,
+      60_000,
+    );
+    if (!stageChanges) {
+      this.send(ws, { t: 'error', code: 'rate_limited' });
+      return false;
+    }
+    this.save(ws, { ...me, stageChanges });
+    return true;
   }
 
   /** The owner changed the room's rules: everyone inside is told. */
@@ -294,6 +350,10 @@ export class AreaRoom extends DurableObject<Env> {
           area: me.area,
           players: this.players(now).filter((p) => p.id !== me.id),
           opened: this.opened ?? 0,
+          lamps: [...(this.flippedLamps ?? [])],
+          ...(me.area === 'conference'
+            ? { stage: this.stage ?? null, now, presenter: !!me.presenter }
+            : {}),
         });
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
         this.grow(me.area);
@@ -360,8 +420,19 @@ export class AreaRoom extends DurableObject<Env> {
           if (result.reason === 'link') this.send(ws, { t: 'error', code: 'link_blocked' });
           return;
         }
-        this.save(ws, { ...me, lastSayAt: now });
-        void this.ctx.storage.put(saidKey(me.id), now);
+        // Swearing again and again earns a short quiet: the next message waits a minute.
+        let swears = me.swears ?? { start: 0, count: 0 };
+        let lastSayAt = now;
+        if (result.masked) {
+          const left = takeToken(swears, now, SWEARS.count, SWEARS.windowMs);
+          if (left) swears = left;
+          else {
+            lastSayAt = now + SWEARS.quietMs;
+            this.send(ws, { t: 'error', code: 'swearing' });
+          }
+        }
+        this.save(ws, { ...me, lastSayAt, swears });
+        void this.ctx.storage.put(saidKey(me.id), lastSayAt);
         this.broadcast({ t: 'said', id: me.id, text: result.text, at: now });
         return;
       }
@@ -382,14 +453,17 @@ export class AreaRoom extends DurableObject<Env> {
         return;
       }
       case 'dance': {
-        if (!me.joined || me.dancing === message.on) return;
+        const move = message.move ?? 0;
+        if (!me.joined || (me.dancing === message.on && (!message.on || me.danceMove === move))) {
+          return;
+        }
         if (message.on && !AREA_RULES[me.area].dance) {
           return this.send(ws, { t: 'error', code: 'not_allowed' });
         }
         // One thing at a time: dancing puts the cigarette out.
-        this.save(ws, { ...me, dancing: message.on, smoking: false });
+        this.save(ws, { ...me, dancing: message.on, danceMove: move, smoking: false });
         if (me.smoking) this.broadcast({ t: 'smoked', id: me.id, on: false });
-        this.broadcast({ t: 'danced', id: me.id, on: message.on });
+        this.broadcast({ t: 'danced', id: me.id, on: message.on, move });
         return;
       }
       case 'chair': {
@@ -400,13 +474,31 @@ export class AreaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'chaired', tile: message.tile, pulled: message.pulled }, ws);
         return;
       }
+      case 'lamp': {
+        if (!me.joined || me.area !== 'library') return;
+        const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
+        const lamps = (this.flippedLamps ??= new Set());
+        if (!statuses || lamps.has(message.index) === message.flipped) return;
+        this.save(ws, { ...me, statuses });
+        if (message.flipped) lamps.add(message.index);
+        else lamps.delete(message.index);
+        void this.ctx.storage.put(LAMPS_KEY, [...lamps]);
+        this.broadcast({ t: 'lamped', index: message.index, flipped: message.flipped });
+        return;
+      }
+      case 'afk': {
+        if (!me.joined || me.afk === message.on) return;
+        this.save(ws, { ...me, afk: message.on });
+        this.broadcast({ t: 'afked', id: me.id, on: message.on });
+        return;
+      }
       case 'smoke': {
         if (!me.joined || me.smoking === message.on) return;
         if (message.on && !AREA_RULES[me.area].smoke) {
           return this.send(ws, { t: 'error', code: 'not_allowed' });
         }
         this.save(ws, { ...me, smoking: message.on, dancing: false });
-        if (me.dancing) this.broadcast({ t: 'danced', id: me.id, on: false });
+        if (me.dancing) this.broadcast({ t: 'danced', id: me.id, on: false, move: 0 });
         this.broadcast({ t: 'smoked', id: me.id, on: message.on });
         return;
       }
@@ -457,6 +549,31 @@ export class AreaRoom extends DurableObject<Env> {
         void this.env.SOCIAL.getByName('hub').recordBlock(me.id, timer.totalMs / 60_000);
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
         return;
+      }
+      case 'stageShow': {
+        if (!this.mayPresent(ws, me, now)) return;
+        const clean = cleanStage(message);
+        if (!clean.ok) return this.send(ws, { t: 'error', code: clean.error });
+        return this.setStage(
+          {
+            kind: clean.kind,
+            src: clean.src,
+            caption: clean.caption,
+            by: me.id,
+            byName: me.name,
+            startedAt: now,
+            pausedAt: null,
+          },
+          now,
+        );
+      }
+      case 'stageControl': {
+        if (!this.stage || !this.mayPresent(ws, me, now)) return;
+        return this.setStage(controlStage(this.stage, message, now), now);
+      }
+      case 'stageClear': {
+        if (!this.stage || !this.mayPresent(ws, me, now)) return;
+        return this.setStage(null, now);
       }
       case 'invite': {
         if (!me.joined) return;
@@ -760,6 +877,8 @@ function snapshot(c: Connection, now: number): PlayerSnapshot {
     status: publicStudy(c.study, now),
     lines: c.lines,
     dancing: c.dancing,
+    danceMove: c.danceMove ?? 0,
+    afk: c.afk ?? false,
     smoking: c.smoking,
   };
 }

@@ -1,3 +1,4 @@
+import { hasProfanity } from './profanity';
 import { containsLink } from './rules';
 import { normalizeChat } from './text';
 import type { RoomSize } from './world';
@@ -69,7 +70,7 @@ export function normalizeRoomCode(raw: string): string | null {
 /** A room's name: short, on one line, and no links. */
 export function cleanRoomName(raw: string): string | null {
   const name = normalizeChat(raw, ROOM_NAME_MAX);
-  return name && name.length >= 2 && !containsLink(name) ? name : null;
+  return name && name.length >= 2 && !containsLink(name) && !hasProfanity(name) ? name : null;
 }
 
 export function isValidRoomPassword(password: string): boolean {

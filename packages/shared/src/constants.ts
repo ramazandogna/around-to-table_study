@@ -26,3 +26,11 @@ export const DATA_EPOCH = 2;
 
 /** Access password attempts per address in ten minutes, before waiting. */
 export const PASSWORD_TRIES = 8;
+
+/** Friend requests one person may send in a window, so a name search cannot be used to spam. */
+export const FRIEND_REQUESTS = { count: 20, windowMs: 10 * 60_000 } as const;
+/** The most people a name search returns. */
+export const FIND_LIMIT = 12;
+
+/** Swearing more than this often in the window: the next message waits `quietMs`. */
+export const SWEARS = { count: 3, windowMs: 10 * 60_000, quietMs: 60_000 } as const;

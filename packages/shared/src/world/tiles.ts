@@ -17,6 +17,7 @@ export const TILE = {
   doorToHall: 'H',
   doorToLibrary: 'L',
   doorToSmoking: 'K',
+  doorToConference: 'M',
   /** The street entrance: where new arrivals come in. Drawn as a door, never walked through. */
   entrance: 'O',
   /** A notice board with the rules and this week's events; opens when someone stands next to it. */
@@ -39,6 +40,12 @@ export const TILE = {
   lostBox: 'Y',
   /** A small round table with games on it, in private rooms that allow games. */
   roomGameTable: 'Z',
+  /** The conference hall's raised stage: walkable, a step above the floor. */
+  stage: '^',
+  /** The microphone on its stand, on the stage. */
+  microphone: 'I',
+  /** A theatre chair in rows facing the stage; sat on like a sofa, facing the stage. */
+  theaterSeat: 'W',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];
@@ -50,6 +57,9 @@ const WALKABLE: ReadonlySet<string> = new Set([
   TILE.doorToHall,
   TILE.doorToLibrary,
   TILE.doorToSmoking,
+  TILE.doorToConference,
+  TILE.stage,
+  TILE.theaterSeat,
 ]);
 
 export function isWalkableTile(char: string): boolean {

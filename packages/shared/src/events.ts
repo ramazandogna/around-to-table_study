@@ -1,3 +1,4 @@
+import { hasProfanity } from './profanity';
 import type { AreaId } from './world';
 
 /**
@@ -75,6 +76,8 @@ export type ProposedEvent = {
   by: string;
   byName: string;
   status: 'pending' | 'approved' | 'rejected';
+  /** How the room is dressed; the meetup's look when left out. */
+  theme?: ThemeId | undefined;
 };
 
 export const EVENT_LIMITS = {
@@ -88,12 +91,20 @@ export const EVENT_LIMITS = {
 } as const;
 
 /** Rooms an event can be held in: the shared ones. */
-export const EVENT_AREAS = ['smoking', 'hall', 'library'] as const satisfies readonly AreaId[];
+export const EVENT_AREAS = [
+  'smoking',
+  'hall',
+  'library',
+  'conference',
+] as const satisfies readonly AreaId[];
 
 export type EventProposal = Pick<
   ProposedEvent,
-  'title' | 'description' | 'area' | 'start' | 'minutes'
+  'title' | 'description' | 'area' | 'start' | 'minutes' | 'theme'
 >;
+
+/** The looks a proposer can pick, in the order the form shows them. */
+export const THEME_IDS = Object.keys(EVENT_THEMES) as ThemeId[];
 
 /** Why a proposal cannot be taken, or null when it is fine. */
 export function checkProposal(
@@ -103,6 +114,7 @@ export function checkProposal(
   const title = proposal.title.trim();
   if (title.length < EVENT_LIMITS.title.min || title.length > EVENT_LIMITS.title.max)
     return 'title';
+  if (hasProfanity(title) || hasProfanity(proposal.description)) return 'title';
   if (!(EVENT_AREAS as readonly string[]).includes(proposal.area)) return 'area';
   if (
     !Number.isFinite(proposal.start) ||
@@ -129,9 +141,9 @@ export type Occurrence = {
 export const isWeekly = (event: WeeklyEvent | ProposedEvent): event is WeeklyEvent =>
   'weekday' in event;
 
-/** How a room is dressed for an occurrence: weekly events have their theme, proposals the meetup's. */
+/** How a room is dressed for an occurrence: the theme it was given, else the meetup's. */
 export function themeOf(event: WeeklyEvent | ProposedEvent): ThemeId {
-  return isWeekly(event) ? event.theme : 'meetup';
+  return event.theme && event.theme in EVENT_THEMES ? event.theme : 'meetup';
 }
 
 function oneOffs(proposed: readonly ProposedEvent[]): Occurrence[] {
@@ -154,21 +166,31 @@ function lastStart(event: WeeklyEvent, now: number): number {
   return start - event.utcOffset * MINUTE;
 }
 
-/** The event under way in a room right now, if any (weekly ones first). */
+/** A room dresses up this long before its event starts, so people see it coming. */
+export const DECOR_LEAD_MS = 15 * MINUTE;
+
+/**
+ * The event under way in a room right now, if any (weekly ones first). With
+ * `lead`, one that starts within that long counts too (for decorations).
+ */
 export function eventNow(
   area: AreaId,
   now: number,
   events = EVENTS,
   proposed: readonly ProposedEvent[] = [],
+  lead = 0,
 ): Occurrence | null {
   for (const event of events) {
     if (event.area !== area) continue;
-    const start = lastStart(event, now);
-    const end = start + event.minutes * MINUTE;
-    if (now >= start && now < end) return { event, start, end };
+    // The next start may be the one coming up within the lead.
+    for (const start of [lastStart(event, now), lastStart(event, now) + WEEK]) {
+      const end = start + event.minutes * MINUTE;
+      if (now >= start - lead && now < end) return { event, start, end };
+    }
   }
   return (
-    oneOffs(proposed).find((o) => o.event.area === area && now >= o.start && now < o.end) ?? null
+    oneOffs(proposed).find((o) => o.event.area === area && now >= o.start - lead && now < o.end) ??
+    null
   );
 }
 

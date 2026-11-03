@@ -1,3 +1,4 @@
+import { maskProfanity } from './profanity';
 import { normalizeChat } from './text';
 import { isRoomArea, type AreaId } from './world';
 
@@ -80,6 +81,21 @@ export const AREA_RULES: Record<AreaId, AreaRules> = {
     phone: true,
     smoke: false,
   },
+  // Talks and concerts: the audience may chat and cheer, like the hall.
+  conference: {
+    maxChars: 200,
+    cooldownMs: 3_000,
+    allowCaps: true,
+    allowLinks: false,
+    effectsVisible: true,
+    notifySound: true,
+    dmAllowed: true,
+    chatLog: true,
+    dance: true,
+    pets: true,
+    phone: true,
+    smoke: false,
+  },
   smoking: {
     maxChars: 300,
     cooldownMs: 3_000,
@@ -132,14 +148,17 @@ export function containsLink(text: string): boolean {
 }
 
 export type AreaTextResult =
-  { ok: true; text: string; lowered: boolean } | { ok: false; reason: 'empty' | 'link' };
+  | { ok: true; text: string; lowered: boolean; masked: boolean }
+  | { ok: false; reason: 'empty' | 'link' };
 
 /** Cleans a message and applies the area's length, caps and link rules. */
 export function applyAreaRules(raw: string, rules: AreaRules): AreaTextResult {
   const clean = normalizeChat(raw, rules.maxChars);
   if (!clean) return { ok: false, reason: 'empty' };
   if (!rules.allowLinks && containsLink(clean)) return { ok: false, reason: 'link' };
-  if (rules.allowCaps) return { ok: true, text: clean, lowered: false };
-  const text = quietCase(clean);
-  return { ok: true, text, lowered: text !== clean };
+  // Swears are masked, not refused: the rest of the message still counts.
+  const { text: polite, masked } = maskProfanity(clean);
+  if (rules.allowCaps) return { ok: true, text: polite, lowered: false, masked };
+  const text = quietCase(polite);
+  return { ok: true, text, lowered: text !== polite, masked };
 }

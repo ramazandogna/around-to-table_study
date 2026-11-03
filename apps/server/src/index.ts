@@ -228,12 +228,19 @@ async function joinArea(request: Request, env: Env, area: string): Promise<Respo
     object = `room:${code}`;
     rules = JSON.stringify(room.rules);
   }
+  // The conference hall opens around its events (always on a local server, and for admins).
+  let role: string | null = null;
+  if (area === 'conference') {
+    role = await env.SOCIAL.getByName('hub').conferenceRole(session.id, !env.ACCESS_PASSWORD);
+    if (!role) return error('closed', 403);
+  }
 
   const headers = new Headers(request.headers);
   headers.set(AREA_HEADERS.id, session.id);
   headers.set(AREA_HEADERS.name, encodeURIComponent(session.name));
   headers.set(AREA_HEADERS.area, area as AreaId);
   if (rules) headers.set(AREA_HEADERS.rules, rules);
+  if (role) headers.set(AREA_HEADERS.role, role);
   return env.AREAS.getByName(object).fetch(new Request(request, { headers }));
 }
 

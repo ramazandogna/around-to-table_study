@@ -1,7 +1,7 @@
 import { TILE } from './tiles';
 
 /** The building's shared rooms. */
-export const PUBLIC_AREAS = ['hall', 'library', 'smoking'] as const;
+export const PUBLIC_AREAS = ['hall', 'library', 'smoking', 'conference'] as const;
 export type PublicAreaId = (typeof PUBLIC_AREAS)[number];
 
 /**
@@ -45,23 +45,28 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     id: 'hall',
     // People come in from the street (bottom) and walk the rug straight to the library's
     // glass doors, so arriving and leaving never cross. Reception sits front right, facing
-    // the people coming in, on the way to the elevator; the smoking room and sofas are left.
+    // the people coming in, on the way to the elevator. On the left wall the smoking room's
+    // door sits up in the corner, and the conference hall's double door lower down.
     // The notice board stands left of the rug, passed on the way in; the door frame would hide it lower down.
     // The receptionist's chair is behind the desk, on the elevator's side.
     layout: [
       '#######LLLL#######',
       '#P..............P#',
+      'K................#',
       '#................#',
       '#................#',
-      '#................#',
-      'K................E',
-      '#.....N..........E',
-      '#.A.........C....#',
+      '#................E',
+      'M.....N..........E',
+      'M.A.........C....#',
       '#..bbbb.....CQ...#',
       '#P..........C...P#',
       '#######OOOO#######',
     ],
-    doors: { [TILE.doorToLibrary]: 'library', [TILE.doorToSmoking]: 'smoking' },
+    doors: {
+      [TILE.doorToLibrary]: 'library',
+      [TILE.doorToSmoking]: 'smoking',
+      [TILE.doorToConference]: 'conference',
+    },
     spawn: { x: 8, y: 8 },
     renovation: null,
     rugs: [{ x: 7, y: 1, w: 4, h: 9 }],
@@ -126,6 +131,36 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
     spawn: { x: 8, y: 5 },
     renovation: null,
     rugs: [{ x: 4, y: 3, w: 6, h: 4 }],
+  },
+
+  conference: {
+    id: 'conference',
+    // As big as the library: a stage with a microphone along the back wall, a big
+    // screen above it, and rows of theatre chairs facing it with an aisle down the
+    // middle. Talks, concerts and screenings; for now it opens only for events.
+    layout: [
+      '##############################',
+      '#P......^^^^^^^^^^^^^^......P#',
+      '#.......^^^^^^^^^^^^^^.......#',
+      '#.......^^^^^^I^^^^^^^.......#',
+      '#............................#',
+      '#..WWWWWWWWWWW..WWWWWWWWWWW..#',
+      '#............................#',
+      '#..WWWWWWWWWWW..WWWWWWWWWWW..#',
+      '#............................#',
+      '#..WWWWWWWWWWW..WWWWWWWWWWW..#',
+      '#............................#',
+      '#..WWWWWWWWWWW..WWWWWWWWWWW..#',
+      '#............................#',
+      '#..WWWWWWWWWWW..WWWWWWWWWWW..#',
+      '#............................#',
+      '#P..........................P#',
+      '#############HHHH#############',
+    ],
+    doors: { [TILE.doorToHall]: 'hall' },
+    spawn: { x: 14, y: 14 },
+    renovation: null,
+    rugs: [{ x: 14, y: 4, w: 2, h: 12 }],
   },
 
   // Private rooms: a table for everyone, a sofa, shelves, and a door back to the hall.
