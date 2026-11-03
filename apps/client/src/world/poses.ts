@@ -147,6 +147,205 @@ export function createDanceCycle(): AnimationClip {
   return new AnimationClip('dance', beat * 2, tracks);
 }
 
+/**
+ * The six dances on the dance ring, in its order: the bounce above, then a
+ * slow sway, the robot, a disco point, the twist and a cheer with jumps.
+ */
+export function createDances(): AnimationClip[] {
+  return [createDanceCycle(), sway(), robot(), disco(), twist(), cheer()];
+}
+
+/** Side to side, slowly, arms out like wings. */
+function sway(): AnimationClip {
+  const b = 0.8;
+  const t = [0, b / 2, b, (b * 3) / 2, b * 2];
+  return new AnimationClip('dance-sway', b * 2, [
+    new VectorKeyframeTrack(
+      'root.position',
+      t,
+      [0, 0, 0, 0.04, 0.01, 0, 0, 0, 0, -0.04, 0.01, 0, 0, 0, 0],
+    ),
+    turns('torso', [
+      [0, 0, 0, 0],
+      [b / 2, 0, 0, -8],
+      [b, 0, 0, 0],
+      [(b * 3) / 2, 0, 0, 8],
+      [b * 2, 0, 0, 0],
+    ]),
+    turns('head', [
+      [0, 0, 0, 0],
+      [b / 2, 0, 0, 10],
+      [b, 0, 0, 0],
+      [(b * 3) / 2, 0, 0, -10],
+      [b * 2, 0, 0, 0],
+    ]),
+    arms('arm-left', [
+      [0, [1, 0.25, 0.1]],
+      [b / 2, [1, 0.5, 0.1]],
+      [b, [1, 0.25, 0.1]],
+      [(b * 3) / 2, [1, -0.05, 0.1]],
+      [b * 2, [1, 0.25, 0.1]],
+    ]),
+    arms('arm-right', [
+      [0, [1, 0.25, 0.1]],
+      [b / 2, [1, -0.05, 0.1]],
+      [b, [1, 0.25, 0.1]],
+      [(b * 3) / 2, [1, 0.5, 0.1]],
+      [b * 2, [1, 0.25, 0.1]],
+    ]),
+  ]);
+}
+
+/** Stiff, held poses that snap from one to the next. */
+function robot(): AnimationClip {
+  const b = 0.4;
+  // Each pose is held, then snaps: two keys a hair apart.
+  const held = <T>(poses: T[]): [number, T][] =>
+    poses.flatMap((pose, i) => [
+      [i * b, pose] as [number, T],
+      [(i + 1) * b - 0.02, pose] as [number, T],
+    ]);
+  const left: Direction[] = [
+    [0.2, 0, 0.98],
+    [0.2, 0.7, 0.7],
+    [0.2, 0, 0.98],
+    [0.9, -0.4, 0.1],
+  ];
+  const right: Direction[] = [
+    [0.2, 0.7, 0.7],
+    [0.2, 0, 0.98],
+    [0.9, -0.4, 0.1],
+    [0.2, 0, 0.98],
+  ];
+  const head = [0, 20, 0, -20];
+  return new AnimationClip('dance-robot', b * 4, [
+    arms('arm-left', held(left)),
+    arms('arm-right', held(right)),
+    turns(
+      'head',
+      held(head).map(([time, y]) => [time, 0, y, 0] as const),
+    ),
+    turns(
+      'torso',
+      held([0, 10, 0, -10]).map(([time, y]) => [time, 0, y, 0] as const),
+    ),
+  ]);
+}
+
+/** One finger to the sky, then down across, the other hand on the hip. */
+function disco(): AnimationClip {
+  const b = 0.5;
+  const t = [0, b / 2, b, (b * 3) / 2, b * 2];
+  return new AnimationClip('dance-disco', b * 2, [
+    new VectorKeyframeTrack(
+      'root.position',
+      t,
+      t.flatMap((_, i) => [0, i % 2 ? 0.03 : 0, 0]),
+    ),
+    arms('arm-right', [
+      [0, [0.55, 0.83, 0.1]],
+      [b / 2, [0.55, 0.83, 0.1]],
+      [b, [-0.35, -0.7, 0.6]],
+      [(b * 3) / 2, [-0.35, -0.7, 0.6]],
+      [b * 2, [0.55, 0.83, 0.1]],
+    ]),
+    arms('arm-left', [[0, [0.7, -0.6, -0.2]]]),
+    turns('torso', [
+      [0, 0, -12, 4],
+      [b, 0, 12, -4],
+      [b * 2, 0, -12, 4],
+    ]),
+    turns('head', [
+      [0, -10, -15, 0],
+      [b, 10, 15, 0],
+      [b * 2, -10, -15, 0],
+    ]),
+  ]);
+}
+
+/** Knees bent, the body twisting fast one way and the other. */
+function twist(): AnimationClip {
+  const b = 0.35;
+  const t = [0, b / 2, b, (b * 3) / 2, b * 2];
+  return new AnimationClip('dance-twist', b * 2, [
+    new VectorKeyframeTrack(
+      'root.position',
+      t,
+      t.flatMap((_, i) => [0, i % 2 ? -0.035 : -0.015, 0]),
+    ),
+    turns('torso', [
+      [0, 0, 28, 0],
+      [b, 0, -28, 0],
+      [b * 2, 0, 28, 0],
+    ]),
+    turns('leg-left', [
+      [0, -18, -15, 0],
+      [b, -18, 15, 0],
+      [b * 2, -18, -15, 0],
+    ]),
+    turns('leg-right', [
+      [0, -18, -15, 0],
+      [b, -18, 15, 0],
+      [b * 2, -18, -15, 0],
+    ]),
+    arms('arm-left', [
+      [0, [0.5, 0.1, 0.85]],
+      [b, [0.9, 0.1, 0.3]],
+      [b * 2, [0.5, 0.1, 0.85]],
+    ]),
+    arms('arm-right', [
+      [0, [0.9, 0.1, 0.3]],
+      [b, [0.5, 0.1, 0.85]],
+      [b * 2, [0.9, 0.1, 0.3]],
+    ]),
+  ]);
+}
+
+/** Both arms up, pumping, with little jumps. */
+function cheer(): AnimationClip {
+  const b = 0.45;
+  const t = [0, b / 2, b, (b * 3) / 2, b * 2];
+  return new AnimationClip('dance-cheer', b * 2, [
+    new VectorKeyframeTrack(
+      'root.position',
+      t,
+      [0, 0, 0, 0, 0.09, 0, 0, 0, 0, 0, 0.09, 0, 0, 0, 0],
+    ),
+    arms('arm-left', [
+      [0, [0.6, 0.6, 0.3]],
+      [b / 2, [0.25, 0.96, 0.1]],
+      [b, [0.6, 0.6, 0.3]],
+      [(b * 3) / 2, [0.25, 0.96, 0.1]],
+      [b * 2, [0.6, 0.6, 0.3]],
+    ]),
+    arms('arm-right', [
+      [0, [0.6, 0.6, 0.3]],
+      [b / 2, [0.25, 0.96, 0.1]],
+      [b, [0.6, 0.6, 0.3]],
+      [(b * 3) / 2, [0.25, 0.96, 0.1]],
+      [b * 2, [0.6, 0.6, 0.3]],
+    ]),
+    turns('head', [
+      [0, -5, 0, 0],
+      [b / 2, -15, 0, 0],
+      [b, -5, 0, 0],
+      [b * 2, -5, 0, 0],
+    ]),
+    turns('leg-left', [
+      [0, 0],
+      [b / 2, -20],
+      [b, 0],
+      [b * 2, 0],
+    ]),
+    turns('leg-right', [
+      [0, 0],
+      [b, 0],
+      [(b * 3) / 2, -20],
+      [b * 2, 0],
+    ]),
+  ]);
+}
+
 /** Raises the right hand and waves it a few times. */
 export function createWaveGesture(): AnimationClip {
   const tracks = [

@@ -9,6 +9,7 @@ const FLOOR: Record<string, string> = {
   hall: '#dccfb8',
   library: '#c48e5a',
   smoking: '#94603f',
+  conference: '#9a6a48',
 };
 
 const TILE_COLOR: Partial<Record<string, string>> = {
@@ -24,6 +25,10 @@ const TILE_COLOR: Partial<Record<string, string>> = {
   [TILE.doorToHall]: '#f2c230',
   [TILE.doorToLibrary]: '#f2c230',
   [TILE.doorToSmoking]: '#f2c230',
+  [TILE.doorToConference]: '#f2c230',
+  [TILE.stage]: '#5a3a26',
+  [TILE.microphone]: '#2a2a2e',
+  [TILE.theaterSeat]: '#8e2b2f',
   [TILE.entrance]: '#f2c230',
   [TILE.noticeBoard]: '#d0523f',
 };

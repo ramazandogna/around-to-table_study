@@ -1,6 +1,6 @@
 import { APP_NAME, isRoomArea, type AreaId } from '@att/shared';
 import { useEffect, useRef } from 'react';
-import { t } from '../i18n/t';
+import { getLanguage, setLanguage, t } from '../i18n/t';
 import { layerIndex, useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
 import { WorldClock } from './Calendar';
@@ -15,6 +15,7 @@ const AREA_ICON: Record<AreaId, string> = {
   hall: '🚪',
   library: '📚',
   smoking: '☕',
+  conference: '🎤',
   room3: '🔑',
   room5: '🔑',
   room9: '🔑',
@@ -70,6 +71,7 @@ export function HudPlate() {
         <InboxLink />
         <Wardrobe />
         <SoundToggle />
+        <LanguageToggle />
         <IntroLink />
         <StartOver />
       </nav>
@@ -96,6 +98,24 @@ function SoundToggle() {
         {muted ? '🔇' : '🔊'}
       </span>
       <span className="hud-label">{t(muted ? 'hud.muted' : 'hud.sound')}</span>
+    </button>
+  );
+}
+
+/** English or Türkçe; switching reloads so every sign changes too. */
+function LanguageToggle() {
+  const next = getLanguage() === 'en' ? 'tr' : 'en';
+  return (
+    <button
+      type="button"
+      className="hud-link"
+      title={next === 'tr' ? 'Türkçe' : 'English'}
+      onClick={() => setLanguage(next)}
+    >
+      <span className="hud-icon" aria-hidden>
+        🌐
+      </span>
+      <span className="hud-label">{next === 'tr' ? 'Türkçe' : 'English'}</span>
     </button>
   );
 }

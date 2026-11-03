@@ -2,7 +2,7 @@ import { AREA_RULES, createAreaGrid, EVENTS, upcoming } from '@att/shared';
 import type { ReactNode } from 'react';
 import { eventTitle } from '../content/events';
 import { HALL_EVENTS, LIBRARY_SESSIONS, type Pinned } from '../content/boards';
-import { t } from '../i18n/t';
+import { dateLocale, t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { useNow } from './Calendar';
 
@@ -221,7 +221,7 @@ function NextEvent() {
         {live
           ? t('board.events.now', { area: t(`area.${next.event.area}`) })
           : t('board.events.when', {
-              when: new Date(next.start).toLocaleString([], {
+              when: new Date(next.start).toLocaleString(dateLocale(), {
                 weekday: 'long',
                 hour: '2-digit',
                 minute: '2-digit',

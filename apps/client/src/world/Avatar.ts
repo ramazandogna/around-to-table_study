@@ -24,6 +24,7 @@ import { t } from '../i18n/t';
 import { ACTIVITY_ICON, DOING_ICON, formatClock, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { CHAIR_INSET, FLOOR_Y, SEAT_HEIGHT, SOFA_SEAT_HEIGHT, TABLE_HEIGHT } from './buildArea';
 import type { Character, CharacterClips, CharacterKit } from './characters';
+import { groundAt } from './ground';
 import { showEmote } from './emotes';
 import { facing } from './instancing';
 import { SMOKE_DRAG, SMOKE_EXHALE_AT } from './poses';
@@ -59,6 +60,8 @@ const SEAT_EASE = 9;
 const SIT_INSET = CHAIR_INSET + 0.06;
 /** On a sofa the body sits forward enough to stay inside the backrest. */
 const SOFA_INSET = 0.1;
+/** A theatre chair stands in the middle of its tile; the body sits back into it. */
+const THEATER_INSET = -0.04;
 /** Waiting to sit, the body stands this far behind the chair's tile middle. */
 const STAND_BEHIND = 0.42;
 /** The hip joints sit this far above the cushion (half a leg's thickness). */
@@ -131,7 +134,7 @@ type LocalStatus = Omit<StudyStatus, 'timer'> & {
 
 type Pose = 'idle' | 'walk' | 'sit';
 
-type Loop = 'idle' | 'walk' | 'sit' | 'study' | 'dance' | 'smoke';
+type Loop = 'idle' | 'walk' | 'sit' | 'study' | 'smoke';
 type Gesture = 'poke' | 'nod' | 'wave';
 
 /**
@@ -169,6 +172,9 @@ export class Avatar {
   private sitBlend = 0;
   private stillFor = 0;
   private dancing = false;
+  /** Which of the six dances (see `DANCES`). */
+  private danceMove = 0;
+  private danceActions: AnimationAction[] = [];
   private smoking = false;
   /** A chair at a table this body stands at without sitting yet. */
   private waitingAt: Seat | null = null;
@@ -198,6 +204,12 @@ export class Avatar {
   private pokeTimer = 0;
   private readonly linesBox: HTMLDivElement;
   private readonly nameTag: HTMLButtonElement;
+  /** "+3": how many more stand with them, in a tight crowd. */
+  private readonly moreTag = document.createElement('span');
+  /** 💤 while away from the keyboard. */
+  private readonly afkTag = document.createElement('span');
+  private readonly micTag = document.createElement('span');
+  private detail: 'full' | 'far' | 'off' = 'full';
   private stopEmote: (() => void) | null = null;
   private hopFor = 0;
   private linesOpenTimer = 0;
@@ -256,7 +268,15 @@ export class Avatar {
     this.phoneBuzz.className = 'avatar-buzz';
     this.phoneBuzz.textContent = '📳';
     this.phoneBuzz.hidden = true;
-    nameTag.append(this.badges, this.phoneBuzz);
+    this.moreTag.className = 'avatar-more';
+    this.moreTag.hidden = true;
+    this.afkTag.className = 'avatar-afk';
+    this.afkTag.textContent = '💤';
+    this.afkTag.hidden = true;
+    this.micTag.className = 'avatar-mic';
+    this.micTag.textContent = '🎤';
+    this.micTag.hidden = true;
+    nameTag.append(this.micTag, this.afkTag, this.badges, this.phoneBuzz, this.moreTag);
     nameTag.addEventListener('click', () => (this.onTap ? this.onTap() : this.toggleDetails()));
     element.append(
       this.emoteIcon,
@@ -297,6 +317,9 @@ export class Avatar {
       this.materials.push(material);
     });
     this.setHighlight(this.highlighted, true);
+    // A new body casts shadows again until the world next decides it is far.
+    this.detail = 'full';
+    this.root.visible = true;
     this.body.add(model);
     this.mixer = new AnimationMixer(model);
     this.actions = {
@@ -304,7 +327,6 @@ export class Avatar {
       walk: this.mixer.clipAction(clips.walk),
       sit: this.mixer.clipAction(clips.sit),
       study: this.mixer.clipAction(clips.study),
-      dance: this.mixer.clipAction(clips.dance),
       smoke: this.mixer.clipAction(clips.smoke),
     };
     // The cigarette goes into the new body's right hand.
@@ -315,6 +337,9 @@ export class Avatar {
     }
     // All of them always play; their weights follow what the body does (see `animate`).
     for (const action of Object.values(this.actions)) action.play().setEffectiveWeight(0);
+    this.danceActions = clips.dances.map((clip) =>
+      this.mixer.clipAction(clip).play().setEffectiveWeight(0),
+    );
     this.actions.idle.setEffectiveWeight(1);
     this.gesture = null;
   }
@@ -340,13 +365,18 @@ export class Avatar {
     return this.isSeated ? (this.seat?.kind ?? null) : null;
   }
 
+  get danceMoveNow(): number {
+    return this.danceMove;
+  }
+
   get isDancing(): boolean {
     return this.dancing;
   }
 
   /** Dances in place while standing; walking or sitting down ends it. */
-  setDancing(on: boolean): void {
+  setDancing(on: boolean, move = this.danceMove): void {
     this.dancing = on;
+    this.danceMove = move;
     if (on) this.setSmoking(false);
   }
 
@@ -512,6 +542,16 @@ export class Avatar {
     return this.lines;
   }
 
+  /**
+   * In a tight crowd only one name tag shows, with "+N" for the others standing
+   * with them; the rest hide theirs (`merged`) until the crowd breaks up.
+   */
+  setMerged(merged: boolean, others = 0): void {
+    this.label.element.classList.toggle('avatar-label--merged', merged);
+    this.moreTag.hidden = others === 0;
+    this.moreTag.textContent = others > 0 ? `+${others}` : '';
+  }
+
   /** Folds the lines into one icon row when people crowd together; your own always stay open. */
   setCrowded(crowded: boolean): void {
     if (crowded === this.crowded) return;
@@ -520,6 +560,37 @@ export class Avatar {
   }
 
   /** Friends get a ⭐ on their name tag and keep their lines open in a crowd, like your own. */
+  /** Away from the keyboard: a small 💤 by the name. */
+  setAfk(on: boolean): void {
+    this.afkTag.hidden = !on;
+    this.afkTag.title = on ? t('afk.title') : '';
+  }
+
+  /**
+   * How much of this person is drawn, for crowds: everything; no shadow and
+   * no name tag when far away; nothing at all when off the screen.
+   */
+  setDetail(detail: 'full' | 'far' | 'off'): void {
+    if (detail === this.detail) return;
+    this.detail = detail;
+    this.root.visible = detail !== 'off';
+    this.model?.traverse((child) => {
+      if ((child as Mesh).isMesh) child.castShadow = detail === 'full';
+    });
+    this.label.element.classList.toggle('avatar-label--far', detail === 'far' && !this.friend);
+  }
+
+  /** At the conference hall's microphone: a 🎤 by the name. */
+  setSpeaking(on: boolean): void {
+    if (this.micTag.hidden !== on) return;
+    this.micTag.hidden = !on;
+    this.label.element.classList.toggle('avatar-label--speaking', on);
+  }
+
+  get isFriend(): boolean {
+    return this.friend;
+  }
+
   setFriend(friend: boolean): void {
     if (friend === this.friend) return;
     this.friend = friend;
@@ -905,7 +976,9 @@ export class Avatar {
     this.actions.study.setEffectiveWeight(studying ? this.sitBlend * rest : 0);
     this.actions.sit.setEffectiveWeight(studying ? 0 : this.sitBlend * rest);
     this.actions.walk.setEffectiveWeight(standing * walking);
-    this.actions.dance.setEffectiveWeight(standing * (1 - walking) * dancing);
+    this.danceActions.forEach((action, i) =>
+      action.setEffectiveWeight(i === this.danceMove ? standing * (1 - walking) * dancing : 0),
+    );
     this.actions.smoke.setEffectiveWeight(standing * (1 - walking) * smoking);
     this.actions.idle.setEffectiveWeight(standing * (1 - walking) * (1 - dancing - smoking));
     this.actions.walk.timeScale = WALK_TEMPO_AT_FULL_PACE * Math.max(pace, 0.55);
@@ -918,8 +991,8 @@ export class Avatar {
     if (seat) {
       const { x, z } = tileCenter(this.tile);
       const chair = seat.kind === 'chair';
-      const inset = chair ? SIT_INSET : SOFA_INSET;
-      const cushion = chair ? SEAT_HEIGHT : SOFA_SEAT_HEIGHT;
+      const inset = chair ? SIT_INSET : seat.theater ? THEATER_INSET : SOFA_INSET;
+      const cushion = chair || seat.theater ? SEAT_HEIGHT : SOFA_SEAT_HEIGHT;
       const y = FLOOR_Y + cushion + HIP_ABOVE_SEAT - this.kit.seatedHipHeight;
       this.settleTarget.set(x + seat.facing.x * inset, y, z + seat.facing.y * inset);
       position.lerp(this.settleTarget, ease);
@@ -931,7 +1004,7 @@ export class Avatar {
       this.settleTarget.set(x + toward.x * step, FLOOR_Y, z + toward.y * step);
       position.lerp(this.settleTarget, ease);
     } else {
-      position.y = MathUtils.lerp(position.y, FLOOR_Y, ease);
+      position.y = MathUtils.lerp(position.y, FLOOR_Y + groundAt(this.tile), ease);
     }
     const labelHeight = this.pose === 'sit' ? SEATED_LABEL_HEIGHT : LABEL_HEIGHT;
     this.label.position.y = MathUtils.lerp(this.label.position.y, labelHeight, ease);

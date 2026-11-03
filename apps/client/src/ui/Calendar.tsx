@@ -1,5 +1,8 @@
 import {
   EVENT_AREAS,
+  EVENT_THEMES,
+  THEME_IDS,
+  type ThemeId,
   EVENT_LIMITS,
   EVENTS,
   eventNow,
@@ -11,7 +14,7 @@ import {
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { play } from '../audio/sound';
 import { eventShort, eventText, eventTitle } from '../content/events';
-import { t } from '../i18n/t';
+import { dateLocale, t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { Dialog } from './Panel';
 
@@ -29,14 +32,14 @@ export function useNow(every = 1000): number {
   return now;
 }
 
-const clockFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-const dayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
-const dateFormat = new Intl.DateTimeFormat(undefined, {
+const clockFormat = new Intl.DateTimeFormat(dateLocale(), { hour: '2-digit', minute: '2-digit' });
+const dayFormat = new Intl.DateTimeFormat(dateLocale(), { weekday: 'short' });
+const dateFormat = new Intl.DateTimeFormat(dateLocale(), {
   weekday: 'long',
   day: 'numeric',
   month: 'long',
 });
-const japanFormat = new Intl.DateTimeFormat(undefined, {
+const japanFormat = new Intl.DateTimeFormat(dateLocale(), {
   weekday: 'short',
   hour: '2-digit',
   minute: '2-digit',
@@ -362,6 +365,7 @@ function EventForm({ now }: { now: number }) {
     return toInput(start.getTime());
   });
   const [minutes, setMinutes] = useState<number>(60);
+  const [theme, setTheme] = useState<ThemeId>('meetup');
   const start = new Date(when).getTime();
   const valid =
     title.trim().length >= EVENT_LIMITS.title.min && Number.isFinite(start) && start > now;
@@ -377,6 +381,7 @@ function EventForm({ now }: { now: number }) {
       area,
       start,
       minutes,
+      theme,
     });
     store.setEventFormOpen(false);
     store.setNotice('event_proposed');
@@ -431,6 +436,25 @@ function EventForm({ now }: { now: number }) {
           </select>
         </label>
       </div>
+      <fieldset className="event-themes">
+        <legend className="field-label">{t('calendar.form.theme')}</legend>
+        {THEME_IDS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={theme === id}
+            className={`event-theme${theme === id ? ' event-theme--on' : ''}`}
+            onClick={() => setTheme(id)}
+          >
+            <span className="event-theme-flags" aria-hidden>
+              {EVENT_THEMES[id].bunting.map((colour, i) => (
+                <i key={i} style={{ background: colour }} />
+              ))}
+            </span>
+            {t(`event.theme.${id}`)}
+          </button>
+        ))}
+      </fieldset>
       <p className="creator-note">{t('calendar.form.note')}</p>
       <div className="panel-actions">
         <button

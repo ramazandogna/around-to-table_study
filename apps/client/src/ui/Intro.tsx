@@ -1,3 +1,4 @@
+import { LegalLine } from './CharacterCreator';
 import { useEffect } from 'react';
 import { t, type MessageKey } from '../i18n/t';
 import { readJson, writeJson } from '../net/storage';
@@ -51,6 +52,7 @@ export function Intro() {
             </li>
           ))}
         </ol>
+        <LegalLine />
         <button type="button" className="panel-ok intro-ok" onClick={close}>
           {t('intro.ok')}
         </button>

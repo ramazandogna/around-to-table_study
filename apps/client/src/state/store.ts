@@ -1,9 +1,11 @@
 import {
+  type FoundPerson,
   DM_HISTORY,
   EMPTY_JUKEBOX,
   EMPTY_LINES,
   JUKEBOX,
   type JukeboxState,
+  type StageState,
   type Profile,
   type ProposedEvent,
   type Role,
@@ -39,6 +41,7 @@ import {
 
 export type Notice =
   | 'rate_limited'
+  | 'swearing'
   | 'replaced'
   | 'offline'
   | 'quiet_caps'
@@ -63,6 +66,8 @@ export type Notice =
   | 'pet_waits'
   /** A study timer ran out. */
   | 'finished'
+  /** The player's own daily goal was reached today. */
+  | 'goal_reached'
   /** An event just started (the value is its room). */
   | 'event_started'
   /** A coffee from the vending machine. */
@@ -85,6 +90,12 @@ export type Notice =
   | 'tune_bad'
   | 'tune_full'
   | 'tune_long'
+  /** The big screen could not take a link, or only the presenter on the stage may change it. */
+  | 'stage_link'
+  | 'stage_host'
+  | 'not_presenter'
+  /** The conference hall is closed except around its events. */
+  | 'conference_closed'
   /** A song went into the queue. */
   | 'tune_added'
   /** No smoking outside the smoking room. */
@@ -282,11 +293,13 @@ export function layerIndex(layers: Record<Layer, number>, layer: Layer): number 
 export type Radial = {
   x: number;
   y: number;
-  mode?: 'self' | 'emote' | 'person' | undefined;
+  mode?: 'self' | 'emote' | 'dance' | 'person' | 'pick' | undefined;
   /** For 'person': who, by name, with their status lines as they were when tapped. */
   id?: string | undefined;
   name?: string | undefined;
   lines?: StatusLines | undefined;
+  /** For 'pick': the people standing together under the tap, to choose who was meant. */
+  people?: { id: string; name: string; lines: StatusLines }[] | undefined;
 };
 
 /** State shared between the three.js world and the React UI. */
@@ -325,6 +338,11 @@ type GameState = {
   /** The rooms panel (reception or elevator), and a code to fill in from a link or invite. */
   roomsOpen: boolean;
   roomCode: string | null;
+  /** The rooms panel was opened at the reception desk: a room can be opened here. */
+  roomsAtDesk: boolean;
+  /** Asks the world to walk the player to the reception desk (a time, so it can repeat). */
+  deskWalk: number;
+  walkToDesk: () => void;
   /** Someone in the room invited the player to theirs. */
   invite: { from: string; code: string; name: string } | null;
   /** Event music on or off (all sound has its own switch too). */
@@ -336,13 +354,29 @@ type GameState = {
   /** The "what is Around the Table" note from the board, open over the game. */
   introOpen: boolean;
   /** The player dances (where the room allows it). */
+  /** People found by a name search (the add-friend box), or null before one. */
+  found: FoundPerson[] | null;
+  setFound: (found: FoundPerson[] | null) => void;
   dancing: boolean;
+  /** Which dance (an index into `DANCES`). */
+  danceMove: number;
   /** The player smokes (in the smoking room). */
   smoking: boolean;
   /** The smoking room's game tables, as the server last said. */
   tables: Partial<Record<TableKind, Table>>;
   tableOpen: TableOpen | null;
   jukebox: JukeboxState;
+  /**
+   * The conference hall's big screen, and how far the server's clock is ahead
+   * of this one (to play videos and sounds at the room's moment).
+   */
+  stage: StageState | null;
+  stageClockOffset: number;
+  /** In the conference hall: whether this player may present (from the stage). */
+  presenter: boolean;
+  /** On this device: the big screen hidden ("not watching"), or enlarged. */
+  stageHidden: boolean;
+  stageFull: boolean;
   jukeboxOpen: boolean;
   /** Listening to the jukebox on this device, and how loud. */
   jukeboxOn: boolean;
@@ -445,7 +479,7 @@ type GameState = {
   setCalendarOpen: (open: boolean) => void;
   setGame: (game: 'arcade' | 'claw' | null) => void;
   setRoom: (room: RoomTicket | null) => void;
-  openRooms: (code?: string | null) => void;
+  openRooms: (code?: string | null, atDesk?: boolean) => void;
   closeRooms: () => void;
   setInvite: (invite: { from: string; code: string; name: string } | null) => void;
   setMusicOn: (on: boolean) => void;
@@ -454,11 +488,16 @@ type GameState = {
   setRadial: (radial: Radial | null) => void;
   setDiscovery: (discovery: Discovery | null) => void;
   setIntroOpen: (open: boolean) => void;
-  setDancing: (dancing: boolean) => void;
+  setDancing: (dancing: boolean, move?: number) => void;
   setSmoking: (smoking: boolean) => void;
   setTable: (kind: TableKind, table: Table | null) => void;
   setTableOpen: (open: TableOpen | null) => void;
   setJukebox: (state: JukeboxState) => void;
+  setStage: (stage: StageState | null, serverNow?: number, presenter?: boolean) => void;
+  /** Someone pointed at in a crowd's chooser: a ring shows under them. */
+  ringFor: string | null;
+  setRingFor: (id: string | null) => void;
+  setStageView: (view: { hidden?: boolean; full?: boolean }) => void;
   setJukeboxOpen: (open: boolean) => void;
   /** Saves on this device whether to listen and how loud. */
   setJukeboxPrefs: (prefs: { on?: boolean; volume?: number }) => void;
@@ -552,17 +591,29 @@ export const useGameStore = create<GameState>((set) => ({
   room: null,
   roomsOpen: false,
   roomCode: null,
+  roomsAtDesk: false,
+  deskWalk: 0,
+  walkToDesk: () => set({ roomsOpen: false, deskWalk: Date.now() }),
   invite: null,
   musicOn: isMusicOn(),
   opened: {},
   radial: null,
   discovery: null,
   introOpen: false,
+  found: null,
+  setFound: (found) => set({ found }),
   dancing: false,
+  danceMove: 0,
   smoking: false,
   tables: {},
   tableOpen: null,
   jukebox: EMPTY_JUKEBOX,
+  stage: null,
+  ringFor: null,
+  stageClockOffset: 0,
+  presenter: false,
+  stageHidden: false,
+  stageFull: false,
   jukeboxOpen: false,
   jukeboxOn: loadJukeboxPrefs().on,
   jukeboxVolume: loadJukeboxPrefs().volume,
@@ -637,6 +688,9 @@ export const useGameStore = create<GameState>((set) => ({
       tables: {},
       tableOpen: null,
       jukebox: EMPTY_JUKEBOX,
+      stage: null,
+      presenter: false,
+      stageFull: false,
       jukeboxOpen: false,
       roomPeople: [],
       roomAdminOpen: false,
@@ -671,8 +725,9 @@ export const useGameStore = create<GameState>((set) => ({
   setCalendarOpen: (calendarOpen) => set({ calendarOpen }),
   setGame: (game) => set({ game }),
   setRoom: (room) => set({ room }),
-  openRooms: (roomCode = null) => set({ roomsOpen: true, roomCode }),
-  closeRooms: () => set({ roomsOpen: false, roomCode: null }),
+  openRooms: (roomCode = null, atDesk = false) =>
+    set({ roomsOpen: true, roomCode, roomsAtDesk: atDesk }),
+  closeRooms: () => set({ roomsOpen: false, roomCode: null, roomsAtDesk: false }),
   setInvite: (invite) => set({ invite }),
   setMusicOn: (musicOn) => {
     setMusicOn(musicOn);
@@ -686,7 +741,11 @@ export const useGameStore = create<GameState>((set) => ({
   setRadial: (radial) => set({ radial }),
   setDiscovery: (discovery) => set({ discovery }),
   setIntroOpen: (introOpen) => set({ introOpen }),
-  setDancing: (dancing) => set(dancing ? { dancing, smoking: false } : { dancing }),
+  setDancing: (dancing, move) =>
+    set((s) => {
+      const danceMove = move ?? s.danceMove;
+      return dancing ? { dancing, danceMove, smoking: false } : { dancing, danceMove };
+    }),
   setSmoking: (smoking) => set(smoking ? { smoking, dancing: false } : { smoking }),
   setTable: (kind, table) =>
     set((state) => {
@@ -698,6 +757,18 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   setTableOpen: (tableOpen) => set({ tableOpen }),
   setJukebox: (jukebox) => set({ jukebox }),
+  setStage: (stage, serverNow, presenter) =>
+    set((state) => ({
+      stage,
+      stageClockOffset: serverNow === undefined ? state.stageClockOffset : serverNow - Date.now(),
+      presenter: presenter ?? state.presenter,
+    })),
+  setRingFor: (ringFor) => set({ ringFor }),
+  setStageView: ({ hidden, full }) =>
+    set((state) => ({
+      stageHidden: hidden ?? state.stageHidden,
+      stageFull: full ?? state.stageFull,
+    })),
   setJukeboxOpen: (jukeboxOpen) => set({ jukeboxOpen }),
   setJukeboxPrefs: (prefs) =>
     set((state) => {

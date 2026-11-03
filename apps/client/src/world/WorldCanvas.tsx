@@ -6,6 +6,7 @@ import { IsoView } from './IsoView';
 import { loadFurniture } from './models';
 import { loadPetKit } from './pets';
 import { loadArcadeKit } from './arcade';
+import { useGameStore } from '../state/store';
 
 type Status = 'loading' | 'ready' | 'failed';
 
@@ -29,6 +30,8 @@ export function WorldCanvas() {
         if (cancelled) return;
         world = new AreaWorld(view, { furniture, characters, pets, arcade }, fade);
         world.enter('hall');
+        // Development only (dropped from the production build): handles for browser tests.
+        if (import.meta.env.DEV) Object.assign(window, { __world: world, __store: useGameStore });
         setStatus('ready');
       })
       .catch((error: unknown) => {

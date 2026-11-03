@@ -15,7 +15,7 @@ import {
 } from '@att/shared';
 import { useState, type FormEvent } from 'react';
 import { FOOTSTEPS, getFootsteps, previewStep, setFootsteps, type Footsteps } from '../audio/sound';
-import { t } from '../i18n/t';
+import { getLanguage, t } from '../i18n/t';
 import { createGuest, type GuestError } from '../net/session';
 import { useGameStore } from '../state/store';
 import { CharacterPreview } from './CharacterPreview';
@@ -402,6 +402,7 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
           </div>
         </div>
         {error && <p className="panel-error">{t(`gate.error.${error}`)}</p>}
+        {mode === 'new' && <LegalLine />}
         <div className="panel-actions">
           {mode === 'wardrobe' && (
             <button type="button" className="panel-button" onClick={onClose}>
@@ -414,5 +415,22 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
         </div>
       </form>
     </Panel>
+  );
+}
+
+/** "By coming in you accept the Terms and the Privacy note", with both linked (Turkish part for Turkish players). */
+export function LegalLine() {
+  const hash = getLanguage() === 'tr' ? '#tr' : '';
+  return (
+    <p className="legal-line">
+      {t('legal.accept')}{' '}
+      <a href={`/terms.html${hash}`} target="_blank" rel="noopener">
+        {t('legal.terms')}
+      </a>{' '}
+      ·{' '}
+      <a href={`/privacy.html${hash}`} target="_blank" rel="noopener">
+        {t('legal.privacy')}
+      </a>
+    </p>
   );
 }

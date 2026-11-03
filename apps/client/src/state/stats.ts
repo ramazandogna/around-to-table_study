@@ -15,9 +15,15 @@ type Stats = {
   streak: number;
   /** The last day with focus time. */
   lastDay: string | null;
+  /** The day the daily goal was last reached, so it is cheered once. */
+  goalDay?: string | null;
 };
 
 const STATS_KEY = 'att.stats';
+const GOAL_KEY = 'att.goal';
+/** Daily goals the player can pick, in minutes of focus. */
+export const GOALS = [30, 60, 120, 180, 240] as const;
+const DEFAULT_GOAL = 60;
 /** Less than this does not count as studying for the streak. */
 const STREAK_MIN_MS = 5 * 60_000;
 
@@ -55,6 +61,30 @@ export function recordFocus(ms: number, finished: boolean, now = Date.now()): St
   }
   writeJson(STATS_KEY, next);
   return next;
+}
+
+/** The player's own daily goal, in minutes of focus (on this device, seen by nobody else). */
+export function dailyGoal(): number {
+  const saved = readJson<{ minutes?: number }>(GOAL_KEY)?.minutes;
+  return GOALS.find((g) => g === saved) ?? DEFAULT_GOAL;
+}
+
+/** The next goal in the list, round again after the last. */
+export function nextGoal(): number {
+  const goal = GOALS[(GOALS.indexOf(dailyGoal() as (typeof GOALS)[number]) + 1) % GOALS.length];
+  writeJson(GOAL_KEY, { minutes: goal });
+  return goal ?? DEFAULT_GOAL;
+}
+
+/**
+ * Whether today's goal was just reached: true once a day, the first time the
+ * focus time passes it, so the game can cheer.
+ */
+export function goalJustReached(now = Date.now()): boolean {
+  const stats = todayStats(now);
+  if (stats.focusMs < dailyGoal() * 60_000 || stats.goalDay === stats.day) return false;
+  writeJson(STATS_KEY, { ...stats, goalDay: stats.day });
+  return true;
 }
 
 /** "1h 25m" or "40m". */

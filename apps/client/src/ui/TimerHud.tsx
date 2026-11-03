@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { play } from '../audio/sound';
 import { t } from '../i18n/t';
 import { layerIndex, useGameStore } from '../state/store';
-import { formatDuration, recordFocus, todayStats } from '../state/stats';
+import { GoalBar } from './StudyRing';
+import { formatDuration, goalJustReached, recordFocus, todayStats } from '../state/stats';
 import { formatClock } from '../state/study';
 
 /**
@@ -48,8 +49,8 @@ export function TimerHud() {
     // The block is done: celebrate, count it, then a break or the end.
     play('finish');
     store.connection?.finished();
-    store.setNotice('finished');
     recordFocus(timer.totalMs, true);
+    store.setNotice(goalJustReached() ? 'goal_reached' : 'finished');
     const current = store.study;
     const rhythm = current?.rhythm;
     if (current && rhythm && current.round < rhythm.rounds && rhythm.breakMinutes > 0) {
@@ -86,6 +87,7 @@ export function TimerHud() {
   const stop = () => {
     if (timer) recordFocus(timer.totalMs - Math.max(0, timer.endsAt - Date.now()), false);
     if (session?.phase === 'free') recordFocus(Date.now() - session.startedAt, false);
+    if (goalJustReached()) store.setNotice('goal_reached');
     store.stopTimer();
   };
 
@@ -138,6 +140,7 @@ export function TimerHud() {
         <p className="timer-tip">
           {t('plan.today', { time: formatDuration(today.focusMs), blocks: today.blocks })}
         </p>
+        <GoalBar focusMs={today.focusMs} />
         <div className="panel-actions">
           <button
             type="button"

@@ -11,6 +11,7 @@ import {
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { t } from '../i18n/t';
 import { FLOOR_Y } from './buildArea';
+import { groundUnder } from './ground';
 import { showEmote } from './emotes';
 import type { PetClips, PetDress, PetKit } from './pets';
 
@@ -29,12 +30,24 @@ import type { PetClips, PetDress, PetKit } from './pets';
  * petted (by anyone, seen by everyone) makes it purr with hearts.
  */
 
-/** How far behind its person the pet walks, in seconds of their path. */
-const FOLLOW_DELAY = 1;
+/** The pet walks its person's own path; a new crumb every this many tiles. */
+const CRUMB_STEP = 0.2;
+/** How long a pet takes to come through the door after its person (a slow one, longer). */
+const ENTER_DELAY_SECONDS = 0.7;
+/** At most this many crumbs (a long walk ahead of a turtle); older ones are skipped. */
+const MAX_CRUMBS = 600;
 /** Never closer to its person than this (tiles), so it does not stand in their feet. */
 const PERSONAL_SPACE = 0.55;
-/** Further away than this (a door, a reconnect), it simply appears by its person. */
-const LOST_DISTANCE = 4;
+/**
+ * Only this far away (a reconnect, a jump in the data) does it appear by its
+ * person. Otherwise it walks, however slow it is: a turtle takes its time.
+ */
+const LOST_DISTANCE = 30;
+/** When its person sets off, it looks up first and follows a moment later. */
+const SET_OFF_SECONDS: readonly [number, number] = [0.35, 1.1];
+/** Now and then on a long walk it stops to sniff something, then catches up. */
+const SNIFF_SECONDS: readonly [number, number] = [0.5, 1.2];
+const SNIFF_CHANCE_PER_SECOND = 0.12;
 const RUN_SPEED = 3.6;
 const STROLL_SPEED = 0.9;
 const TURN_SPEED = 10;
@@ -126,7 +139,12 @@ export class Pet {
   private readonly clips: PetClips;
   private readonly loops: Record<'idle' | 'walk' | 'run', AnimationAction>;
   private gesture: AnimationAction | null = null;
-  private readonly trail: { t: number; x: number; z: number }[] = [];
+  private readonly trail: { x: number; z: number }[] = [];
+  /** Seconds it still stands before following (setting off, or a sniff). */
+  private pause = 0;
+  /** Seconds left before it comes through the door (see `enterThrough`). */
+  private behindDoor = 0;
+  private ownerWasMoving = false;
   private mode: Mode = 'follow';
   private task: Task = { kind: 'rest', left: 1 };
   private clock = 0;
@@ -248,6 +266,20 @@ export class Pet {
     this.trail.length = 0;
   }
 
+  /**
+   * Comes in through a door after its person: out of sight for a moment (a
+   * slow pet longer), then in the doorway, and from there it walks to them.
+   */
+  enterThrough(doorway: FloorXZ, facing: FloorXZ): void {
+    this.follow();
+    this.root.position.set(doorway.x, FLOOR_Y, doorway.z);
+    this.heading = Math.atan2(facing.x, facing.z);
+    this.root.rotation.y = this.heading;
+    this.speed = 0;
+    this.behindDoor = ENTER_DELAY_SECONDS / Math.max(0.3, this.traits.speed);
+    this.root.visible = false;
+  }
+
   /** Puts the pet right by its person, e.g. after coming through a door. */
   placeBy(owner: FloorXZ): void {
     const angle = this.random() * Math.PI * 2;
@@ -266,6 +298,12 @@ export class Pet {
 
   update(delta: number, owner: Owner | null): void {
     this.clock += delta;
+    if (this.behindDoor > 0) {
+      // Still on the other side of the door.
+      this.behindDoor -= delta;
+      if (this.behindDoor > 0) return;
+      this.root.visible = true;
+    }
     this.chatterIn -= delta;
     if (this.chatterIn <= 0) {
       this.chatterIn = this.between(CHATTER_EVERY) / this.traits.chatter;
@@ -282,6 +320,9 @@ export class Pet {
       this.speed = 0;
     } else if (this.mode === 'wait' || !owner) this.waitStep(delta);
     else this.followStep(delta, owner);
+    // Up the step onto the conference hall's stage, and down again.
+    const ground = FLOOR_Y + groundUnder(this.root.position.x, this.root.position.z);
+    this.root.position.y = MathUtils.damp(this.root.position.y, ground, 12, delta);
     // A rabbit goes in little hops.
     if (this.traits.hop && this.speed > 0.15) {
       this.tilt.position.y += Math.abs(Math.sin(this.clock * 11)) * 0.06;
@@ -295,14 +336,19 @@ export class Pet {
   }
 
   private followStep(delta: number, owner: Owner): void {
-    this.trail.push({ t: this.clock, x: owner.x, z: owner.z });
-    while (this.trail.length > 2 && (this.trail[1]?.t ?? 0) < this.clock - FOLLOW_DELAY) {
-      this.trail.shift();
+    // Crumbs along the way its person walked, so it goes around what they went around.
+    const last = this.trail[this.trail.length - 1];
+    if (!last || Math.hypot(owner.x - last.x, owner.z - last.z) > CRUMB_STEP) {
+      this.trail.push({ x: owner.x, z: owner.z });
+      if (this.trail.length > MAX_CRUMBS) this.trail.shift();
     }
+    if (owner.moving && !this.ownerWasMoving) this.pause = this.between(SET_OFF_SECONDS);
+    this.ownerWasMoving = owner.moving;
     this.ownerStill = owner.moving ? 0 : this.ownerStill + delta;
     const here = this.position;
     const toOwner = Math.hypot(owner.x - here.x, owner.z - here.z);
     if (toOwner > LOST_DISTANCE) {
+      console.debug('pet lost its person; placed by them', toOwner.toFixed(1));
       this.placeBy(owner);
       return;
     }
@@ -322,11 +368,31 @@ export class Pet {
       this.wanderStep(delta, owner);
       return;
     }
+    // Crumbs it has reached (or that are behind it, nearer its person) are done.
+    while (this.trail.length > 1) {
+      const next = this.trail[0];
+      if (!next || Math.hypot(next.x - here.x, next.z - here.z) > 0.15) break;
+      this.trail.shift();
+    }
+    // Quick ones stop to sniff; a turtle just keeps on, slow and steady.
+    if (
+      this.traits.speed >= 1 &&
+      this.pause <= 0 &&
+      toOwner > 2.5 &&
+      this.random() < SNIFF_CHANCE_PER_SECOND * delta
+    ) {
+      this.pause = this.between(SNIFF_SECONDS);
+    }
+    this.pause -= delta;
     const target = this.trail[0] ?? { x: owner.x, z: owner.z };
-    const gap = Math.hypot(target.x - here.x, target.z - here.z);
+    const top = RUN_SPEED * this.traits.speed;
+    // Slows as it comes up to its person, and stops at arm's length.
     const wanted =
-      toOwner < PERSONAL_SPACE ? 0 : Math.min(RUN_SPEED * this.traits.speed, gap * 3.2);
-    this.speed = MathUtils.damp(this.speed, wanted, 8, delta);
+      this.pause > 0 || toOwner < PERSONAL_SPACE
+        ? 0
+        : Math.min(top, Math.max(0.6, (toOwner - PERSONAL_SPACE) * 3));
+    this.speed = MathUtils.damp(this.speed, wanted, 6, delta);
+    const gap = Math.hypot(target.x - here.x, target.z - here.z);
     if (gap > 0.02 && this.speed > 0.05) this.moveTowards(target, this.speed * delta);
   }
 

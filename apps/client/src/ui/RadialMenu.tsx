@@ -1,4 +1,4 @@
-import { AREA_RULES, EMOTES, EMPTY_LINES } from '@att/shared';
+import { AREA_RULES, DANCES, EMOTES, EMPTY_LINES, type Dance } from '@att/shared';
 import { useEffect } from 'react';
 import { t, type MessageKey } from '../i18n/t';
 import { useGameStore, type Radial } from '../state/store';
@@ -15,6 +15,8 @@ type Action = {
   icon: string;
   image?: string;
   label: MessageKey;
+  /** Shown instead of `label` when the words are not ours (a person's name). */
+  text?: string;
   /** Why it cannot be used here, if it cannot. */
   off?: MessageKey | undefined;
   run: () => void;
@@ -57,10 +59,67 @@ export function RadialMenu() {
   const actions =
     radial.mode === 'emote'
       ? emoteActions()
-      : radial.mode === 'person'
-        ? personActions(radial)
-        : selfActions(radial, { area, dancing, smoking, seated });
+      : radial.mode === 'dance'
+        ? danceActions(dancing)
+        : radial.mode === 'pick'
+          ? pickActions(radial)
+          : radial.mode === 'person'
+            ? personActions(radial)
+            : selfActions(radial, { area, dancing, smoking, seated });
   return <Ring radial={radial} actions={actions} />;
+}
+
+const DANCE_ICON: Record<Dance, string> = {
+  bounce: '💃',
+  sway: '🌊',
+  robot: '🤖',
+  disco: '🕺',
+  twist: '🌀',
+  cheer: '🙌',
+};
+
+/**
+ * People standing on top of each other: one button each, to say who was meant.
+ * Picking one opens their own ring in the same place.
+ */
+function pickActions(radial: Radial): Action[] {
+  const store = useGameStore.getState();
+  return (radial.people ?? []).map((person) => ({
+    id: person.id,
+    icon: person.name.slice(0, 1).toUpperCase(),
+    label: 'radial.pick',
+    text: person.name,
+    run: () =>
+      window.setTimeout(
+        () =>
+          store.setRadial({
+            x: radial.x,
+            y: radial.y,
+            mode: 'person',
+            id: person.id,
+            name: person.name,
+            lines: person.lines,
+          }),
+        0,
+      ),
+  }));
+}
+
+/** The six dances, and a stop while one is on. */
+function danceActions(dancing: boolean): Action[] {
+  const store = useGameStore.getState();
+  const moves: Action[] = DANCES.map((dance, move) => ({
+    id: dance,
+    icon: DANCE_ICON[dance],
+    label: `dance.${dance}` as MessageKey,
+    run: () => store.setDancing(true, move),
+  }));
+  return dancing
+    ? [
+        ...moves,
+        { id: 'stop', icon: '🛑', label: 'radial.stop', run: () => store.setDancing(false) },
+      ]
+    : moves;
 }
 
 function emoteActions(): Action[] {
@@ -184,7 +243,8 @@ function selfActions(
       icon: dancing ? '🛑' : '💃',
       label: dancing ? 'radial.stop' : 'radial.dance',
       off: !rules.dance ? 'radial.dance.off' : seated ? 'radial.dance.seated' : undefined,
-      run: () => store.setDancing(!dancing),
+      // The six dances open as a ring of their own (with a stop while one is on).
+      run: () => window.setTimeout(() => store.setRadial({ ...radial, mode: 'dance' }), 0),
     },
     // Only where people smoke, right beside the dance.
     ...(rules.smoke
@@ -275,7 +335,15 @@ function Ring({ radial, actions }: { radial: Radial; actions: Action[] }) {
               animationDelay: `${i * 25}ms`,
             }}
             aria-disabled={disabled}
-            title={action.off ? t(action.off) : t(action.label)}
+            title={action.off ? t(action.off) : (action.text ?? t(action.label))}
+            // In a crowd's chooser, pointing at a name rings that person on the floor.
+            {...(radial.mode === 'pick'
+              ? {
+                  onPointerEnter: () => store.setRingFor(action.id),
+                  onFocus: () => store.setRingFor(action.id),
+                  onPointerLeave: () => store.setRingFor(null),
+                }
+              : {})}
             onClick={() => {
               if (action.off) {
                 store.setNotice('off', t(action.off));
@@ -288,7 +356,7 @@ function Ring({ radial, actions }: { radial: Radial; actions: Action[] }) {
             <span className="radial-icon" aria-hidden>
               {action.image ? <img src={action.image} alt="" /> : action.icon}
             </span>
-            <span className="radial-label">{t(action.label)}</span>
+            <span className="radial-label">{action.text ?? t(action.label)}</span>
           </button>
         );
       })}

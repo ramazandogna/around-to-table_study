@@ -38,6 +38,7 @@ import { buildRenovation } from './renovation';
 import { buildAmbience, LAMP_SHADE, type Ambience } from './ambience';
 import { lostBox, umbrellaStand, wallClock } from './smallProps';
 import { dartCabinet, jukeboxModel, tableGames } from './smokingProps';
+import { buildStage, theaterChairs, type BuiltStage } from './conferenceProps';
 
 /** Top of the floor tiles; furniture stands on this. */
 export const FLOOR_Y = 0.05;
@@ -49,6 +50,8 @@ const AREA_STYLE: Record<AreaId, AreaStyle> = {
   // Warm oak, deep green and cream: an old reading room.
   library: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xeadcc0, carpet: [0x3f6b55, 0x2f5242] },
   smoking: { floor: 0x7a4f34, slab: 0x3b2a1e, wall: 0xd9c9ad, carpet: [0x6c5a86, 0x54456b] },
+  // A theatre: dark walnut, deep red aisle carpet, warm plaster.
+  conference: { floor: 0x8a5a3a, slab: 0x35241a, wall: 0xe6d3b3, carpet: [0x8e2b2f, 0x6a1f22] },
   // Private rooms: a small warm study, honey walls and oak.
   room3: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xf0dcb8, carpet: [0x9a5b3e, 0x7a4430] },
   room5: { floor: 0xb07a4c, slab: 0x3f2b1f, wall: 0xf0dcb8, carpet: [0x9a5b3e, 0x7a4430] },
@@ -61,6 +64,7 @@ const DOORS: ReadonlySet<string> = new Set([
   TILE.doorToHall,
   TILE.doorToLibrary,
   TILE.doorToSmoking,
+  TILE.doorToConference,
   TILE.entrance,
 ]);
 
@@ -92,7 +96,17 @@ const noise = (x: number, y: number, salt = 0) => {
 export type Examinable = {
   id: string;
   kind:
-    'shelf' | 'painting' | 'renovation' | 'flaw' | 'game' | 'topic' | 'table' | 'jukebox' | 'lost';
+    | 'shelf'
+    | 'painting'
+    | 'renovation'
+    | 'flaw'
+    | 'game'
+    | 'topic'
+    | 'table'
+    | 'jukebox'
+    | 'lost'
+    /** A library lamp with its own switch. */
+    | 'lamp';
   /** Index into the content list for its kind. */
   index: number;
   /** Where to stand to look at it. */
@@ -114,6 +128,8 @@ export type BuiltArea = {
   ambience: Ambience;
   /** Moves a chair along its way to the table (see CHAIR_TUCKED and CHAIR_PULLED). */
   setChair: (tile: Point, offset: number) => void;
+  /** The conference hall's stage and big screen; null in other rooms. */
+  stage: BuiltStage | null;
 };
 
 /** What a room is built with beyond its layout: a private room's rules. */
@@ -501,8 +517,21 @@ export function buildArea(
   }
   materials.push(...labelShelves(shelves.runs, furniture, root, textures));
 
-  materials.push(...buildDesks(grid, furniture, root));
+  const deskWork = buildDesks(grid, furniture, root);
+  materials.push(...deskWork.materials);
   const decor = decorate(grid, furniture, root, desks, materials);
+  if (grid.area.id === 'library') {
+    decor.switchable.push(
+      ...switchableLamps(
+        grid,
+        furniture.lampRoundTable,
+        deskWork.lamps,
+        decor.switchable.length,
+        root,
+        materials,
+      ),
+    );
+  }
   materials.push(
     ...buildNoticeBoards(noticeBoards, root, grid.area.id === 'library' ? 'library' : 'hall'),
   );
@@ -552,11 +581,24 @@ export function buildArea(
     pickables.push(mesh);
   }
   addDoorSigns(grid, root);
+  const stage = buildStage(grid, FLOOR_Y);
+  if (stage) {
+    root.add(stage.root);
+    materials.push(...stage.materials);
+  }
+  const theater = theaterChairs(grid, FLOOR_Y, materials);
+  theater.traverse((child) => (child.userData.ownGeometry = true));
+  root.add(theater);
+  decor.switchable.forEach(({ group, stand }, i) => {
+    pickables.push(group);
+    examinables.set(`lamp:${i}`, { id: `lamp:${i}`, kind: 'lamp', index: i, stand });
+  });
 
   const ambience = buildAmbience(
     root,
     windows,
     decor.floorLamps,
+    decor.switchable.map((l) => l.shade),
     grid.area.id === 'library' ? decor.laptop : null,
     weatherDecor(new Date().getMonth()),
     FLOOR_Y,
@@ -574,6 +616,7 @@ export function buildArea(
     root,
     ambience,
     setChair,
+    stage,
     update: (delta, people) => {
       doors.update(delta, people);
       ambience.update(delta);
@@ -592,7 +635,11 @@ export function buildArea(
       root.traverse((child) => {
         if (child instanceof CSS2DObject) child.element.remove();
         // Instanced furniture shares its geometry with every other room.
-        if (child instanceof Mesh && !(child instanceof InstancedMesh)) child.geometry.dispose();
+        if (
+          child instanceof Mesh &&
+          (!(child instanceof InstancedMesh) || child.userData.ownGeometry)
+        )
+          child.geometry.dispose();
       });
       root.clear();
       for (const material of materials) {
@@ -646,9 +693,12 @@ function buildWalls(
   // Sliding doors disappear into the wall next to them, so no windows there.
   const nearDoor = (x: number, y: number) =>
     [-2, -1, 1, 2].some((d) => DOORS.has(at(x + d, y)) || DOORS.has(at(x, y + d)));
+  // Nor behind shelves, or behind the stage, where the big screen hangs.
   const wantsWindow = (i: number, x: number, y: number) =>
     i % 3 === 2 &&
-    at(x + (y === 0 ? 0 : 1), y + (y === 0 ? 1 : 0)) !== TILE.bookcase &&
+    ![TILE.bookcase, TILE.stage, TILE.microphone].includes(
+      at(x + (y === 0 ? 0 : 1), y + (y === 0 ? 1 : 0)) as 'B',
+    ) &&
     !nearDoor(x, y);
 
   // Door tiles get no wall piece; buildDoors fills the opening.
@@ -860,7 +910,11 @@ function fillShelves(
  * never quite square to the room, like real ones that have been nudged around.
  * Longer runs still make one long table.
  */
-function buildDesks(grid: AreaGrid, furniture: Furniture, root: Group): MeshStandardMaterial[] {
+function buildDesks(
+  grid: AreaGrid,
+  furniture: Furniture,
+  root: Group,
+): { materials: MeshStandardMaterial[]; lamps: Placement[] } {
   const wood = new MeshStandardMaterial({ color: WOOD, roughness: 0.62 });
   const dark = new MeshStandardMaterial({ color: 0x6e4a2f, roughness: 0.7 });
   const leather = new MeshStandardMaterial({ color: 0x2f5242, roughness: 0.8 });
@@ -930,8 +984,49 @@ function buildDesks(grid: AreaGrid, furniture: Furniture, root: Group): MeshStan
       });
     }
   });
-  root.add(instance(furniture.lampRoundTable, lamps, { materialsByName: { lamp: LAMP_SHADE } }));
-  return [wood, dark, leather, runner];
+  // The library's desk lamps each have a switch (see `switchableLamps`); elsewhere they burn as one.
+  if (grid.area.id !== 'library') {
+    root.add(instance(furniture.lampRoundTable, lamps, { materialsByName: { lamp: LAMP_SHADE } }));
+  }
+  return { materials: [wood, dark, leather, runner], lamps };
+}
+
+/** A lamp with its own switch: its own shade, something to point at, and a tile to reach it from. */
+type SwitchableLamp = { group: Group; shade: MeshStandardMaterial; stand: Point };
+
+/**
+ * Lamps that each switch on and off by themselves: one instance and one
+ * shade each, ids `lamp:<first + i>`, reached from the nearest open floor.
+ */
+function switchableLamps(
+  grid: AreaGrid,
+  model: ModelTemplate,
+  placements: readonly Placement[],
+  first: number,
+  root: Group,
+  materials: Material[],
+): SwitchableLamp[] {
+  return placements.map((placement, i) => {
+    const shade = LAMP_SHADE.clone();
+    materials.push(shade);
+    const group = instance(model, [placement], { materialsByName: { lamp: shade } });
+    group.traverse((node) => (node.userData.examine = `lamp:${first + i}`));
+    root.add(group);
+    const tile = { x: Math.floor(placement.x), y: Math.floor(placement.z) };
+    let stand = tile;
+    let best = Infinity;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const p = { x: tile.x + dx, y: tile.y + dy };
+        const distance = Math.hypot(dx, dy);
+        if (distance < best && grid.isWalkable(p) && !grid.isSeat(p)) {
+          best = distance;
+          stand = p;
+        }
+      }
+    }
+    return { group, shade, stand };
+  });
 }
 
 function buildLongTable(
@@ -996,7 +1091,12 @@ function decorate(
   root: Group,
   desks: Placement[],
   materials: Material[],
-): { laptop: { open: Group; closed: Mesh } | null; floorLamps: { x: number; z: number }[] } {
+): {
+  laptop: { open: Group; closed: Mesh } | null;
+  floorLamps: { x: number; z: number }[];
+  /** The library's lamps, one shade each, so each can be switched (by index): floor lamps first. */
+  switchable: SwitchableLamp[];
+} {
   const middle = desks[Math.floor(desks.length / 2)];
   let laptop: { open: Group; closed: Mesh } | null = null;
   if (middle) {
@@ -1055,11 +1155,17 @@ function decorate(
       });
     }),
   );
-  root.add(instance(furniture.lampSquareFloor, lamps, { materialsByName: { lamp: LAMP_SHADE } }));
+  const switchable: SwitchableLamp[] =
+    grid.area.id === 'library'
+      ? switchableLamps(grid, furniture.lampSquareFloor, lamps, 0, root, materials)
+      : [];
+  if (grid.area.id !== 'library') {
+    root.add(instance(furniture.lampSquareFloor, lamps, { materialsByName: { lamp: LAMP_SHADE } }));
+  }
   if (grid.area.id === 'hall') {
     root.add(instance(furniture.coatRackStanding, [{ x: 1.5, z: 7.5, y: FLOOR_Y }]));
   }
-  return { laptop, floorLamps: lamps.map((l) => ({ x: l.x, z: l.z })) };
+  return { laptop, floorLamps: lamps.map((l) => ({ x: l.x, z: l.z })), switchable };
 }
 
 type BoardKind = 'hall' | 'library';

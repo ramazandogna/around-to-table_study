@@ -29,9 +29,10 @@ export const DAYLIGHT: Record<
   morning: { sun: 2.0, sunColor: 0xfff1dc, sky: 1.5, skyColor: 0xf4f6ff, ground: 0x5a4636 },
   day: { sun: 2.4, sunColor: 0xfffaf0, sky: 1.7, skyColor: 0xfff8ec, ground: 0x5a4636 },
   afternoon: { sun: 2.2, sunColor: 0xffd59a, sky: 1.4, skyColor: 0xffe2b0, ground: 0x6a4a30 },
-  evening: { sun: 1.6, sunColor: 0xffb27a, sky: 1.3, skyColor: 0xe6d6f0, ground: 0x4e3e48 },
-  // Night stays bright enough to study by: cooler and bluer, with the lamps warm on top.
-  night: { sun: 1.25, sunColor: 0xb8c8f0, sky: 1.2, skyColor: 0xc4ccf0, ground: 0x3a3448 },
+  // Evening and night: the rooms are lit from inside, warm like the lamps, about
+  // as bright as the day. Night shows in the windows and the lamps, not as dark.
+  evening: { sun: 2.0, sunColor: 0xffd6a0, sky: 1.6, skyColor: 0xffe2b8, ground: 0x6a4a30 },
+  night: { sun: 1.9, sunColor: 0xffcf94, sky: 1.6, skyColor: 0xffdcae, ground: 0x604430 },
 };
 
 /** How bright the lamps are: off by day, warm in the evening, all on at night. */
@@ -135,6 +136,8 @@ export type Ambience = {
   /** Opens or closes a window (by its index in `windows`). */
   setWindowOpen: (index: number, open: boolean) => void;
   isWindowOpen: (index: number) => boolean;
+  /** Turns one switchable lamp (library) on or off, whatever the hour says. */
+  setLamp: (index: number, on: boolean) => void;
   windows: readonly WindowSpot[];
   update: (delta: number) => void;
   dispose: () => void;
@@ -146,6 +149,8 @@ export function buildAmbience(
   root: Group,
   windows: readonly WindowSpot[],
   floorLamps: readonly { x: number; z: number }[],
+  /** Shades of lamps with their own switch, in the order of `floorLamps`; empty elsewhere. */
+  switchShades: readonly MeshStandardMaterial[],
   laptop: { open: Group; closed: Mesh } | null,
   decor: 'heaters' | 'fans' | null,
   floorY: number,
@@ -287,6 +292,12 @@ export function buildAmbience(
       if (sash) sash.open = open;
     },
     isWindowOpen: (index) => sashes[index]?.open ?? false,
+    setLamp: (index, on) => {
+      const shade = switchShades[index];
+      if (shade) shade.emissiveIntensity = on ? LAMPS.night : 0;
+      const light = lights[index];
+      if (light) light.intensity = on ? LAMPS.night * 2.2 : 0;
+    },
     update: (delta) => {
       for (const sash of sashes) {
         const target = sash.open ? OPEN_ANGLE : 0;

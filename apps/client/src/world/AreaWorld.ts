@@ -1,6 +1,9 @@
 import {
+  conferenceRole,
+  type Emote,
   AREA_RULES,
   EVENT_THEMES,
+  DECOR_LEAD_MS,
   EVENTS,
   themeOf,
   isRoomArea,
@@ -55,10 +58,22 @@ import type { PetDress, PetKit } from './pets';
 import type { IsoView } from './IsoView';
 import { minimap, type MapPerson } from './minimap';
 import type { Furniture } from './models';
-import type { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { Mesh, MeshBasicMaterial, RingGeometry, Vector3 } from 'three';
+import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createTableProps } from './tableProps';
 import { createHoverMarker, type HoverKind } from './hoverMarker';
 import { createSeatMarkers } from './seatMarkers';
+import { STAGE_HEIGHT } from './conferenceProps';
+import { setGround } from './ground';
+import { stageView, type ScreenQuad } from './stageView';
+
+/** With this many people around, far and off-screen people are drawn with less detail. */
+const DETAIL_CROWD = 12;
+/** Further than this from the player (in tiles), someone loses their shadow and name tag. */
+const FAR_TILES = 9;
+/** Past the screen's edge by this much (1 is the edge), someone is not drawn at all. */
+const OFF_SCREEN = 1.15;
+const DETAIL_EVERY_SECONDS = 0.3;
 
 const BLOCK_MESSAGES: Partial<Record<BlockReason, MessageKey>> = {
   renovation: 'blocked.renovation',
@@ -69,6 +84,30 @@ const CAMERA_LERP = 0.12;
 /** Heights checked when a tap misses the floor, up to the top of the tallest door. */
 const DOOR_PICK_HEIGHTS = [0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1];
 const FADE_MS = 120;
+/** Library lamps are due on from this hour (15:30) through the night, until morning (07:00). */
+const LAMPS_ON_FROM = 15.5;
+const LAMPS_OFF_FROM = 7;
+/** How long the librarian lets a lamp switched against the rule be (2 to 4 minutes in all, with the walk). */
+const LAMP_PATIENCE_MS = 120_000;
+
+/** Nothing done this long: a 💤 shows for everyone. */
+const AFK_AFTER_SECONDS = 120;
+/** Idle this long: the character wanders to something to look at, now and then. */
+const WANDER_AFTER_SECONDS = 300;
+const WANDER_EVERY: readonly [number, number] = [50, 110];
+/** What an idle character goes to look at. */
+const IDLE_LOOKS = new Set<Examinable['kind']>(['shelf', 'painting', 'lost', 'flaw', 'jukebox']);
+/** Of the idle wanders, this share goes to sit on a sofa or armchair instead. */
+const IDLE_SIT_SHARE = 0.35;
+/** Idle this long, the character fidgets now and then: looks around, yawns, thinks. */
+const FIDGET_AFTER_SECONDS = 60;
+const FIDGET_EVERY: readonly [number, number] = [14, 32];
+const FIDGET_EMOTES: readonly Emote[] = ['sleepy', 'thinking', 'coffee'];
+
+/** Three or more people this close (tiles) share one name tag. */
+const MERGE_DISTANCE = 0.9;
+const MERGE_AT = 3;
+
 /** How often name tags and bubbles are checked for crowding. */
 const CROWD_CHECK_SECONDS = 0.2;
 /** More people than this on screen fold everyone's status lines into icons. */
@@ -140,8 +179,12 @@ type Pending =
   | { kind: 'desk'; tile: Point }
   /** The elevator up to the private rooms. */
   | { kind: 'elevator' }
+  /** With a key in hand: into the elevator and up to the room. */
+  | { kind: 'ride'; to: AreaId }
   /** Petting someone's pet (by its person's id; 'self' for the player's own). */
-  | { kind: 'pat'; owner: string };
+  | { kind: 'pat'; owner: string }
+  /** Idle: wandered over to look at something, with nothing opened. */
+  | { kind: 'gaze' };
 
 /** What the mouse is over: a person, something to look at, or a tile. */
 type Target =
@@ -156,6 +199,10 @@ export class AreaWorld {
   private areaId: AreaId = 'hall';
   private grid!: AreaGrid;
   private built: BuiltArea | null = null;
+  private readonly projected = new Vector3();
+  private detailIn = 0;
+  private readonly ring = createPersonRing();
+  private ringClock = 0;
   private player: Avatar | null = null;
   private readonly others = new Map<string, Avatar>();
   /** Everyone's look, for bringing their pets back when a room lets pets in again. */
@@ -179,6 +226,22 @@ export class AreaWorld {
   private readonly tip = document.createElement('div');
   private seatMarkers: ReturnType<typeof createSeatMarkers> | null = null;
   private crowdTimer = 0;
+  /** Seconds since the player last did anything (see `idle`). */
+  private idleFor = 0;
+  /** Library lamps switched against the house rule, and when (for the librarian's patience). */
+  private readonly lampFlips = new Map<number, number>();
+  private lampTimer = 0;
+  /** The hall's sign to a room where an event is on. */
+  private eventSign: CSS2DObject | null = null;
+  private eventSignKey = '';
+  private afk = false;
+  /** Seconds until an idle player wanders to the next thing to look at. */
+  private wanderIn = 0;
+  private fidgetIn = 0;
+  /** Whether the current walk is an idle wander (any real input ends it). */
+  private wandering = false;
+  /** Name tags folded into one: the one showing "+N", and everyone in its group. */
+  private readonly mergedWith = new Map<string, string[]>();
   private mapTimer = 0;
   private stepTimer = 0;
   private pending: Pending | null = null;
@@ -241,13 +304,16 @@ export class AreaWorld {
         state.room !== before.room &&
         this.areaId !== roomArea(state.room.room.size)
       ) {
-        this.goThrough(roomArea(state.room.room.size));
+        this.rideUp(roomArea(state.room.room.size));
       }
       if (state.friends !== before.friends) this.markFriends();
-      if (state.dancing !== before.dancing) this.dance(state.dancing);
+      if (state.dancing !== before.dancing || state.danceMove !== before.danceMove) {
+        this.dance(state.dancing, state.danceMove);
+      }
       if (state.smoking !== before.smoking) this.smoke(state.smoking);
       if (state.buzzAt !== before.buzzAt) this.player?.buzz();
       if (state.travel && state.travel !== before.travel) this.travel(state.travel);
+      if (state.deskWalk !== before.deskWalk) this.walkToDesk();
       // The owner changed the private room's rules (here, or told by the room).
       if (state.roomRules && before.roomRules && state.roomRules !== before.roomRules) {
         this.applyRoomRules(state.roomRules, before.roomRules);
@@ -284,6 +350,7 @@ export class AreaWorld {
     view.canvas.addEventListener('pointermove', this.onPointerMove);
     view.canvas.addEventListener('pointerleave', this.onPointerLeave);
     view.add(this.hover.mesh);
+    view.add(this.ring);
     this.tip.className = 'world-tip';
     this.tip.hidden = true;
     view.canvas.parentElement?.append(this.tip);
@@ -325,8 +392,11 @@ export class AreaWorld {
     if (pet && this.rules().pets) {
       const own = this.walkPet('self', this.player, look);
       const door = from === 'library' ? this.doorSpots()[0] : undefined;
+      const doorway = from && !door ? this.doorwayFrom(from, start) : null;
       if (own && door) own.wait(door.spot, door.facing);
       own?.follow();
+      // Through any other door it comes in after its person, rather than appearing by them.
+      if (own && doorway) own.enterThrough(doorway.at, doorway.facing);
     } else if (pet) {
       useGameStore.getState().setNotice('pet_waits');
       play('mew');
@@ -365,6 +435,9 @@ export class AreaWorld {
     this.view.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.view.remove(this.hover.mesh);
     this.hover.dispose();
+    this.view.remove(this.ring);
+    this.ring.geometry.dispose();
+    (this.ring.material as MeshBasicMaterial).dispose();
     this.tip.remove();
     this.view.canvas.style.cursor = '';
     this.view.setLoop(null);
@@ -379,6 +452,11 @@ export class AreaWorld {
       roomRules: useGameStore.getState().roomRules,
     });
     this.view.add(this.built.root);
+    const grid = this.grid;
+    setGround((tile) => (grid.isStage(tile) ? STAGE_HEIGHT : 0));
+    const stage = this.built.stage;
+    stageView.quad = stage ? () => this.screenQuad(stage.screenCorners) : () => null;
+    stage?.setLit(!!useGameStore.getState().stage);
     // Chairs start pushed in; who sits, or left one out, is worked out every frame.
     this.chairs.clear();
     this.grid.area.layout.forEach((row, y) =>
@@ -407,6 +485,25 @@ export class AreaWorld {
     );
     this.view.add(this.seatMarkers.root);
     minimap.setGrid(this.grid);
+  }
+
+  /** Where the big screen's corners land on the page, in CSS pixels. */
+  private screenQuad(corners: readonly Vector3[]): ScreenQuad {
+    const bounds = this.view.canvas.getBoundingClientRect();
+    const points = corners.map((corner) => {
+      const p = this.projected.copy(corner).project(this.view.camera);
+      return {
+        x: bounds.left + ((p.x + 1) / 2) * bounds.width,
+        y: bounds.top + ((1 - p.y) / 2) * bounds.height,
+      };
+    });
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    return {
+      corners: points,
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
   }
 
   private removeRoom(): void {
@@ -447,6 +544,10 @@ export class AreaWorld {
     this.decor = null;
     this.eventId = null;
     this.eventTimer = 0;
+    this.eventSign?.removeFromParent();
+    this.eventSign?.element.remove();
+    this.eventSign = null;
+    this.eventSignKey = '';
     stopMusic();
     this.player?.dispose();
     this.player = null;
@@ -461,6 +562,8 @@ export class AreaWorld {
     const player = this.player;
     if (!player || this.leaving) return;
     this.handleKeyboard(player);
+    this.idle(delta, player);
+    this.keepLamps(delta);
 
     const entered = player.update(delta);
     if (this.steerDirection) this.sendSteering(player, this.steerDirection);
@@ -485,6 +588,13 @@ export class AreaWorld {
     this.updateBoard(player);
     this.updateHover();
     for (const other of this.others.values()) other.update(delta);
+    this.detailIn -= delta;
+    if (this.detailIn <= 0) {
+      this.detailIn = DETAIL_EVERY_SECONDS;
+      this.updateDetail(player);
+    }
+    this.updateMicrophone(player);
+    this.updateRing(delta);
     this.staff?.update(delta);
     this.updateChairs(delta);
     this.askAtChair(player);
@@ -521,6 +631,13 @@ export class AreaWorld {
         for (const other of this.others.values()) other.dispose();
         this.others.clear();
         this.regrow(message.opened, false);
+        this.lampFlips.clear();
+        for (const index of message.lamps ?? []) this.lampFlips.set(index, performance.now());
+        this.applyLamps();
+        if (this.areaId === 'conference') {
+          store.setStage(message.stage ?? null, message.now, message.presenter ?? false);
+          this.built?.stage?.setLit(!!message.stage);
+        }
         message.players.forEach((p) => this.addOther(p));
         // After a reconnect the server puts us at the door; walk back to where we are,
         // then repeat the status, since an activity only counts once seated.
@@ -531,7 +648,7 @@ export class AreaWorld {
         break;
       case 'joined':
         if (message.player.id === selfId) break;
-        this.addOther(message.player);
+        this.addOther(message.player, true);
         store.addChatLine({ kind: 'joined', name: message.player.name, self: false });
         break;
       case 'left': {
@@ -560,7 +677,19 @@ export class AreaWorld {
         this.regrow(message.opened, true);
         break;
       case 'danced':
-        if (message.id !== selfId) this.others.get(message.id)?.setDancing(message.on);
+        if (message.id !== selfId) {
+          this.others.get(message.id)?.setDancing(message.on, message.move);
+        }
+        break;
+      case 'lamped':
+        if (message.flipped) this.lampFlips.set(message.index, performance.now());
+        else this.lampFlips.delete(message.index);
+        this.applyLamps();
+        play('pop');
+        break;
+      case 'afked':
+        if (message.id !== selfId) this.others.get(message.id)?.setAfk(message.on);
+        else this.player?.setAfk(message.on);
         break;
       case 'smoked':
         if (message.id !== selfId) this.others.get(message.id)?.setSmoking(message.on);
@@ -584,6 +713,10 @@ export class AreaWorld {
         break;
       case 'jukebox':
         store.setJukebox(message.state);
+        break;
+      case 'staged':
+        store.setStage(message.stage, message.now);
+        this.built?.stage?.setLit(!!message.stage);
         break;
       case 'status':
         if (message.id !== selfId) this.others.get(message.id)?.setStatus(message.status);
@@ -824,6 +957,16 @@ export class AreaWorld {
       }
       return;
     }
+    // A theatre chair: no question, people come to sit and watch.
+    if (player.waitingKind === 'sofa' && this.grid.tileAt(player.tile) === TILE.theaterSeat) {
+      player.sofaAllowed = true;
+      return;
+    }
+    // Wandering while idle, the body just sits down; the player is not there to ask.
+    if (player.waitingKind === 'sofa' && this.wandering) {
+      player.sofaAllowed = true;
+      return;
+    }
     // A sofa: just a question, and a little jump onto it.
     if (player.waitingKind === 'sofa') {
       if (this.chairAsked) return;
@@ -889,7 +1032,7 @@ export class AreaWorld {
     return this.pets.get(owner) ?? this.waiting.get(owner) ?? null;
   }
 
-  private addOther(player: PlayerSnapshot): void {
+  private addOther(player: PlayerSnapshot, arriving = false): void {
     this.others.get(player.id)?.dispose();
     const avatar = new Avatar(
       this.assets.characters,
@@ -902,13 +1045,61 @@ export class AreaWorld {
     avatar.setStatus(player.status);
     avatar.setLines(player.lines);
     avatar.setFriend(this.isFriend(player.id));
-    avatar.setDancing(player.dancing);
+    avatar.setDancing(player.dancing, player.danceMove ?? 0);
+    avatar.setAfk(player.afk ?? false);
     avatar.setSmoking(player.smoking ?? false);
-    avatar.onTap = () => this.openPersonRing(player.id);
+    avatar.onTap = () => this.tapPerson(player.id);
     this.others.set(player.id, avatar);
     this.view.add(avatar.root);
     this.looks.set(player.id, player.look);
-    this.walkPet(player.id, avatar, player.look);
+    const pet = this.walkPet(player.id, avatar, player.look);
+    // Someone who just came in through a door: their pet follows them in.
+    const from = arriving ? this.grid.doorNextTo(player.tile) : null;
+    const doorway = from ? this.doorwayFrom(from, player.tile) : null;
+    if (pet && doorway) pet.enterThrough(doorway.at, doorway.facing);
+  }
+
+  /**
+   * In the hall, a sign over the door to a room where an event is on (or
+   * about to start), so people coming in know where to go.
+   */
+  private pointToEvent(now: number, proposed: Parameters<typeof eventNow>[3]): void {
+    let key = '';
+    let to: AreaId | null = null;
+    let title = '';
+    if (this.areaId === 'hall') {
+      for (const area of ['conference', 'smoking', 'library'] as const) {
+        const live = eventNow(area, now, EVENTS, proposed, DECOR_LEAD_MS);
+        if (!live) continue;
+        to = area;
+        title = eventTitle(live.event);
+        key = `${area}:${live.event.id}`;
+        break;
+      }
+    }
+    if (key === this.eventSignKey) return;
+    this.eventSignKey = key;
+    if (this.eventSign) {
+      this.eventSign.removeFromParent();
+      this.eventSign.element.remove();
+      this.eventSign = null;
+    }
+    if (!to) return;
+    const doors: Point[] = [];
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((_, x) => {
+        if (this.grid.doorTarget({ x, y }) === to) doors.push({ x, y });
+      }),
+    );
+    if (doors.length === 0) return;
+    const x = doors.reduce((sum, p) => sum + p.x, 0) / doors.length + 0.5;
+    const z = doors.reduce((sum, p) => sum + p.y, 0) / doors.length + 0.5;
+    const element = document.createElement('div');
+    element.className = 'world-sign world-sign--event';
+    element.textContent = `🎉 ${title} →`;
+    this.eventSign = new CSS2DObject(element);
+    this.eventSign.position.set(x, 2.6, z);
+    this.view.add(this.eventSign);
   }
 
   /**
@@ -920,8 +1111,12 @@ export class AreaWorld {
     this.eventTimer -= delta;
     if (this.eventTimer > 0) return;
     this.eventTimer = 1;
-    const live = eventNow(this.areaId, Date.now(), EVENTS, useGameStore.getState().proposed);
+    const now = Date.now();
+    const { proposed } = useGameStore.getState();
+    // Dressed from 15 minutes before; the music waits for the start itself.
+    const live = eventNow(this.areaId, now, EVENTS, proposed, DECOR_LEAD_MS);
     const id = live?.event.id ?? null;
+    this.pointToEvent(now, proposed);
     if (id !== this.eventId) {
       this.eventId = id;
       this.decor?.dispose();
@@ -934,7 +1129,7 @@ export class AreaWorld {
     }
     // The smoking room always has its own music (see RoomMusic); elsewhere an event brings some.
     const { musicOn } = useGameStore.getState();
-    if (live && musicOn && this.areaId !== 'smoking') {
+    if (live && now >= live.start && musicOn && this.areaId !== 'smoking') {
       playMusic(EVENT_THEMES[themeOf(live.event)].music);
     } else stopMusic();
   }
@@ -1014,6 +1209,22 @@ export class AreaWorld {
   }
 
   /** Places beside the library door, inside the hall, facing the door. */
+  /** The doorway someone coming from `from` steps in through, next to where they arrive. */
+  private doorwayFrom(
+    from: AreaId,
+    inside: Point,
+  ): { at: { x: number; z: number }; facing: { x: number; z: number } } | null {
+    const door = [
+      { x: inside.x, y: inside.y - 1 },
+      { x: inside.x, y: inside.y + 1 },
+      { x: inside.x - 1, y: inside.y },
+      { x: inside.x + 1, y: inside.y },
+    ].find((p) => this.grid.doorTarget(p) === from);
+    if (!door) return null;
+    const into = { x: inside.x - door.x, z: inside.y - door.y };
+    return { at: { x: door.x + 0.5 - into.x * 0.2, z: door.y + 0.5 - into.z * 0.2 }, facing: into };
+  }
+
   private doorSpots(): { spot: { x: number; z: number }; facing: { x: number; z: number } }[] {
     if (this.areaId !== 'hall') return [];
     const inside = this.grid.arrivalPoint('library');
@@ -1041,6 +1252,7 @@ export class AreaWorld {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
+    this.wake();
     const { typing, wardrobeOpen, statusOpen, confirm } = useGameStore.getState();
     if (typing || wardrobeOpen || statusOpen || confirm || !(event.code in KEY_DIRECTIONS)) return;
     event.preventDefault();
@@ -1057,6 +1269,7 @@ export class AreaWorld {
   private readonly onContextMenu = (event: MouseEvent) => event.preventDefault();
 
   private readonly onPointerDown = (event: PointerEvent) => {
+    this.wake();
     unlockAudio();
     const store = useGameStore.getState();
     if (this.view.isPinching || store.confirm) return;
@@ -1075,9 +1288,10 @@ export class AreaWorld {
         return;
       }
       case 'person':
-        // Tapping someone opens a ring of what you can do with them, around them.
+        // Tapping someone opens a ring of what you can do with them, around them;
+        // where several stand on top of each other, first a choice of who.
         this.ripple(event, 'talk');
-        this.openPersonRing(target.id);
+        this.tapPersonAt(target.id, event.clientX, event.clientY);
         return;
       case 'pet':
         this.ripple(event, 'talk');
@@ -1116,7 +1330,7 @@ export class AreaWorld {
     switch (target.kind) {
       case 'person':
         this.ripple(event, 'talk');
-        this.openPersonRing(target.id);
+        this.tapPersonAt(target.id, event.clientX, event.clientY);
         return;
       case 'pet':
         this.ripple(event, 'talk');
@@ -1188,6 +1402,89 @@ export class AreaWorld {
     if (this.player) check('self', this.player);
     for (const [id, other] of this.others) check(id, other);
     return (best as { id: string | 'self' } | null)?.id ?? null;
+  }
+
+  /** Everyone else whose body is under a screen point, front-most first. */
+  private othersAt(clientX: number, clientY: number): string[] {
+    return [...this.others]
+      .filter(([, other]) => this.onScreen(other.bodyBox, clientX, clientY))
+      .sort(([, a], [, b]) => b.bodyBox.x + b.bodyBox.z - (a.bodyBox.x + a.bodyBox.z))
+      .map(([id]) => id);
+  }
+
+  /** A tap on someone: their ring, or a choice when others stand on top of them. */
+  private tapPersonAt(id: string, clientX: number, clientY: number): void {
+    const under = this.othersAt(clientX, clientY);
+    const crowd = [...this.mergedWith.values()].find((ids) => ids.includes(id)) ?? [];
+    const group = [...new Set([id, ...under, ...crowd])];
+    if (group.length > 1) this.openPicker(group, clientX, clientY);
+    else this.openPersonRing(id);
+  }
+
+  /** A tap on a name tag: their ring, or the choice for a "+N" crowd tag. */
+  private tapPerson(id: string): void {
+    const group = this.mergedWith.get(id);
+    const other = this.others.get(id);
+    if (group && group.length > 1 && other) {
+      const box = other.bodyBox;
+      const at = this.view.project(box.x, box.bottom + (box.top - box.bottom) * 0.55, box.z);
+      this.openPicker(group, at.x, at.y);
+    } else this.openPersonRing(id);
+  }
+
+  private openPicker(ids: readonly string[], x: number, y: number): void {
+    const people = ids.flatMap((id) => {
+      const other = this.others.get(id);
+      return other ? [{ id, name: other.name, lines: other.statusLines }] : [];
+    });
+    useGameStore.getState().setRadial({ x, y, mode: 'pick', people });
+  }
+
+  /**
+   * Tight crowds (three or more within about a tile) show one name tag with
+   * "+N" instead of a pile of tags. The player's own tag and friends' stay.
+   */
+  private mergeTags(): void {
+    const loose = [...this.others].filter(([, o]) => !o.isFriend);
+    const groups: string[][] = [];
+    const seen = new Set<string>();
+    for (const [id] of loose) {
+      if (seen.has(id)) continue;
+      const group = [id];
+      seen.add(id);
+      for (let i = 0; i < group.length; i++) {
+        const at = this.others.get(group[i] ?? '')?.bodyBox;
+        if (!at) continue;
+        for (const [otherId, o] of loose) {
+          if (seen.has(otherId)) continue;
+          const box = o.bodyBox;
+          if (Math.hypot(box.x - at.x, box.z - at.z) < MERGE_DISTANCE) {
+            seen.add(otherId);
+            group.push(otherId);
+          }
+        }
+      }
+      groups.push(group);
+    }
+    this.mergedWith.clear();
+    for (const group of groups) {
+      if (group.length < MERGE_AT) {
+        for (const id of group) this.others.get(id)?.setMerged(false);
+        continue;
+      }
+      // The one nearest the camera keeps the tag.
+      const sorted = [...group].sort((a, b) => {
+        const A = this.others.get(a)?.bodyBox;
+        const B = this.others.get(b)?.bodyBox;
+        return (B ? B.x + B.z : 0) - (A ? A.x + A.z : 0);
+      });
+      sorted.forEach((id, i) =>
+        this.others.get(id)?.setMerged(i > 0, i === 0 ? group.length - 1 : 0),
+      );
+      const host = sorted[0];
+      if (host) this.mergedWith.set(host, sorted);
+    }
+    for (const [, other] of this.others) if (other.isFriend) other.setMerged(false);
   }
 
   /** Whose pet is under a screen point ('self' for the player's own), the front-most one. */
@@ -1316,6 +1613,144 @@ export class AreaWorld {
     this.pending = then;
   }
 
+  /**
+   * Away from the keyboard: after a couple of minutes a 💤 shows for everyone;
+   * after five the character wanders over to something to look at (a shelf, a
+   * painting, the lost-and-found box, a board) and moves on now and then.
+   * Studying at a desk never counts as idle. Any key or tap wakes them where
+   * they stand.
+   */
+  private idle(delta: number, player: Avatar): void {
+    const store = useGameStore.getState();
+    const busy =
+      player.seatKind === 'chair' ||
+      store.typing ||
+      store.stick !== null ||
+      this.steerDirection !== null ||
+      (player.isMoving && !this.wandering);
+    if (busy) {
+      this.wake();
+      return;
+    }
+    this.idleFor += delta;
+    if (!this.afk && this.idleFor > AFK_AFTER_SECONDS) {
+      this.afk = true;
+      player.setAfk(true);
+      this.connection?.afk(true);
+    }
+    this.fidget(delta, player);
+    if (this.idleFor < WANDER_AFTER_SECONDS || player.isSeated || player.isMoving) return;
+    this.wanderIn -= delta;
+    if (this.wanderIn > 0) return;
+    this.wanderIn = WANDER_EVERY[0] + Math.random() * (WANDER_EVERY[1] - WANDER_EVERY[0]);
+    // Now and then a sofa or an armchair instead: they sit there until the player is back.
+    const seats = this.seatTiles.filter(
+      (tile) => this.grid.seatAt(tile)?.kind === 'sofa' && !this.personAt(tile),
+    );
+    const seat = seats[Math.floor(Math.random() * seats.length)];
+    if (seat && Math.random() < IDLE_SIT_SHARE) {
+      this.wandering = true;
+      this.walkTo(seat);
+      return;
+    }
+    const spots = [...(this.built?.examinables.values() ?? [])].filter(
+      (e) => IDLE_LOOKS.has(e.kind) && this.grid.isWalkable(e.stand) && !this.personAt(e.stand),
+    );
+    const spot = spots[Math.floor(Math.random() * spots.length)];
+    if (!spot) return;
+    this.wandering = true;
+    this.goTo(spot.stand, { kind: 'gaze' });
+  }
+
+  /**
+   * Small things an idle body does where it is: turns to look around, and
+   * now and then a yawn or a thinking face that the room sees too.
+   */
+  private fidget(delta: number, player: Avatar): void {
+    if (this.idleFor < FIDGET_AFTER_SECONDS || player.isMoving) return;
+    this.fidgetIn -= delta;
+    if (this.fidgetIn > 0) return;
+    this.fidgetIn = FIDGET_EVERY[0] + Math.random() * (FIDGET_EVERY[1] - FIDGET_EVERY[0]);
+    if (Math.random() < 0.4) {
+      const emote = FIDGET_EMOTES[Math.floor(Math.random() * FIDGET_EMOTES.length)] ?? 'sleepy';
+      this.connection?.emote(emote);
+    } else if (!player.isSeated) {
+      const angle = Math.random() * Math.PI * 2;
+      player.face(Math.sin(angle), Math.cos(angle));
+    }
+  }
+
+  /**
+   * The house rule: library lamps are off by day and on from half past three
+   * until seven in the morning. Only a librarian on duty puts a switched lamp
+   * back; from ten at night to nine in the morning nobody does, and the
+   * morning librarian sees to it.
+   */
+  private lampsDue(): boolean {
+    const now = new Date();
+    const hour = now.getHours() + now.getMinutes() / 60;
+    return hour >= LAMPS_ON_FROM || hour < LAMPS_OFF_FROM;
+  }
+
+  private lampOn(index: number): boolean {
+    return this.lampsDue() !== this.lampFlips.has(index);
+  }
+
+  /** Lights each library lamp as the rule and the switches say. */
+  private applyLamps(): void {
+    const ambience = this.built?.ambience;
+    if (!ambience || this.areaId !== 'library') return;
+    const count = [...(this.built?.examinables.values() ?? [])].filter(
+      (e) => e.kind === 'lamp',
+    ).length;
+    for (let i = 0; i < count; i++) ambience.setLamp(i, this.lampOn(i));
+  }
+
+  /**
+   * Every few seconds: the lamps follow the hour, and a lamp switched against
+   * the rule for a while gets a visit from the librarian, who puts it back
+   * with a word ("plenty of daylight" by day, "too dark to read" in the evening).
+   */
+  private keepLamps(delta: number): void {
+    this.lampTimer -= delta;
+    if (this.lampTimer > 0 || this.areaId !== 'library') return;
+    this.lampTimer = 2;
+    this.applyLamps();
+    const staff = this.staff;
+    if (staff?.kind !== 'librarian') return;
+    const now = performance.now();
+    for (const [index, since] of this.lampFlips) {
+      if (now - since < LAMP_PATIENCE_MS) continue;
+      const lamp = this.built?.examinables.get(`lamp:${index}`);
+      if (!lamp || staff.choresWaiting.some((c) => sameTile(c.stand, lamp.stand))) continue;
+      const day = !this.lampsDue();
+      staff.addChore({
+        stand: lamp.stand,
+        facing: { x: 0, y: -1 },
+        done: () => {
+          if (!this.lampFlips.has(index)) return;
+          staff.avatar.say(t(day ? 'staff.lampOff' : 'staff.lampOn'));
+          this.connection?.lamp(index, false);
+        },
+      });
+    }
+  }
+
+  /** Back at the keyboard: the 💤 goes away and nothing wanders off on its own. */
+  private wake(): void {
+    this.idleFor = 0;
+    this.wanderIn = 0;
+    this.fidgetIn = 0;
+    if (this.wandering) {
+      this.wandering = false;
+      if (this.pending?.kind === 'gaze') this.pending = null;
+    }
+    if (!this.afk) return;
+    this.afk = false;
+    this.player?.setAfk(false);
+    this.connection?.afk(false);
+  }
+
   /** Does what the player walked over for, once they stand still. */
   private arrive(player: Avatar, pending: Pending): void {
     this.pending = null;
@@ -1362,6 +1797,12 @@ export class AreaWorld {
           }
           return;
         }
+        if (examinable.kind === 'lamp') {
+          const lamp = this.built?.examinables.get(`lamp:${examinable.index}`);
+          if (lamp) lookAt({ x: lamp.stand.x, y: lamp.stand.y - 1 });
+          this.connection?.lamp(examinable.index, !this.lampFlips.has(examinable.index));
+          return;
+        }
         if (examinable.kind === 'lost') {
           store.setDiscovery({ kind: 'lost', index: 0, pick: Math.floor(Date.now() / 86_400_000) });
           return;
@@ -1378,11 +1819,23 @@ export class AreaWorld {
       case 'desk':
         lookAt(pending.tile);
         // The reception looks after the private rooms (and explains the place); the librarian points to the notices.
-        if (this.areaId === 'hall') store.openRooms();
-        else store.setBoardOpen(true);
+        if (this.areaId === 'hall') {
+          // The receptionist turns to the player and holds out a key (and says so), then the form.
+          this.staff?.avatar.face(
+            player.position.x - (this.staff?.avatar.position.x ?? 0),
+            player.position.z - (this.staff?.avatar.position.z ?? 0),
+          );
+          this.staff?.avatar.play('poke');
+          store.openRooms(null, true);
+        } else store.setBoardOpen(true);
         return;
       case 'elevator':
         store.openRooms();
+        return;
+      case 'gaze':
+        return;
+      case 'ride':
+        this.goThrough(pending.to);
         return;
       case 'pat': {
         const pet = this.petOf(pending.owner);
@@ -1412,17 +1865,17 @@ export class AreaWorld {
   }
 
   /** Starts or stops dancing, where the room allows it. */
-  private dance(on: boolean): void {
+  private dance(on: boolean, move: number): void {
     const player = this.player;
-    if (!player || player.isDancing === on) return;
+    if (!player || (player.isDancing === on && (!on || player.danceMoveNow === move))) return;
     if (on && (!AREA_RULES[this.areaId].dance || player.isSeated)) {
       const store = useGameStore.getState();
       store.setDancing(false);
       store.setNotice('no_dance');
       return;
     }
-    player.setDancing(on);
-    this.connection?.dance(on);
+    player.setDancing(on, move);
+    this.connection?.dance(on, move);
   }
 
   private drawMap(player: Avatar): void {
@@ -1491,6 +1944,7 @@ export class AreaWorld {
     useGameStore.getState().setStudying(seated);
     this.shareBlocks();
     this.spreadOut(everyone);
+    this.mergeTags();
     // The player first, so their own bubble keeps its place.
     const avatars = [this.player, ...this.others.values()];
     const screen = this.view.canvas.getBoundingClientRect();
@@ -1675,6 +2129,9 @@ export class AreaWorld {
           return t(examinable.index === 0 ? 'tip.darts' : 'tip.gameTable');
         if (examinable.kind === 'jukebox') return t('tip.jukebox');
         if (examinable.kind === 'lost') return t('tip.lost');
+        if (examinable.kind === 'lamp') {
+          return t(this.lampOn(examinable.index) ? 'tip.lamp.off' : 'tip.lamp.on');
+        }
         if (examinable.kind === 'game')
           return t(`tip.game.${MACHINES[examinable.index] ?? 'arcade'}`);
         return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
@@ -1856,9 +2313,73 @@ export class AreaWorld {
     this.player?.say(t(key));
   }
 
+  /**
+   * Crowds: people off the screen are not drawn, and people far from the
+   * player lose their shadow and name tag (friends keep the tag). Hovered,
+   * selected or merged people are handled by their own tags as before.
+   */
+  private updateDetail(player: Avatar): void {
+    const crowd = this.others.size >= DETAIL_CROWD;
+    for (const other of this.others.values()) {
+      if (!crowd) {
+        other.setDetail('full');
+        continue;
+      }
+      const { x, z } = other.position;
+      const p = this.projected.set(x, 1, z).project(this.view.camera);
+      const off = Math.abs(p.x) > OFF_SCREEN || Math.abs(p.y) > OFF_SCREEN;
+      const far =
+        Math.hypot(x - player.position.x, z - player.position.z) > FAR_TILES && !other.isFriend;
+      other.setDetail(off ? 'off' : far ? 'far' : 'full');
+    }
+  }
+
+  /**
+   * A soft ring on the floor under the person meant: the one pointed at in a
+   * crowd's chooser, or whose ring of actions is open.
+   */
+  private updateRing(delta: number): void {
+    const { ringFor, radial } = useGameStore.getState();
+    const id =
+      radial?.mode === 'pick' ? ringFor : radial?.mode === 'person' ? (radial.id ?? null) : null;
+    const someone = id ? this.others.get(id) : undefined;
+    this.ring.visible = !!someone && this.others.size > 1;
+    if (!someone || !this.ring.visible) return;
+    this.ringClock += delta;
+    this.ring.position.set(someone.position.x, someone.root.position.y + 0.04, someone.position.z);
+    (this.ring.material as MeshBasicMaterial).opacity = 0.65 + Math.sin(this.ringClock * 5) * 0.25;
+  }
+
+  /** Whoever stands at the conference hall's microphone shows a 🎤 by their name. */
+  private updateMicrophone(player: Avatar): void {
+    const mic = this.built?.stage?.microphone;
+    if (!mic) return;
+    for (const body of [player, ...this.others.values()]) {
+      const { x, y } = body.tile;
+      const near = Math.max(Math.abs(x - mic.x), Math.abs(y - mic.y)) <= 1;
+      body.setSpeaking(near && !body.isMoving && this.grid.isStage(body.tile));
+    }
+  }
+
+  /**
+   * Whether the player may go into the conference hall now: around an event
+   * held there, or always for admins and on a local server. The server checks again.
+   */
+  private conferenceOpen(): boolean {
+    const store = useGameStore.getState();
+    const open = import.meta.env.DEV || store.role === 'admin';
+    return conferenceRole(store.session?.id ?? '', store.proposed, Date.now(), { open }) !== null;
+  }
+
   private checkDoor(tile: Point): void {
     const to = this.grid.doorTarget(tile);
     if (!to) return;
+    if (to === 'conference' && !this.conferenceOpen()) {
+      this.player?.halt();
+      useGameStore.getState().setNotice('conference_closed');
+      this.stepBackFrom(tile);
+      return;
+    }
     // A study timer belongs to the library, so leaving it asks first.
     if (this.areaId === 'library' && this.timerRunning()) {
       this.heldKeys.clear();
@@ -1898,12 +2419,58 @@ export class AreaWorld {
    * between the library and the smoking room that is through the hall, so the
    * player comes in at the door from the hall.
    */
+  /** Off to the reception desk to open a room (from anywhere: through the hall). */
+  private walkToDesk(): void {
+    if (this.areaId !== 'hall') {
+      useGameStore.getState().setTravel('hall');
+      return;
+    }
+    let desk: Point | null = null;
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        if (!desk && c === TILE.receptionDesk) desk = { x, y };
+      }),
+    );
+    if (desk) this.goTo(desk, { kind: 'desk', tile: desk });
+  }
+
+  /**
+   * Up to a private room. In the hall, with the key from the reception, the
+   * player first walks over to the elevator; from anywhere else (an invite,
+   * a link) the elevator is not in sight, so up they go at once.
+   */
+  private rideUp(to: AreaId): void {
+    const player = this.player;
+    const front = this.areaId === 'hall' ? this.grid.arrivalPoint('room3') : null;
+    if (!player || !front || sameTile(player.tile, front)) {
+      this.goThrough(to);
+      return;
+    }
+    this.leaveSeat(player, () => this.goTo(front, { kind: 'ride', to }));
+  }
+
   private travel(to: AreaId): void {
     const store = useGameStore.getState();
     store.setTravel(null);
     const player = this.player;
     if (!player || this.leaving || to === this.areaId || isRoomArea(to)) return;
+    if (to === 'conference' && !this.conferenceOpen()) {
+      store.setNotice('conference_closed');
+      return;
+    }
     const from = this.areaId === 'hall' || to === 'hall' ? this.areaId : 'hall';
     this.leaveSeat(player, () => this.goThrough(to, from));
   }
+}
+
+/** The ring under a person picked out of a crowd. */
+function createPersonRing(): Mesh {
+  const ring = new Mesh(
+    new RingGeometry(0.3, 0.4, 40),
+    new MeshBasicMaterial({ color: 0xffd36b, transparent: true, depthWrite: false }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 3;
+  ring.visible = false;
+  return ring;
 }

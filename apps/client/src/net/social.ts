@@ -18,6 +18,9 @@ export function startSocial(session: GuestSession): () => void {
         case 'friends':
           store.setFriends(message.friends);
           break;
+        case 'found':
+          store.setFound(message.people);
+          break;
         case 'dm': {
           const { message: dm } = message;
           const mine = dm.from === session.id;

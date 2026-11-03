@@ -3524,6 +3524,19 @@ button:disabled {
   gap: 6px;
 }
 
+/* Labels above their fields: long labels (Turkish ones) must not squeeze the date. */
+.event-form-row .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.event-form-row .field input {
+  width: 100%;
+  min-height: 38px;
+  font-size: 13px;
+}
+
 /* ---------- Rings: emotes around the character ---------- */
 
 .radial--emote .radial-icon img {
@@ -4096,4 +4109,388 @@ button:disabled {
     right: max(10px, env(safe-area-inset-right));
     bottom: calc(max(12px, env(safe-area-inset-bottom)) + 70px);
   }
+
+  /* The stage's buttons sit above the welcome note and notices, which stack over the chat line. */
+  .music-on.stage-open,
+  .music-on.stage-show {
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 200px);
+  }
+
+  /* The welcome note, notices and the seat bar stand beside the joystick, never under it. */
+  .hud-bottom > :not(.chat-row, .hud-hint) {
+    box-sizing: border-box;
+    max-width: calc(100% - 124px);
+    margin-left: 124px;
+  }
+}
+
+/* A tight crowd: one name tag with "+N", the others tucked away until it breaks up. */
+.avatar-label--merged .avatar-name,
+.avatar-label--merged .avatar-lines {
+  display: none;
+}
+.avatar-more {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: #c9672f;
+  color: #fff6e6;
+  font-size: 0.85em;
+}
+.avatar-afk {
+  margin-right: 3px;
+  opacity: 0.85;
+}
+.find-name {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.find-where {
+  opacity: 0.7;
+}
+/* In the hall, pointing to the room where an event is on. */
+.world-sign--event {
+  background: #c9672f;
+  color: #fff6e6;
+  animation: event-sign 1.6s ease-in-out infinite;
+}
+@keyframes event-sign {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.legal-line {
+  margin: 6px 0 0;
+  font-size: 11px;
+  opacity: 0.8;
+  text-align: center;
+}
+.legal-line a {
+  color: inherit;
+}
+
+.room-desk,
+.room-key {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+.room-key-icon {
+  font-size: 40px;
+  animation: key-turn 1.2s ease-in-out 2;
+}
+@keyframes key-turn {
+  50% {
+    transform: rotate(-25deg) scale(1.15);
+  }
+}
+
+/* ---------- The conference hall's big screen and the presenter's panel ---------- */
+
+/* Laid over the screen in the room; it follows the camera (see StageScreen). */
+.stage-screen {
+  position: fixed;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0c0c10;
+  box-shadow: 0 0 24px rgb(255 214 150 / 0.25);
+  pointer-events: auto;
+}
+
+/* Too small in the room (a phone), or made bigger: a card of its own. */
+.stage-screen--card {
+  top: calc(max(12px, env(safe-area-inset-top)) + 64px);
+  left: 50%;
+  translate: -50% 0;
+  width: min(420px, calc(100vw - 24px));
+  aspect-ratio: 16 / 10;
+  border: 4px solid var(--panel-edge);
+  border-radius: 10px;
+}
+
+.stage-screen--full {
+  top: 50%;
+  translate: -50% -50%;
+  z-index: 8;
+  width: min(1100px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+}
+
+.stage-media {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+}
+
+.stage-picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.stage-video,
+.stage-video iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.stage-video {
+  position: absolute;
+  inset: 0;
+}
+
+.stage-tap {
+  position: absolute;
+  z-index: 1;
+}
+
+.stage-failed {
+  margin: 0;
+  padding: 12px;
+  color: #f3e3c7;
+  font-size: 13px;
+  text-align: center;
+}
+
+.stage-sound {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  color: #f3e3c7;
+}
+
+.stage-sound-icon {
+  font-size: 40px;
+  animation: music-pulse 1.4s ease-in-out infinite;
+}
+
+.stage-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.stage-bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgb(20 16 14 / 0.86);
+}
+
+.stage-bar .music-button {
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+}
+
+.stage-caption {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #f3e3c7;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-show {
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 140px);
+}
+
+.music-on.stage-open,
+.music-on.stage-show {
+  z-index: 2;
+}
+
+.stage-panel {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 96px);
+  /* Under dialogs and rings: a tool of the room, not a window over everything. */
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  width: min(300px, calc(100vw - 24px));
+  pointer-events: auto;
+}
+
+.stage-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stage-hint,
+.stage-hosts {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.stage-hosts {
+  color: var(--panel-ink-soft);
+  font-size: 11px;
+}
+
+.stage-form {
+  display: grid;
+  gap: 6px;
+}
+
+.stage-form input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.stage-kinds,
+.stage-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Theme picker in the event form: a row of little bunting swatches. */
+.event-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.event-themes legend {
+  margin-bottom: 4px;
+}
+
+.event-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.event-theme--on {
+  border-color: var(--panel-ok);
+  box-shadow: 0 0 0 2px var(--panel-ok);
+}
+
+.event-theme-flags {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.event-theme-flags i {
+  width: 7px;
+  height: 10px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.avatar-mic {
+  margin-right: 2px;
+}
+
+/* On the wall: placed by a transform from the top left, so it starts there. */
+.stage-screen:not(.stage-screen--card) {
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+@media (max-width: 600px) {
+  /* Below the clock and the chat button in the top right. */
+  .stage-screen--card:not(.stage-screen--full) {
+    top: calc(max(12px, env(safe-area-inset-top)) + 150px);
+  }
+
+  .stage-panel {
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 150px);
+    max-height: calc(100dvh - 330px);
+    overflow-y: auto;
+  }
+
+  .stage-panel .stage-hosts {
+    display: none;
+  }
+}
+
+/* Far away in a crowd: the name tag steps back (see Avatar.setDetail). */
+.avatar-label--far {
+  display: none;
+}
+
+/* The player's daily goal: a thin bar and the goal, which taps to the next one. */
+.goal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.goal-track {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--panel-well);
+  box-shadow: inset 0 0 0 1px var(--panel-edge-mid);
+}
+
+.goal-fill {
+  display: block;
+  height: 100%;
+  background: var(--panel-ok);
+  transition: width 0.4s ease;
+}
+
+.goal-pick {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--panel-ink-soft);
+  font: inherit;
+  font-size: 10px;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.find-face {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--panel-well);
+  box-shadow: inset 0 0 0 2px var(--panel-edge-mid);
 }

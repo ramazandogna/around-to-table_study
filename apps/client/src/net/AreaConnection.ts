@@ -5,6 +5,7 @@ import type {
   Point,
   Emote,
   ServerMessage,
+  StageKind,
   StatusLines,
   StudyStatus,
   TableAction,
@@ -89,8 +90,29 @@ export class AreaConnection {
     this.send({ t: 'emote', emote });
   }
 
-  dance(on: boolean): void {
-    this.send({ t: 'dance', on });
+  lamp(index: number, flipped: boolean): void {
+    this.send({ t: 'lamp', index, flipped });
+  }
+
+  /** Puts a picture, video or sound on the conference hall's big screen. */
+  stageShow(kind: StageKind, src: string, caption: string): void {
+    this.send({ t: 'stageShow', kind, src, caption });
+  }
+
+  stageControl(action: 'play' | 'pause' | 'seek', at?: number): void {
+    this.send(at === undefined ? { t: 'stageControl', action } : { t: 'stageControl', action, at });
+  }
+
+  stageClear(): void {
+    this.send({ t: 'stageClear' });
+  }
+
+  afk(on: boolean): void {
+    this.send({ t: 'afk', on });
+  }
+
+  dance(on: boolean, move = 0): void {
+    this.send({ t: 'dance', on, move });
   }
 
   /** The study timer ran out; the server checks it really did. */

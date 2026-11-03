@@ -12,6 +12,7 @@ import { Discovery } from './ui/Discovery';
 import { Games } from './ui/Games';
 import { JukeboxPanel } from './ui/Jukebox';
 import { RoomMusic } from './ui/RoomMusic';
+import { StageScreen } from './ui/StageScreen';
 import { Joystick } from './ui/Joystick';
 import { Loader } from './ui/Loader';
 import { TableGames } from './ui/TableGames';
@@ -140,6 +141,7 @@ export function App() {
       <TableGames />
       <JukeboxPanel />
       <RoomMusic />
+      <StageScreen />
       <RoomsPanel />
       <RoomAdmin />
       <PeoplePanel />

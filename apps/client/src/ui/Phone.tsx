@@ -1,4 +1,5 @@
 import {
+  type Appearance,
   AREA_RULES,
   isRoomArea,
   type AreaId,
@@ -9,11 +10,12 @@ import {
   roomInviteMark,
 } from '@att/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { t } from '../i18n/t';
+import { dateLocale, t, type MessageKey } from '../i18n/t';
 import { unreadMessages } from '../net/social';
 import { useGameStore } from '../state/store';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { Panel } from './Panel';
+import { portrait } from '../world/portrait';
 
 /**
  * The HUD link to the phone. It works in every room; in the library it only
@@ -128,6 +130,93 @@ function Contacts() {
   );
 }
 
+/**
+ * Finds someone in the building by name, for a crowd where tapping them is
+ * hard. Two people with one name are told apart by where they are.
+ */
+function FindByName() {
+  const social = useGameStore((s) => s.social);
+  const found = useGameStore((s) => s.found);
+  const friends = useGameStore((s) => s.friends);
+  const [q, setQ] = useState('');
+  const [asked, setAsked] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      useGameStore.getState().setFound(null);
+      return;
+    }
+    const timer = window.setTimeout(() => social?.find(query), 250);
+    return () => window.clearTimeout(timer);
+  }, [q, social]);
+  return (
+    <div className="find-name">
+      <input
+        className="text-input"
+        value={q}
+        maxLength={40}
+        placeholder={t('find.placeholder')}
+        aria-label={t('find.placeholder')}
+        onChange={(event) => setQ(event.target.value)}
+      />
+      {found && q.trim().length >= 2 && (
+        <ul className="room-list">
+          {found.length === 0 && <li className="board-empty">{t('find.none')}</li>}
+          {found.map((person) => {
+            const state = friends.find((f) => f.id === person.id)?.state;
+            const sent = asked.has(person.id) || state === 'outgoing';
+            return (
+              <li key={person.id} className="room-line">
+                {person.look && <Face look={person.look} />}
+                <span className="room-name">
+                  {person.name}
+                  <small className="find-where"> · {t(`area.${person.area}` as MessageKey)}</small>
+                </span>
+                <button
+                  type="button"
+                  className="mini-button mini-button--ok"
+                  disabled={person.friend || sent}
+                  onClick={() => {
+                    social?.befriend(person.id);
+                    setAsked(new Set([...asked, person.id]));
+                  }}
+                >
+                  {person.friend
+                    ? t('card.friend.done')
+                    : sent
+                      ? t('card.friend.sent')
+                      : state === 'incoming'
+                        ? t('friends.accept')
+                        : t('card.friend')}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** A little drawing of someone's face, made from their character. */
+function Face({ look }: { look: Appearance }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    portrait(look)
+      .then((made) => live && setUrl(made))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [look]);
+  return url ? (
+    <img className="find-face" src={url} alt="" width={40} height={40} />
+  ) : (
+    <span className="find-face" aria-hidden />
+  );
+}
+
 /** Your own friend link, to send anywhere: opening it sends you a request. */
 function AddFriend() {
   const id = useGameStore((s) => s.session?.id ?? '');
@@ -135,6 +224,7 @@ function AddFriend() {
   const link = `${location.origin}/?friend=${encodeURIComponent(id)}`;
   return (
     <div className="phone-add">
+      <FindByName />
       <p className="creator-note">{t('phone.add.how')}</p>
       <code className="phone-link">{link}</code>
       <button
@@ -320,7 +410,10 @@ const PLACE = /⟦go:(hall|library|smoking)⟧/;
 const placeMark = (area: AreaId) => `⟦go:${area}⟧`;
 
 function Bubble({ message, mine, seen }: { message: DirectMessage; mine: boolean; seen: boolean }) {
-  const time = new Date(message.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = new Date(message.at).toLocaleTimeString(dateLocale(), {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   // An invite to a private room, or a place to come to, shows as a button rather than its code.
   const invite = findRoomInvite(message.text);
   const place = PLACE.exec(message.text)?.[1] as AreaId | undefined;

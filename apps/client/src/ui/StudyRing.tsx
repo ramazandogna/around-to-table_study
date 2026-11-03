@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { t, type MessageKey } from '../i18n/t';
 import { readJson, writeJson } from '../net/storage';
 import { useGameStore, type RunningBlock } from '../state/store';
-import { formatDuration, todayStats } from '../state/stats';
+import { dailyGoal, formatDuration, nextGoal, todayStats } from '../state/stats';
 import { formatClock } from '../state/study';
 import { useNow } from './Calendar';
 import { Check, Stepper } from './Panel';
@@ -137,6 +137,7 @@ export function StudyRing() {
             {t('plan.today', { time: formatDuration(stats.focusMs), blocks: stats.blocks })}
             {stats.streak > 1 && ` · ${t('plan.streak', { days: stats.streak })}`}
           </p>
+          <GoalBar focusMs={stats.focusMs} />
         </div>
       </div>
 
@@ -213,5 +214,31 @@ export function StudyRing() {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Today against the player's own goal: a bar that fills as they focus. Tapping
+ * the goal moves it to the next one (30 minutes to 4 hours). Only this device
+ * knows it; there is no ranking.
+ */
+export function GoalBar({ focusMs }: { focusMs: number }) {
+  const [goal, setGoal] = useState(dailyGoal);
+  const share = Math.min(1, focusMs / (goal * 60_000));
+  return (
+    <div className="goal-bar">
+      <span className="goal-track" aria-hidden>
+        <span className="goal-fill" style={{ width: `${Math.round(share * 100)}%` }} />
+      </span>
+      <button
+        type="button"
+        className="goal-pick"
+        title={t('goal.change')}
+        onClick={() => setGoal(nextGoal())}
+      >
+        {share >= 1 ? '🎯 ' : ''}
+        {t('goal.label', { time: formatDuration(goal * 60_000) })}
+      </button>
+    </div>
   );
 }

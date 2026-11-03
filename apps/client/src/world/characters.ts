@@ -12,7 +12,7 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { dressMesh, mapOutfit, type OutfitMap } from './outfit';
-import { createDanceCycle, createSmokeCycle, createStudyPose, createWaveGesture } from './poses';
+import { createDances, createSmokeCycle, createStudyPose, createWaveGesture } from './poses';
 
 const PATH = 'models/characters/';
 /** Standing height in tiles (a tile is about a meter): small and chibi, like the furniture kit. */
@@ -26,7 +26,8 @@ export type CharacterClips = {
   sit: AnimationClip;
   /** Sitting at a table with the forearms on it. */
   study: AnimationClip;
-  dance: AnimationClip;
+  /** The six dances, in the order of the dance ring (see `DANCES`). */
+  dances: AnimationClip[];
   /** Standing with a cigarette, a drag now and then. */
   smoke: AnimationClip;
   /** One-off gestures. */
@@ -96,7 +97,7 @@ async function loadKit(): Promise<CharacterKit> {
           walk: clipNamed(animations, 'walk'),
           sit,
           study: createStudyPose(sit),
-          dance: createDanceCycle(),
+          dances: createDances(),
           smoke: createSmokeCycle(idle),
           poke: clipNamed(animations, 'interact-right'),
           nod: clipNamed(animations, 'emote-yes'),

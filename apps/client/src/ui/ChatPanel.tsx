@@ -1,12 +1,12 @@
 import { AREA_RULES, SHOUT_MAX_CHARS, type Shout } from '@att/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { t } from '../i18n/t';
+import { dateLocale, t } from '../i18n/t';
 import { useGameStore, type ChatLine } from '../state/store';
 
 /** Lines from one person this close together share one name and time. */
 const GROUP_MS = 3 * 60_000;
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const clock = new Intl.DateTimeFormat(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 
 /** A line continues the one before when the same person said it, the same way, just now. */
 function continues(line: ChatLine, before: ChatLine | undefined): boolean {

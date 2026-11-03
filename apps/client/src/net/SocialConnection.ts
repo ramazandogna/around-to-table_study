@@ -7,6 +7,7 @@ import type {
   SocialServerMessage,
   StatusLines,
 } from '@att/shared';
+import type { EVENT_AREAS } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
 import { isPong, keepAlive } from './heartbeat';
 
@@ -66,10 +67,15 @@ export class SocialConnection {
       note: lines.announcement,
       tz: -new Date().getTimezoneOffset(),
       pet: pet ?? null,
+      ...(look ? { look } : {}),
       ...(pet && look.petColor !== undefined ? { petColor: look.petColor } : {}),
       ...(pet && look.petSex ? { petSex: look.petSex } : {}),
       ...(pet && look.petAccessory ? { petAccessory: look.petAccessory } : {}),
     });
+  }
+
+  find(q: string): void {
+    this.send({ t: 'find', q });
   }
 
   befriend(to: string): void {
@@ -116,7 +122,13 @@ export class SocialConnection {
   }
 
   propose(event: EventProposal): void {
-    this.send({ t: 'propose', ...event, area: event.area as 'smoking' | 'hall' | 'library' });
+    const { theme, ...rest } = event;
+    this.send({
+      t: 'propose',
+      ...rest,
+      area: event.area as (typeof EVENT_AREAS)[number],
+      ...(theme ? { theme } : {}),
+    });
   }
 
   /** Admins: approve, turn down or take off an event. */

@@ -4,6 +4,7 @@ import { unlockAudio } from '../audio/sound';
 import { COZY, COZY_ARTIST, COZY_LICENSE, cozyAt } from '../content/cozy';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
+import { loadYouTube, type YTPlayer } from './youtube';
 
 /**
  * The smoking room's music, in one card. Calm piano, guitar and strings play
@@ -206,61 +207,6 @@ function Cozy({
 }
 
 /* ---------- A queued song, in YouTube's embedded player ---------- */
-
-type YTPlayer = {
-  loadVideoById: (options: { videoId: string; startSeconds: number }) => void;
-  seekTo: (seconds: number, allowSeekAhead: boolean) => void;
-  setVolume: (volume: number) => void;
-  unMute: () => void;
-  getCurrentTime: () => number;
-  getDuration: () => number;
-  getPlayerState: () => number;
-  playVideo: () => void;
-  destroy: () => void;
-};
-
-type YTNamespace = {
-  Player: new (
-    element: HTMLElement,
-    options: {
-      host?: string;
-      width: number;
-      height: number;
-      videoId: string;
-      playerVars: Record<string, number | string>;
-      events: {
-        onReady?: (event: { target: YTPlayer }) => void;
-        onStateChange?: (event: { data: number; target: YTPlayer }) => void;
-      };
-    },
-  ) => YTPlayer;
-};
-
-declare global {
-  interface Window {
-    YT?: YTNamespace;
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-let api: Promise<YTNamespace> | null = null;
-
-/** Loads YouTube's player script once. */
-function loadYouTube(): Promise<YTNamespace> {
-  api ??= new Promise((resolve, reject) => {
-    if (window.YT?.Player) return resolve(window.YT);
-    window.onYouTubeIframeAPIReady = () => (window.YT ? resolve(window.YT) : reject());
-    const script = document.createElement('script');
-    script.src = 'https://www.youtube.com/iframe_api';
-    script.async = true;
-    script.onerror = () => {
-      api = null;
-      reject(new Error('YouTube could not be reached'));
-    };
-    document.head.append(script);
-  });
-  return api;
-}
 
 /** Off by more than this many seconds from the room, the player catches up. */
 const DRIFT_SECONDS = 4;

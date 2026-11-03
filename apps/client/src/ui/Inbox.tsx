@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { t } from '../i18n/t';
+import { dateLocale, t } from '../i18n/t';
 import { useGameStore, type InboxItem } from '../state/store';
 import { Dialog, Panel } from './Panel';
 
@@ -18,7 +18,7 @@ const ICON: Record<InboxItem['kind'], string> = {
   room_closed: '🗝️',
 };
 
-const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const time = new Intl.DateTimeFormat(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 
 /**
  * The bell on the HUD: everything that happened to the player (messages,

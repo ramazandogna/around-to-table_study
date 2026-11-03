@@ -1,6 +1,6 @@
 import { AREA_RULES, BADGES, earnedBadges, type Profile } from '@att/shared';
 import { useEffect, useState, type FormEvent } from 'react';
-import { t, type MessageKey } from '../i18n/t';
+import { dateLocale, t, type MessageKey } from '../i18n/t';
 import { formatDuration } from '../state/stats';
 import { useGameStore, type Selected } from '../state/store';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
@@ -18,7 +18,7 @@ export function PlayerCard() {
   return selected ? <Card key={selected.id} {...selected} /> : null;
 }
 
-const joined = new Intl.DateTimeFormat(undefined, {
+const joined = new Intl.DateTimeFormat(dateLocale(), {
   day: 'numeric',
   month: 'long',
   year: 'numeric',

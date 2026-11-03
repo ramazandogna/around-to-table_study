@@ -1,3 +1,4 @@
+import { dateLocale } from '../i18n/t';
 import {
   BoxGeometry,
   CanvasTexture,
@@ -142,7 +143,7 @@ export function wallClock(materials: Material[]): { root: Group; tick: (now: Dat
   root.add(back, screen);
   let shown = '';
   const tick = (now: Date) => {
-    const text = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const text = now.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
     if (text === shown) return;
     shown = text;
     const c = canvas.getContext('2d');

@@ -34,9 +34,13 @@ export function RoomsPanel() {
 
 function RoomsDialog({ prefilled }: { prefilled: string | null }) {
   const session = useGameStore((s) => s.session);
-  const [tab, setTab] = useState<Tab>(prefilled ? 'code' : 'open');
+  const [tab, setTab] = useState<Tab>(
+    prefilled ? 'code' : useGameStore.getState().roomsAtDesk ? 'create' : 'open',
+  );
   const [error, setError] = useState<RoomError | null>(null);
   const [busy, setBusy] = useState(false);
+  const atDesk = useGameStore((s) => s.roomsAtDesk);
+  const [created, setCreated] = useState<{ room: RoomInfo; password: string } | null>(null);
   const close = () => useGameStore.getState().closeRooms();
   const token = session?.token ?? '';
 
@@ -92,14 +96,33 @@ function RoomsDialog({ prefilled }: { prefilled: string | null }) {
             onJoin={(code, password) => void go(code, password)}
           />
         )}
-        {tab === 'create' && (
-          <CreateRoom
-            token={token}
-            busy={busy}
-            onError={setError}
-            onCreated={(room, password) => void go(room.code, password)}
-          />
-        )}
+        {tab === 'create' &&
+          (created ? (
+            <KeyHandover
+              room={created.room}
+              locked={created.password !== ''}
+              busy={busy}
+              onGo={() => void go(created.room.code, created.password)}
+            />
+          ) : atDesk ? (
+            <CreateRoom
+              token={token}
+              busy={busy}
+              onError={setError}
+              onCreated={(room, password) => setCreated({ room, password })}
+            />
+          ) : (
+            <div className="room-desk">
+              <p className="creator-note">{t('room.atDesk')}</p>
+              <button
+                type="button"
+                className="panel-ok"
+                onClick={() => useGameStore.getState().walkToDesk()}
+              >
+                🛎️ {t('room.toDesk')}
+              </button>
+            </div>
+          ))}
         {error && <p className="panel-error">{t(`room.error.${error}`)}</p>}
         <div className="panel-actions">
           <button
@@ -312,11 +335,85 @@ function CreateRoom({
         />
       </label>
       <p className="creator-note">{t(password ? 'room.private.note' : 'room.open.note')}</p>
+      <div className="room-sizes" role="radiogroup" aria-label={t('room.type')}>
+        {ROOM_TYPES.map(({ id, icon, rules: preset }) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            className="pet-card"
+            aria-checked={rules.sound === preset.sound && rules.games === preset.games}
+            onClick={() => setRules({ ...rules, ...preset })}
+          >
+            <span className="pet-card-icon" aria-hidden>
+              {icon}
+            </span>
+            {t(`room.type.${id}`)}
+            <span className="room-size-hint">{t(`room.type.${id}.hint`)}</span>
+          </button>
+        ))}
+      </div>
       <RuleSwitches rules={rules} onChange={setRules} />
       <button type="submit" className="panel-ok" disabled={busy || working}>
         {t('room.create')}
       </button>
     </form>
+  );
+}
+
+/**
+ * Three kinds of room, as presets of the rules below them: a silent one
+ * (no sounds, no game table), one to chat in, one with the game table.
+ */
+const ROOM_TYPES = [
+  { id: 'silent', icon: '🤫', rules: { sound: false, games: false } },
+  { id: 'chat', icon: '💬', rules: { sound: true, games: false } },
+  { id: 'game', icon: '🎲', rules: { sound: true, games: true } },
+] as const;
+
+/**
+ * The receptionist hands over the key: the room's code, its link to copy and
+ * share, and the way up when the player is ready.
+ */
+function KeyHandover({
+  room,
+  locked,
+  busy,
+  onGo,
+}: {
+  room: RoomInfo;
+  locked: boolean;
+  busy: boolean;
+  onGo: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="room-key">
+      <span className="room-key-icon" aria-hidden>
+        🔑
+      </span>
+      <p>
+        <b>{t('room.keyTitle', { name: room.name })}</b>
+      </p>
+      <p className="creator-note">
+        {t(locked ? 'room.share.locked' : 'room.share.open', { code: room.code })}
+      </p>
+      <code className="phone-link">{roomLink(room.code)}</code>
+      <div className="phone-foot">
+        <button
+          type="button"
+          className="mini-button"
+          onClick={() =>
+            void navigator.clipboard?.writeText(roomLink(room.code)).then(() => setCopied(true))
+          }
+        >
+          {copied ? t('room.copied') : t('room.copy')}
+        </button>
+        <button type="button" className="panel-ok" disabled={busy} onClick={onGo}>
+          ⬆️ {t('room.goUp')}
+        </button>
+      </div>
+    </div>
   );
 }
 

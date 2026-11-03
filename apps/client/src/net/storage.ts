@@ -26,13 +26,17 @@ export function remove(key: string): void {
 
 /**
  * A new data epoch starts every browser over too: everything the game kept
- * here (the character, the session, preferences) is forgotten once.
+ * here (the character, the session, preferences) is forgotten once. The
+ * language stays: it is about the person, not the building.
  */
+/** Kept across a new epoch. */
+const KEPT = new Set(['att.language']);
+
 export function startOverIfNeeded(epoch: number): void {
   try {
     if (Number(localStorage.getItem('att.epoch')) === epoch) return;
     for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('att.')) localStorage.removeItem(key);
+      if (key.startsWith('att.') && !KEPT.has(key)) localStorage.removeItem(key);
     }
     localStorage.setItem('att.epoch', String(epoch));
   } catch {

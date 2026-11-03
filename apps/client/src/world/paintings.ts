@@ -42,13 +42,18 @@ const SPOTS: Record<AreaId, readonly Spot[]> = {
     { wall: 'north', at: 4.6, height: 1.5, width: 0.62, painting: HALL_GALLERY[1] },
     { wall: 'north', at: 12.4, height: 1.5, width: 0.62, painting: HALL_GALLERY[2] },
     { wall: 'north', at: 14.6, height: 1.45, width: 0.85, painting: HALL_GALLERY[5] },
-    { wall: 'west', at: 2.6, height: 1.45, width: 0.9, painting: HALL_GALLERY[3] },
-    { wall: 'west', at: 7.6, height: 1.45, width: 0.9, painting: HALL_GALLERY[4] },
+    { wall: 'west', at: 4.6, height: 1.45, width: 0.9, painting: HALL_GALLERY[3] },
+    { wall: 'west', at: 9.1, height: 1.45, width: 0.9, painting: HALL_GALLERY[4] },
   ],
   smoking: [
     { wall: 'north', at: 5.5, height: 1.5, width: 0.8 },
     { wall: 'north', at: 11, height: 1.55, width: 0.6 },
     { wall: 'west', at: 6.5, height: 1.5, width: 0.7 },
+  ],
+  // Along the side wall, between the rows; the back wall is the stage's.
+  conference: [
+    { wall: 'west', at: 6.5, height: 1.5, width: 0.8 },
+    { wall: 'west', at: 10.5, height: 1.5, width: 0.8 },
   ],
   room3: [{ wall: 'west', at: 3.5, height: 1.5, width: 0.7, painting: 6 }],
   room5: [{ wall: 'west', at: 3.5, height: 1.5, width: 0.7, painting: 6 }],
@@ -63,6 +68,7 @@ const FIRST: Record<AreaId, number> = {
   library: 0,
   hall: 5,
   smoking: 5,
+  conference: 2,
   room3: 6,
   room5: 6,
   room9: 6,
