@@ -29,10 +29,6 @@ import { BaseBadge, BaseButton } from 'rei-kit';
 import { BaseTooltip } from 'rei-kit/web';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Cursor from './Cursor.vue';
-import HeroBubble from './HeroBubble.vue';
-import PlayGate from './PlayGate.vue';
-import { openGate } from './gate';
-import { more } from './more';
 import { extra, PET_ICON, PETS } from './extra';
 import { copy, language, LANGUAGES, type Language } from './i18n';
 import { fine, still, vMagnetic, vReveal, vTilt } from './motion';
@@ -47,23 +43,15 @@ const REI_KIT = 'https://ramazandogna.github.io/rei-kit/';
 const base = import.meta.env.BASE_URL;
 const pillarIcons = [Users, Coffee, KeyRound, BookOpen, CalendarDays];
 const featureIcons = [Timer, Award, PawPrint, SunMoon, MessageCircle, ShieldCheck];
-/** What is new, from inside the game. */
-const shots = ['ui-games.webp', 'ui-goals.webp', 'ui-lobby.webp'];
-/** A scene from the game for each part of the day: people meeting, playing, studying, listening. */
+const shots = ['shot-library.webp', 'shot-smoking.webp', 'shot-hall.webp'];
+/** The picture that goes with each reason: the hall, the smoking room, the library… */
 const pillarShots = [
-  'scene-meet.webp',
-  'scene-games.webp',
-  'scene-room.webp',
-  'scene-study.webp',
-  'scene-stage.webp',
+  'shot-hall.webp',
+  'shot-smoking.webp',
+  'shot-library.webp',
+  'shot-library.webp',
+  'shot-hall.webp',
 ];
-/** The hero's chat bubbles: their emoji, and when each first starts typing. */
-const heroBubbles = [
-  { emoji: '💬', start: 1800, side: 'a' },
-  { emoji: '🍅', start: 4600, side: 'b' },
-  { emoji: '🎵', start: 7800, side: 'c' },
-  { emoji: '🐾', start: 10600, side: 'd' },
-] as const;
 
 const mail = (subject: string) => `mailto:${MAIL}?subject=${encodeURIComponent(subject)}`;
 const suggestLink = computed(() => mail(copy.value.beta.mailSubject));
@@ -244,14 +232,7 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
             </Transition>
           </div>
 
-          <BaseButton
-            v-magnetic
-            as="a"
-            :href="GAME_URL"
-            size="sm"
-            class="play-cta shrink-0"
-            @click="openGate"
-          >
+          <BaseButton v-magnetic as="a" :href="GAME_URL" size="sm" class="play-cta shrink-0">
             <Play class="size-4" aria-hidden="true" />
             <span class="hidden sm:inline">{{ copy.nav.play }}</span>
           </BaseButton>
@@ -324,7 +305,6 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
                 :href="GAME_URL"
                 size="lg"
                 class="play-cta play-cta--big"
-                @click="openGate"
               >
                 <Play class="size-5" aria-hidden="true" /> {{ copy.hero.web }}
               </BaseButton>
@@ -357,14 +337,10 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
           </div>
 
           <div class="hero-art hero-in" style="--i: 3">
-            <HeroBubble
-              v-for="(b, i) in heroBubbles"
-              :key="b.side"
-              :class="`bubble--${b.side}`"
-              :emoji="b.emoji"
-              :lines="more.chatter[i] ?? []"
-              :start="b.start"
-            />
+            <span class="bubble bubble--a" aria-hidden="true">💬</span>
+            <span class="bubble bubble--b" aria-hidden="true">🍅</span>
+            <span class="bubble bubble--c" aria-hidden="true">🎵</span>
+            <span class="bubble bubble--d" aria-hidden="true">🐾</span>
             <img
               :src="`${base}hero.webp`"
               alt=""
@@ -616,6 +592,5 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
         <span>{{ copy.footer.credits }}</span>
       </div>
     </footer>
-    <PlayGate :game-url="GAME_URL" :ask-link="suggestLink" />
   </div>
 </template>
