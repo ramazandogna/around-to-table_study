@@ -65,6 +65,10 @@ type Connection = {
   smoking: boolean;
   /** In the conference hall: may put things on the big screen (from the stage). */
   presenter?: boolean;
+  /** When what this presenter shows comes down by itself (the end of their event). */
+  stageUntil?: number | null;
+  /** Table moves lately (see `TABLE_MOVES_PER_MINUTE`). */
+  tableMoves?: RateWindow;
   /** Stage changes lately (see `STAGE_LIMITS.perMinute`). */
   stageChanges?: RateWindow;
   /** When the socket connected, for telling vanished ones apart (see `sweep`). */
@@ -105,7 +109,9 @@ export const AREA_HEADERS = {
 } as const;
 const RULES_KEY = 'rules';
 /** Games a private room's table offers (darts needs the smoking room's cabinet). */
-const ROOM_TABLE_GAMES: readonly TableKind[] = ['pig', 'guess'];
+const ROOM_TABLE_GAMES: readonly TableKind[] = TABLE_GAMES.filter((kind) => kind !== 'darts');
+/** Table moves per person per minute: plenty for a quick math race, not a flood. */
+const TABLE_MOVES_PER_MINUTE = 90;
 
 /**
  * One Durable Object per area (hall, library, smoking room). It owns who is
@@ -193,12 +199,29 @@ export class AreaRoom extends DurableObject<Env> {
     this.opened ??= (await this.ctx.storage.get<number>(OPENED_KEY)) ?? 0;
     this.flippedLamps ??= new Set((await this.ctx.storage.get<number[]>(LAMPS_KEY)) ?? []);
     await this.loadPlay();
+    // Who presents changes as events start and end, so it is asked again at each change of the screen.
+    if (me.area === 'conference' && message.t.startsWith('stage')) {
+      const { role, until } = await this.env.SOCIAL.getByName('hub').conferenceRole(
+        me.id,
+        !this.env.ACCESS_PASSWORD,
+      );
+      const presenter = role === 'presenter';
+      if (presenter !== !!me.presenter) {
+        this.send(ws, { t: 'staged', stage: this.stage ?? null, now: Date.now(), presenter });
+      }
+      me.presenter = presenter;
+      me.stageUntil = until;
+      this.save(ws, me);
+    }
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
     const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
     this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
   }
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
+    // After hibernation the tables are not in memory yet; without them the
+    // leaver would stay seated at a game forever.
+    await this.loadPlay();
     this.leave(ws);
   }
 
@@ -215,7 +238,52 @@ export class AreaRoom extends DurableObject<Env> {
     }
     await this.loadPlay();
     this.advanceIfOver(now);
+    this.dropAbsentPlayers(now);
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
+  }
+
+  /**
+   * Gets anyone no longer in the room up from the tables (a socket that
+   * closed while the room slept), so no game waits forever for a ghost.
+   */
+  private dropAbsentPlayers(now: number): void {
+    if (!this.tables) return;
+    const here = new Set(
+      this.ctx
+        .getWebSockets()
+        .map((ws) => this.load(ws))
+        .filter((c): c is Connection => !!c?.joined)
+        .map((c) => c.id),
+    );
+    for (const [kind, record] of [...this.tables]) {
+      for (const player of record.table.players) {
+        if (here.has(player.id)) continue;
+        const result = tableAction(
+          kind,
+          this.tables.get(kind) ?? null,
+          { a: 'leave' },
+          {
+            id: player.id,
+            name: player.name,
+            now,
+            random: Math.random,
+          },
+        );
+        this.storeTable(kind, result.record);
+      }
+    }
+  }
+
+  /** Keeps a table (or its end) in memory and storage, and tells the room. */
+  private storeTable(kind: TableKind, record: TableRecord | null): void {
+    if (record) {
+      this.tables?.set(kind, record);
+      void this.ctx.storage.put(tableKey(kind), record);
+    } else {
+      this.tables?.delete(kind);
+      void this.ctx.storage.delete(tableKey(kind));
+    }
+    this.broadcast({ t: 'table', kind, table: record?.table ?? null });
   }
 
   /** Loads the tables and the jukebox once per wake-up. */
@@ -233,6 +301,9 @@ export class AreaRoom extends DurableObject<Env> {
     if (this.stage === undefined) {
       this.stage = (await this.ctx.storage.get<StageState>(STAGE_KEY)) ?? null;
     }
+    // An event's screen comes down when the event ends.
+    const now = Date.now();
+    if (this.stage?.until != null && now >= this.stage.until) this.setStage(null, now);
   }
 
   /** A new picture, video or sound on the big screen (or none): kept, and everyone told. */
@@ -305,6 +376,7 @@ export class AreaRoom extends DurableObject<Env> {
 
   /** Someone started over: everyone they were before leaves the room at once. */
   async kick(ids: readonly string[]): Promise<void> {
+    await this.loadPlay();
     for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) this.leave(ws);
   }
 
@@ -313,12 +385,14 @@ export class AreaRoom extends DurableObject<Env> {
     const playing = this.jukebox?.now;
     const songEnd =
       playing?.seconds != null ? playing.startedAt + (playing.seconds + 4) * 1000 : Infinity;
-    const wanted = Math.min(Date.now() + SWEEP_MS, songEnd);
+    const stageEnd = this.stage?.until ?? Infinity;
+    const wanted = Math.min(Date.now() + SWEEP_MS, songEnd, stageEnd);
     const current = await this.ctx.storage.getAlarm();
     if (current === null || current > wanted) await this.ctx.storage.setAlarm(wanted);
   }
 
   override async webSocketError(ws: WebSocket): Promise<void> {
+    await this.loadPlay();
     this.leave(ws);
   }
 
@@ -511,6 +585,14 @@ export class AreaRoom extends DurableObject<Env> {
       }
       case 'table': {
         if (!me.joined || !this.tables || !this.gamesHere(me.area, message.kind)) return;
+        const tableMoves = takeToken(
+          me.tableMoves ?? { start: 0, count: 0 },
+          now,
+          TABLE_MOVES_PER_MINUTE,
+          60_000,
+        );
+        if (!tableMoves) return this.send(ws, { t: 'error', code: 'rate_limited' });
+        this.save(ws, { ...me, tableMoves });
         this.playTable(ws, me, message.kind, message.action, now);
         return;
       }
@@ -563,6 +645,7 @@ export class AreaRoom extends DurableObject<Env> {
             byName: me.name,
             startedAt: now,
             pausedAt: null,
+            until: me.stageUntil ?? null,
           },
           now,
         );
@@ -647,14 +730,7 @@ export class AreaRoom extends DurableObject<Env> {
     });
     if (error) return this.send(ws, { t: 'tableError', kind, code: error });
     if (record === before) return;
-    if (record) {
-      tables.set(kind, record);
-      void this.ctx.storage.put(tableKey(kind), record);
-    } else {
-      tables.delete(kind);
-      void this.ctx.storage.delete(tableKey(kind));
-    }
-    this.broadcast({ t: 'table', kind, table: record?.table ?? null });
+    this.storeTable(kind, record);
   }
 
   /** Queues a song after asking YouTube whether the video exists and may be embedded. */
