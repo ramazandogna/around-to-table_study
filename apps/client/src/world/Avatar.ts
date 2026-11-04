@@ -17,6 +17,7 @@ import {
   type AnimationAction,
   type BufferGeometry,
   type Mesh,
+  type Object3D,
   type MeshStandardMaterial,
 } from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
@@ -33,6 +34,11 @@ import type { TableProps } from './tableProps';
 
 /** Walking pace in tiles (about meters) per second: brisk, so crossing a room takes seconds, not a chore. */
 export const WALK_SPEED = 3;
+/** A sleepy walk: slower, swaying a little from side to side. */
+const SLEEPY_SPEED = 1.5;
+const SLEEPY_SWAY = 0.07;
+/** Dozing off: the head drops slowly, then jerks back up, over this many seconds. */
+const DOZE_SECONDS = 3.2;
 /** Reaches full pace in about a fifth of a second. */
 const ACCELERATION = 16;
 /** Brakes a little softer than it starts, so stops do not look like hitting a wall. */
@@ -153,6 +159,13 @@ export class Avatar {
   /** The tile steering started on, so a quick tap of a key still takes one step. */
   private steerStart: Point | null = null;
   private speed = 0;
+  /** Sleepy: walks slower, swaying (the night librarian). */
+  private sleepy = false;
+  /** Dozing off where they are: the head nods and a 💤 shows. */
+  private dozing = false;
+  private drowse = 0;
+  /** Things held, like a mop: they turn with the body. */
+  private readonly held: Object3D[] = [];
   /** Direction of the current movement, kept while braking. */
   private readonly velocityDir = { x: 0, y: 1 };
   private heading = 0;
@@ -566,6 +579,31 @@ export class Avatar {
     this.afkTag.title = on ? t('afk.title') : '';
   }
 
+  /** A sleepy body walks slower and sways a little. */
+  setSleepy(on: boolean): void {
+    this.sleepy = on;
+  }
+
+  /** Dozes off where it is: the head nods slowly and a 💤 shows over the name. */
+  setDozing(on: boolean): void {
+    if (this.dozing === on) return;
+    this.dozing = on;
+    this.drowse = 0;
+    this.afkTag.hidden = !on;
+  }
+
+  get isDozing(): boolean {
+    return this.dozing;
+  }
+
+  /** Holds something (a mop) that turns with the body; `null` puts everything down. */
+  hold(object: Object3D | null): void {
+    for (const thing of this.held.splice(0)) thing.removeFromParent();
+    if (!object) return;
+    this.held.push(object);
+    this.model.add(object);
+  }
+
   /**
    * How much of this person is drawn, for crowds: everything; no shadow and
    * no name tag when far away; nothing at all when off the screen.
@@ -822,8 +860,16 @@ export class Avatar {
         : 0;
     // A poke makes the body wobble side to side, fading out.
     this.joltFor = Math.max(0, this.joltFor - delta);
+    this.drowse += delta;
     this.model.rotation.z =
-      this.joltFor > 0 ? Math.sin(this.joltFor * 38) * 0.16 * (this.joltFor / JOLT_SECONDS) : 0;
+      this.joltFor > 0
+        ? Math.sin(this.joltFor * 38) * 0.16 * (this.joltFor / JOLT_SECONDS)
+        : this.sleepy && this.isMoving
+          ? Math.sin(this.drowse * 4.2) * SLEEPY_SWAY
+          : 0;
+    // Dozing: the body slumps forward bit by bit, then wakes with a little jerk.
+    const nod = (this.drowse % DOZE_SECONDS) / DOZE_SECONDS;
+    this.model.rotation.x = this.dozing && !this.isMoving ? Math.pow(nod, 2.5) * 0.22 : 0;
     // People sharing a tile slide apart; seated or walking bodies keep to the middle.
     const spreading = this.isMoving || this.isSeated ? 0 : 1;
     const ease = 1 - Math.exp(-SPREAD_EASE * delta);
@@ -879,7 +925,7 @@ export class Avatar {
       remaining += Math.hypot(b.x - a.x, b.y - a.y);
     }
     const stoppable = Math.sqrt(2 * DECELERATION * remaining);
-    const wanted = Math.min(WALK_SPEED, stoppable);
+    const wanted = Math.min(this.topSpeed, stoppable);
     this.speed =
       wanted > this.speed
         ? Math.min(wanted, this.speed + ACCELERATION * delta)
@@ -909,6 +955,10 @@ export class Avatar {
       }
     }
     if (this.route.length === 0) this.speed = 0;
+  }
+
+  private get topSpeed(): number {
+    return this.sleepy ? SLEEPY_SPEED : WALK_SPEED;
   }
 
   /** Walks where the keys point, sliding along walls instead of stopping dead. */

@@ -905,8 +905,9 @@ function fillShelves(
 }
 
 /**
- * Desks for two: each short run of table tiles becomes a wooden desk with a
- * modesty panel on the far side and a lamp between the two places. Desks are
+ * Desks for two and tables for four: each short run of table tiles becomes a
+ * wooden desk, with a modesty panel on the far side when people sit on one
+ * side only, and a lamp shared by the places. Desks are
  * never quite square to the room, like real ones that have been nudged around.
  * Longer runs still make one long table.
  */
@@ -940,8 +941,11 @@ function buildDesks(
         }
         continue;
       }
-      // Which side people sit on: the panel goes on the other side.
+      // Which side people sit on: the panel goes on the other side. A table with
+      // places on both sides seats four, two facing two, and has no panel.
       const seatsNorth = grid.tileAt({ x: start, y: y - 1 }) === TILE.seat;
+      const seatsSouth = grid.tileAt({ x: start, y: y + 1 }) === TILE.seat;
+      const four = seatsNorth && seatsSouth;
       const away = seatsNorth ? 1 : -1;
       const desk = new Group();
       desk.position.set(
@@ -951,18 +955,23 @@ function buildDesks(
       );
       desk.rotation.y = (noise(start, y, 3) - 0.5) * 0.1;
       const width = length - 0.12;
-      const depth = 0.86;
+      const depth = four ? 1.06 : 0.86;
       const top = box(width, 0.05, depth, wood);
       top.position.y = TABLE_HEIGHT - 0.025;
       // A green leather writing pad in front of each place.
-      for (let i = 0; i < length; i++) {
-        const pad = box(0.62, 0.006, 0.36, leather);
-        pad.position.set(i - (length - 1) / 2, TABLE_HEIGHT + 0.003, -away * 0.14);
-        desk.add(pad);
+      for (const side of four ? [-1, 1] : [-away]) {
+        for (let i = 0; i < length; i++) {
+          const pad = box(0.62, 0.006, 0.32, leather);
+          pad.position.set(i - (length - 1) / 2, TABLE_HEIGHT + 0.003, side * (four ? 0.3 : 0.14));
+          desk.add(pad);
+        }
       }
-      const panel = box(width - 0.1, 0.42, 0.04, dark);
-      panel.position.set(0, TABLE_HEIGHT - 0.27, away * (depth / 2 - 0.04));
-      desk.add(top, panel);
+      desk.add(top);
+      if (!four) {
+        const panel = box(width - 0.1, 0.42, 0.04, dark);
+        panel.position.set(0, TABLE_HEIGHT - 0.27, away * (depth / 2 - 0.04));
+        desk.add(panel);
+      }
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
           const leg = box(0.05, TABLE_HEIGHT - 0.05, 0.05, dark);
@@ -975,10 +984,10 @@ function buildDesks(
         }
       }
       root.add(desk);
-      // One lamp shared by the two places, at the back of the desk.
+      // One lamp shared by the places, at the back of the desk (in the middle of a table for four).
       lamps.push({
         x: desk.position.x,
-        z: desk.position.z + away * 0.26,
+        z: desk.position.z + (four ? 0 : away * 0.26),
         y: FLOOR_Y + TABLE_HEIGHT,
         scale: [0.6, 0.6, 0.6],
       });

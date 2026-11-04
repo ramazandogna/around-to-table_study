@@ -21,8 +21,63 @@ import { loadYouTube, type YTPlayer } from './youtube';
 export function RoomMusic() {
   const area = useGameStore((s) => s.area);
   const on = useGameStore((s) => s.jukeboxOn);
+  if (area === 'hall' || area === 'conference') return on ? <Borrowed /> : <TurnOn />;
   if (area !== 'smoking') return null;
   return on ? <Card /> : <TurnOn />;
+}
+
+/** In the hall and the conference hall the smoking room's music plays this much quieter. */
+const BORROWED_LEVEL = 0.5;
+
+/**
+ * The hall and the conference hall hear the smoking room's calm music, softer,
+ * at the same moment as in there; a small note says where it comes from and
+ * where to change it (songs people queue play in the smoking room only, in
+ * YouTube's own player). The stage's sound or video silences it while on,
+ * and the game's mute does too.
+ */
+function Borrowed() {
+  const volume = useGameStore((s) => s.jukeboxVolume);
+  const muted = useGameStore((s) => s.muted);
+  const stageSound = useGameStore(
+    (s) => s.area === 'conference' && !!s.stage && s.stage.kind !== 'image',
+  );
+  const [blocked, setBlocked] = useState(false);
+  const quiet = muted || stageSound;
+  return (
+    <aside className="music-note" aria-label={t('music.borrowed.label')}>
+      {!quiet && (
+        <Cozy share={(volume / JUKEBOX.maxVolume) * BORROWED_LEVEL} docked onBlocked={setBlocked} />
+      )}
+      <span className="music-note-text music-note-text--long">
+        ♪ {t(quiet ? 'music.borrowed.paused' : 'music.borrowed')}
+      </span>
+      <span className="music-note-text music-note-text--short" title={t('music.borrowed')}>
+        ♪ {t(quiet ? 'music.borrowed.paused' : 'music.borrowed.short')}
+      </span>
+      {blocked && !quiet && (
+        <button
+          type="button"
+          className="music-note-tap"
+          onClick={() => {
+            unlockAudio();
+            window.dispatchEvent(new Event('att-music-tap'));
+          }}
+        >
+          ▶
+        </button>
+      )}
+      <button
+        type="button"
+        className="music-note-off"
+        aria-label={t('music.close')}
+        title={t('music.close')}
+        onClick={() => useGameStore.getState().setJukeboxPrefs({ on: false })}
+      >
+        ✕
+      </button>
+    </aside>
+  );
 }
 
 /** With the music off on this screen: a small button to turn it back on. */

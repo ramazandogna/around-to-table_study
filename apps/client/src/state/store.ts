@@ -30,6 +30,28 @@ import { isMuted, setMuted as setSoundMuted } from '../audio/sound';
 import type { AreaConnection } from '../net/AreaConnection';
 import type { RoomTicket } from '../net/rooms';
 import type { SocialConnection } from '../net/SocialConnection';
+import { t } from '../i18n/t';
+import { dailyDone, foundCount, markTask, remember, type DailyTaskId } from './daily';
+import { loadGoals, saveGoals, type Goals } from './stats';
+
+const QUESTS_FOLDED_KEY = 'att.questsFolded';
+
+function readFlag(key: string, fallback = false): boolean {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved === null ? fallback : saved === '1';
+  } catch {
+    return fallback;
+  }
+}
+
+function writeFlag(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    // Remembered for this visit only.
+  }
+}
 import {
   loadLines,
   loadLook,
@@ -40,6 +62,8 @@ import {
 } from '../net/session';
 
 export type Notice =
+  | 'quest_done'
+  | 'daily_done'
   | 'rate_limited'
   | 'swearing'
   | 'replaced'
@@ -95,7 +119,6 @@ export type Notice =
   | 'stage_host'
   | 'not_presenter'
   /** The conference hall is closed except around its events. */
-  | 'conference_closed'
   /** A song went into the queue. */
   | 'tune_added'
   /** No smoking outside the smoking room. */
@@ -374,6 +397,23 @@ type GameState = {
   stageClockOffset: number;
   /** In the conference hall: whether this player may present (from the stage). */
   presenter: boolean;
+  /** Out of the world, on the character select screen. */
+  lobby: boolean;
+  setLobby: (lobby: boolean) => void;
+  /** Today's goals (kept on this device), the dialog to set them, and the quests list folded. */
+  goals: Goals;
+  setGoals: (goals: Goals) => void;
+  goalsOpen: boolean;
+  setGoalsOpen: (open: boolean) => void;
+  questsFolded: boolean;
+  setQuestsFolded: (folded: boolean) => void;
+  /** Today's small tasks done, and how many things were found on shelves and walls. */
+  daily: DailyTaskId[];
+  foundCount: number;
+  /** Ticks off one of today's tasks (if it is one), with a cheer the first time. */
+  markDaily: (id: DailyTaskId) => void;
+  /** Counts a painting or a book moment seen for the first time. */
+  addFound: (key: string) => void;
   /** On this device: the big screen hidden ("not watching"), or enlarged. */
   stageHidden: boolean;
   stageFull: boolean;
@@ -612,6 +652,33 @@ export const useGameStore = create<GameState>((set) => ({
   ringFor: null,
   stageClockOffset: 0,
   presenter: false,
+  lobby: false,
+  setLobby: (lobby) => set({ lobby }),
+  goals: loadGoals(),
+  setGoals: (goals) => {
+    saveGoals(goals);
+    set({ goals });
+  },
+  goalsOpen: false,
+  setGoalsOpen: (goalsOpen) => set({ goalsOpen }),
+  // On a phone the quests start folded to a small icon, like the map.
+  questsFolded: readFlag(
+    QUESTS_FOLDED_KEY,
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches,
+  ),
+  setQuestsFolded: (questsFolded) => {
+    writeFlag(QUESTS_FOLDED_KEY, questsFolded);
+    set({ questsFolded });
+  },
+  daily: dailyDone(),
+  foundCount: foundCount(),
+  markDaily: (id) => {
+    if (!markTask(id)) return;
+    set({ daily: dailyDone(), notice: 'daily_done', noticeValue: t(`daily.${id}`) });
+  },
+  addFound: (key) => {
+    if (remember(key)) set({ foundCount: foundCount() });
+  },
   stageHidden: false,
   stageFull: false,
   jukeboxOpen: false,

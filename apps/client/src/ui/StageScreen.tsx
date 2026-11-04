@@ -1,4 +1,5 @@
 import {
+  conferenceRole,
   guessStageKind,
   STAGE_KINDS,
   STAGE_LIMITS,
@@ -37,7 +38,7 @@ function roomSeconds(stage: StageState): number {
 export function StageScreen() {
   const area = useGameStore((s) => s.area);
   const stage = useGameStore((s) => s.stage);
-  const presenter = useGameStore((s) => s.presenter);
+  const presenter = usePresenter();
   if (area !== 'conference') return null;
   return (
     <>
@@ -45,6 +46,23 @@ export function StageScreen() {
       {presenter && <PresenterPanel stage={stage} />}
     </>
   );
+}
+
+/**
+ * Whether this player presents: as the server said on entry, or because their
+ * approved event here has just begun (checked each half minute; the server
+ * checks again on every change of the screen).
+ */
+function usePresenter(): boolean {
+  const told = useGameStore((s) => s.presenter);
+  const proposed = useGameStore((s) => s.proposed);
+  const id = useGameStore((s) => s.session?.id ?? '');
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return told || conferenceRole(id, proposed, now, { open: false }) === 'presenter';
 }
 
 function Screen({ stage }: { stage: StageState }) {
