@@ -90,17 +90,6 @@ async function sessionFrom(request: Request, env: Env): Promise<Session | Respon
   return (await verifySession(token, secret)) ?? error('unauthorized', 401);
 }
 
-/**
- * The profile behind a token: the character select screen shows each of the
- * device's characters with their badges and hours, without entering the world.
- */
-async function ownProfile(request: Request, env: Env): Promise<Response> {
-  const session = await sessionFrom(request, env);
-  if (session instanceof Response) return session;
-  const profile = await env.SOCIAL.getByName('hub').profileOf(session.id);
-  return profile ? Response.json({ profile }) : error('not_found', 404);
-}
-
 /** Tokens one "start over" may clear: this device's current and past guests. */
 const MAX_LEAVE_TOKENS = 10;
 
@@ -239,11 +228,11 @@ async function joinArea(request: Request, env: Env, area: string): Promise<Respo
     object = `room:${code}`;
     rules = JSON.stringify(room.rules);
   }
-  // The conference hall is always open; who presents is asked again at each change of the screen.
+  // The conference hall opens around its events (always on a local server, and for admins).
   let role: string | null = null;
   if (area === 'conference') {
-    role = (await env.SOCIAL.getByName('hub').conferenceRole(session.id, !env.ACCESS_PASSWORD))
-      .role;
+    role = await env.SOCIAL.getByName('hub').conferenceRole(session.id, !env.ACCESS_PASSWORD);
+    if (!role) return error('closed', 403);
   }
 
   const headers = new Headers(request.headers);
@@ -262,7 +251,6 @@ export default {
     if (pathname === '/api/health') return Response.json(createHealthResponse());
     if (pathname === '/api/guest' && request.method === 'POST') return createGuest(request, env);
     if (pathname === '/api/access') return access(request, env);
-    if (pathname === '/api/profile') return ownProfile(request, env);
 
     if (pathname === '/api/leave' && request.method === 'POST') return leave(request, env);
     if (pathname === '/api/rooms' || pathname.startsWith('/api/rooms/'))

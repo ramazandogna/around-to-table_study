@@ -2,7 +2,6 @@ import {
   AREA_RULES,
   type Appearance,
   isValidAppearance,
-  conferenceEnd,
   conferenceRole,
   type ConferenceRole,
   THEME_IDS,
@@ -932,20 +931,11 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   /**
-   * Whether `id` presents in the conference hall now (see `conferenceRole`),
-   * and when what goes on the screen comes down by itself. The hall asks each
-   * time someone changes the screen. `open` is a local server with no password.
+   * Who `id` is in the conference hall now (see `conferenceRole`): the worker
+   * asks before letting anyone in. `open` is a local server with no password.
    */
-  async conferenceRole(
-    id: string,
-    open: boolean,
-  ): Promise<{ role: ConferenceRole; until: number | null }> {
-    const events = this.eventsFor(id);
-    const now = Date.now();
-    return {
-      role: conferenceRole(id, events, now, { open: open || this.isAdmin(id) }),
-      until: conferenceEnd(events, now),
-    };
+  async conferenceRole(id: string, open: boolean): Promise<ConferenceRole> {
+    return conferenceRole(id, this.eventsFor(id), Date.now(), { open: open || this.isAdmin(id) });
   }
 
   private isAdmin(id: string): boolean {
@@ -1124,11 +1114,6 @@ export class SocialHub extends DurableObject<Env> {
       clean,
       Date.now(),
     );
-  }
-
-  /** A person's own profile, for the character select screen (asked with their token). */
-  async profileOf(id: string): Promise<Profile | null> {
-    return this.profile(id);
   }
 
   private profile(id: string): Profile | null {
