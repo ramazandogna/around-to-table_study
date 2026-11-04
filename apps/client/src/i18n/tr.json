@@ -1002,5 +1002,6 @@
   "door.note": "{email} ile giriş yapıldı. Hesabın ve karakterlerin kalır; yalnızca kod değişir.",
   "elsewhere.title": "Başka yerde açıldı",
   "elsewhere.text": "Oyunu başka bir sekmede ya da cihazda açtın, bu yüzden buradan çıkıldı. Binada aynı anda yalnızca bir kez bulunabilirsin.",
-  "elsewhere.here": "Burada oyna"
+  "elsewhere.here": "Burada oyna",
+  "staff.wetSign": "Islak zemin"
 }

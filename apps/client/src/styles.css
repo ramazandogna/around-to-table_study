@@ -3221,6 +3221,13 @@ button:disabled {
   }
 }
 
+.staff-sign.staff-sign--wet {
+  border-color: #b58a12;
+  background: #f2c230;
+  color: #2a2208;
+  font-size: 10px;
+}
+
 .staff-sign {
   padding: 2px 8px;
   border: 2px solid var(--panel-edge);

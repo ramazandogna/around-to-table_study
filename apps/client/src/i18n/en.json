@@ -1002,5 +1002,6 @@
   "door.note": "Signed in as {email}. Your account and characters stay; only the code changes.",
   "elsewhere.title": "Opened somewhere else",
   "elsewhere.text": "You opened the game in another tab or on another device, so this one stepped out. You can only be in the building once.",
-  "elsewhere.here": "Play here"
+  "elsewhere.here": "Play here",
+  "staff.wetSign": "Wet floor"
 }

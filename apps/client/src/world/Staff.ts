@@ -190,6 +190,8 @@ export class Staff {
   private readonly mop: Group;
   private readonly bucket: Group;
   private readonly wetSign: Group;
+  /** "Wet floor" over the sign, so it reads as a sign and not as something left lying around. */
+  private readonly wetLabel: CSS2DObject;
   private readonly propMaterials: Material[] = [];
   /** When each waiting chore was added, for the night librarian who takes their time. */
   private readonly choreSince = new Map<Chore, number>();
@@ -250,6 +252,13 @@ export class Staff {
     this.wetSign = built.sign;
     this.bucket.visible = false;
     this.wetSign.visible = false;
+    const label = document.createElement('div');
+    label.className = 'staff-sign staff-sign--wet';
+    label.textContent = `⚠️ ${t('staff.wetSign')}`;
+    this.wetLabel = new CSS2DObject(label);
+    this.wetLabel.position.set(0, 0.85, 0);
+    this.wetLabel.visible = false;
+    this.wetSign.add(this.wetLabel);
     this.props.add(this.bucket, this.wetSign);
   }
 
@@ -372,6 +381,8 @@ export class Staff {
     this.bucket.visible =
       !!stretch && mop !== null && offset >= mop.start && offset < mop.start + MOP_LEGS;
     this.wetSign.visible = !!stretch && mop !== null && offset >= mop.start;
+    // Labels are drawn on their own: they follow the sign by hand.
+    this.wetLabel.visible = this.wetSign.visible;
     if (stretch) {
       this.bucket.position.set(stretch.a.x + 0.25, FLOOR_Y, stretch.a.y + 0.75);
       const middle = { x: (stretch.a.x + stretch.b.x) / 2, y: (stretch.a.y + stretch.b.y) / 2 };
@@ -467,6 +478,7 @@ export class Staff {
   }
 
   dispose(): void {
+    this.wetLabel.element.remove();
     this.avatar.hold(null);
     this.avatar.dispose();
     this.props.removeFromParent();

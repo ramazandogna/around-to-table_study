@@ -1,9 +1,11 @@
 # Around the Table 📚🪑
 
 > **Don't study alone. Take a seat.**
-> A cozy, browser-based isometric library where people study "together" in silence, take breaks in a chatty smoking room, and slowly become friends.
+> A cozy isometric building in your browser where people study side by side in a quiet library, take their breaks in a chatty smoking room, and slowly become friends.
 
-**Status:** 🟢 Early prototype, playable in the browser: **[around-the-table.ramazandogna.workers.dev](https://around-the-table.ramazandogna.workers.dev/)**
+**🌐 Website:** [ramazandogna.github.io/around-to-table_study](https://ramazandogna.github.io/around-to-table_study/) · **🎮 Game:** [around-the-table.ramazandogna.workers.dev](https://around-the-table.ramazandogna.workers.dev/)
+
+**Status:** 🟠 Closed beta. Sign in with Google, then enter this week's access code (it changes with every update). Want a code? Write to [doganrmzn40@gmail.com](mailto:doganrmzn40@gmail.com).
 
 ---
 
@@ -22,16 +24,20 @@ We want to combine the warmth of Sanalika with the quiet of a library.
 ## The place
 
 ```
-                ┌──────────── LIBRARY (main hall) ────────────────┐
-                │   ╭────────── elliptical table ─────────╮       │
-                │   │ ✅ open           │ 🚧 RENOVATION 🚧 │       │
-                │   ╰─────────────────────────────────────╯       │
-                └───────────────────▲─────────────────────────────┘
-                                    │ big double glass door
- ┌─────────────┐   ┌────────────────┴───────────────┐   ┌──────────────┐
- │SMOKING ROOM │◄──┤   ENTRANCE HALL + RECEPTION 🛎️ ├──►│  ELEVATOR 🛗 │──► Private rooms
- │ (open chat) │   │      (everyone starts here)    │   │ join / create│
- └─────────────┘   └────────────────────────────────┘   └──────────────┘
+                ┌──────────────────── LIBRARY ─────────────────────┐
+                │  tables for four and desks for two · stacks      │
+                │  ✅ open part          │  🚧 opens as it fills 🚧  │
+                └───────────────────────▲──────────────────────────┘
+                                        │ glass doors
+ ┌──────────────┐   ┌───────────────────┴──────────────┐   ┌──────────────┐
+ │ SMOKING ROOM │◄──┤  ENTRANCE HALL + RECEPTION 🛎️    ├──►│  ELEVATOR 🛗 │──► Private rooms
+ │ games, music │   │      (everyone starts here)      │   │ for 3, 5, 9  │
+ └──────────────┘   └───────────────────┬──────────────┘   └──────────────┘
+                                        │
+                          ┌─────────────┴─────────────┐
+                          │ CONFERENCE HALL 🎤        │
+                          │ stage + big shared screen │
+                          └───────────────────────────┘
 ```
 
 | Area | Rules | Text limit | Cooldown |
@@ -39,6 +45,7 @@ We want to combine the warmth of Sanalika with the quiet of a library.
 | **Library** | NO CAPS · flashy effects hidden · silent notifications · phone (DMs) not allowed | 50 chars | 60–90 s |
 | **Smoking room** | Open chat · add friends · sound notifications allowed | 300 chars | anti-spam (~3 s) |
 | **Private room** (elevator) | Password-protected · owner picks size and type (silent / chat / game) | 200 chars | depends on type |
+| **Conference hall** | Everyone may listen; only the host of the approved event on now goes on stage and runs the big screen | 300 chars | anti-spam |
 
 At launch only the **left end** of the big elliptical table is open. The rest is taped off with a sign: *"This part of the library is under renovation and not available yet."* As the community grows, new sections open, so growth is visible inside the world itself.
 
@@ -80,40 +87,23 @@ Yes, in pieces. No app combines "study together quietly in a library and slowly 
 - **Breaks are social.** Chat happens in the smoking room, work happens in the library.
 - **No engagement tricks.** Quiet notifications, the user stays in control.
 
-## What's in the first release? (MVP / closed beta)
+## What's in it now
 
-- [ ] Entrance hall, reception, library and smoking room maps
-- [ ] Walk by tap/click or WASD/arrow keys (same experience on phone and desktop)
-- [ ] Real-time multiplayer (everyone in the same area sees each other)
-- [ ] Library rules and the renovation zone
-- [ ] 3-line status + speech bubble above each head
-- [ ] Sims-like but minimal, square-based character creator (head, hair, outfit, colors)
-- [ ] Starter pet: cat, dog, lizard or turtle (free during beta)
-- [ ] Emotes (wave, laugh, sleepy…)
-- [ ] Friends and an in-game "phone" for DMs (DMs are not allowed in the library)
-- [ ] Elevator: create/join password-protected rooms, get a key from reception
-- [ ] Block, report, profanity filter
-
-**Later:** stopwatch, pomodoro breaks and a shared table timer, unlocking new table sections, mini games in game rooms, paid pets, more languages, a Steam version.
-
-## How hard is it?
-
-| Part | Difficulty | Note |
-|---|---|---|
-| Isometric world + movement + camera | 🟡 Medium | three.js with Kenney's CC0 3D kits |
-| Responsive (phone + desktop) | 🟡 Medium | Touch controls and the on-screen keyboard take effort |
-| Real-time multiplayer | 🟡 Medium | A well-understood problem at small scale (≤200 users) |
-| Area rules (caps, cooldown, limits) | 🟢 Easy | Must be enforced on the server |
-| Character creator | 🟡 Medium | Characters are drawn from squares in code, so no license issues |
-| Friends + DMs + push notifications | 🟡 Medium | Web push on iOS requires "Add to Home Screen" |
-| Moderation / safety | 🔴 Hard, never finished | Grows with the community |
-| Making it look good | 🔴 Hard | No designer; we rely on free CC0 assets |
-
-Estimate: one developer with AI assistance, 10–15 hours a week, **2–3 months to closed beta**.
+- **Accounts:** sign in with Google; up to two characters per account, with their progress kept on the server so they follow you to any device. One account is in the building once, wherever it is open.
+- **The closed beta's door:** this week's access code, separate from the account; every update changes it and sends everyone back to the door.
+- **The world:** entrance hall with reception, the library, the smoking room, private rooms (3, 5 or 9 people) and the conference hall, with day and night on your own clock and staff working in shifts (the night librarian keeps dozing off, and the librarian mops now and then).
+- **Studying:** pomodoro, deep focus, marathon or your own rhythm at a desk; others see your progress; a daily goal, today's goals and a quests list by the map.
+- **Being together:** speech bubbles, status lines, emotes, dances, friends, a phone for messages, a building chat, a shared calendar with community events.
+- **Breaks:** darts, dice, higher-or-lower and seven quick games (rock-paper-scissors, coin toss, dice duel, tic-tac-toe, word chain, quick math, emoji riddles), scores kept until someone wins; a jukebox and calm music.
+- **For when you are not studying:** three small tasks a day, and paintings and books with stories to collect.
+- **Pets:** a cat, four dogs, a rabbit and a turtle, each with its own ways.
+- **Safety:** a strong English and Turkish swear filter, mute and block, room owners can send people out, admins approve events.
+- **Languages:** English and Turkish.
 
 ## Tech (short)
 
-TypeScript · **three.js** (isometric 3D world) · **React** (menus) · **Cloudflare Workers + Durable Objects** (real-time rooms) · **Cloudflare D1** (database) · Kenney CC0 3D assets.
+
+TypeScript · **three.js** (isometric 3D world) · **React** (menus) · **Cloudflare Workers + Durable Objects** with SQLite storage (real-time rooms, accounts, friends) · **Google sign-in** (OAuth 2.0 + PKCE) · **Vue** (the website) · Kenney CC0 3D assets.
 Everything runs on **free tiers**. Cloudflare was chosen over Vercel because the game needs persistent WebSocket connections, which serverless functions can't hold.
 
 ## Development
@@ -127,12 +117,17 @@ pnpm --filter @att/server dev    # Worker + game at http://localhost:8787
 pnpm --filter @att/client dev    # or: Vite with hot reload at http://localhost:5173
 ```
 
+Local settings go in `apps/server/.dev.vars` (never committed): `SESSION_SECRET` (32+ characters), and optionally `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_EMAILS`, `ACCESS_PASSWORD`. Without a Google client, a local server offers a test sign-in by email instead.
+
+Deploy from the repository root with `pnpm run deploy` (not `pnpm deploy`, which is pnpm's own command): it builds, uploads the Worker with a new access code and prints the code under the Worker's address.
+
 Checks (all must pass before a commit): `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
 
 | Folder | What lives there |
 |---|---|
 | `apps/client` | Vite + React (UI) + three.js (isometric world) |
-| `apps/server` | Cloudflare Worker: API, static assets, later Durable Objects |
+| `apps/server` | Cloudflare Worker: API, Google sign-in, static assets, Durable Objects |
+| `site` | The website (Vue), published to GitHub Pages |
 | `packages/shared` | Types, constants and rules shared by client and server |
 | `docs/decisions.md` | Why things are the way they are |
 | `docs/lessons.md` | What building it taught us, as rules for what comes next |
@@ -140,8 +135,7 @@ Checks (all must pass before a commit): `pnpm format:check`, `pnpm lint`, `pnpm 
 ## Follow / contribute
 
 - ⭐ Star the repo and turn on **Watch → Releases** to hear about new versions.
-- Track progress through the MVP checklist above and the GitHub *Milestones* page.
-- Use *Issues* for ideas and bugs. Want to join the closed beta? Open an issue with the `beta` label.
+- Use *Issues* for ideas and bugs. Want to join the closed beta? Write to [doganrmzn40@gmail.com](mailto:doganrmzn40@gmail.com) or open an issue with the `beta` label.
 - Can you draw pixel art? You're exactly who we're looking for. 🙏
 
 ## License
