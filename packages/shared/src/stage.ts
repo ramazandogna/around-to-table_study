@@ -66,6 +66,8 @@ export type StageState = {
   startedAt: number;
   /** While paused: when it was paused. */
   pausedAt: number | null;
+  /** When it comes down by itself: the end of the event it was shown for (null: until cleared). */
+  until?: number | null | undefined;
 };
 
 export type StageShow = { kind: StageKind; src: string; caption?: string | undefined };
@@ -139,28 +141,45 @@ export function controlStage(state: StageState, control: StageControl, now: numb
 }
 
 /**
- * Who may be in the conference hall now, and who may present. It is closed
- * except around an approved event held there: from `DECOR_LEAD_MS` before it
- * starts until it ends, everyone may come in and the person who proposed it
- * presents. Admins, and anyone on a local server (no access password), may
- * always come in and present, to set things up and to test.
+ * Who may present in the conference hall now. The hall is always open: anyone
+ * may come in, sit and listen. The big screen is another matter: around an
+ * approved event held there (from `DECOR_LEAD_MS` before it starts until it
+ * ends) the person who proposed it presents. Admins, and anyone on a local
+ * server (no access password), may always present, to set things up and to test.
  */
-export type ConferenceRole = 'presenter' | 'audience' | null;
+export type ConferenceRole = 'presenter' | 'audience';
 
-export function conferenceRole(
-  id: string,
-  events: readonly Pick<ProposedEvent, 'area' | 'start' | 'minutes' | 'by' | 'status'>[],
-  now: number,
-  { open }: { open: boolean },
-): ConferenceRole {
-  if (open) return 'presenter';
-  const live = events.filter(
+type ConferenceEvent = Pick<ProposedEvent, 'area' | 'start' | 'minutes' | 'by' | 'status'>;
+
+function liveConferenceEvents(events: readonly ConferenceEvent[], now: number): ConferenceEvent[] {
+  return events.filter(
     (event) =>
       event.area === 'conference' &&
       event.status === 'approved' &&
       now >= event.start - DECOR_LEAD_MS &&
       now < event.start + event.minutes * 60_000,
   );
+}
+
+export function conferenceRole(
+  id: string,
+  events: readonly ConferenceEvent[],
+  now: number,
+  { open }: { open: boolean },
+): ConferenceRole {
+  if (open) return 'presenter';
+  return liveConferenceEvents(events, now).some((event) => event.by === id)
+    ? 'presenter'
+    : 'audience';
+}
+
+/**
+ * When what is put on the screen now comes down by itself: the end of the
+ * event running in the hall, or null when none is (an admin testing), so it
+ * stays until cleared.
+ */
+export function conferenceEnd(events: readonly ConferenceEvent[], now: number): number | null {
+  const live = liveConferenceEvents(events, now);
   if (live.length === 0) return null;
-  return live.some((event) => event.by === id) ? 'presenter' : 'audience';
+  return Math.max(...live.map((event) => event.start + event.minutes * 60_000));
 }

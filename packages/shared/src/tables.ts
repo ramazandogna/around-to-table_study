@@ -1,3 +1,21 @@
+import {
+  BEST_OF,
+  isParlor,
+  newParlor,
+  parlorLeave,
+  parlorMax,
+  parlorMove,
+  parlorTarget,
+  parlorTimeout,
+  parlorTurns,
+  PARLOR_GAMES,
+  type BestOf,
+  type ParlorHidden,
+  type ParlorOutcome,
+  type ParlorKind,
+  type ParlorState,
+} from './parlor';
+
 /**
  * Table games in the smoking room, for two to four people: darts, a dice game
  * and a guessing game. The server keeps each table and is the only one that
@@ -8,16 +26,23 @@
  *   (or, alone, a practice round for a score)
  * - pig: roll as often as you dare, a 1 loses the turn's points; first to 50
  * - guess: a number from 1 to 100, "higher" or "lower" after each try
+ * - and the quick games of `parlor.ts` (rock-paper-scissors, coin, dice duel,
+ *   tic-tac-toe, word chain, quick math, emoji riddles), scored to a target
  */
 
-export const TABLE_GAMES = ['darts', 'pig', 'guess'] as const;
+export const TABLE_GAMES = ['darts', 'pig', 'guess', ...PARLOR_GAMES] as const;
 export type TableKind = (typeof TABLE_GAMES)[number];
 
 export const TABLE_PLAYERS = { min: 2, max: 4 } as const;
 
-/** Darts can be played alone, for practice; the dice and the number game need company. */
+/** Darts can be played alone, for practice; the other games need company. */
 export function minPlayers(kind: TableKind): number {
   return kind === 'darts' ? 1 : TABLE_PLAYERS.min;
+}
+
+/** Most players at one table: four, or two for tic-tac-toe. */
+export function maxPlayers(kind: TableKind): number {
+  return isParlor(kind) ? parlorMax(kind) : TABLE_PLAYERS.max;
 }
 /** A turn left alone this long is played for the absent player (a miss, a hold, a pass). */
 export const TURN_MS = 40_000;
@@ -51,10 +76,14 @@ export type Table = {
   guess: Guess | null;
   /** Ids of the winners once the game is over (several on a tie). */
   winners: string[];
+  /** The quick games: the match as everyone sees it (null for darts, pig and guess). */
+  parlor?: ParlorState | null;
+  /** The quick games set by rounds: best of three or five (picked in the lobby). */
+  bestOf?: BestOf;
 };
 
 /** What the server keeps: the table plus what only it may know. */
-export type TableRecord = { table: Table; secret: number };
+export type TableRecord = { table: Table; secret: number; hidden?: ParlorHidden };
 
 export type TableAction =
   | { a: 'open' }
@@ -66,7 +95,13 @@ export type TableAction =
   | { a: 'hold' }
   | { a: 'guess'; n: number }
   /** Plays a turn that ran out of time; anyone at the table may ask. */
-  | { a: 'nudge' };
+  | { a: 'nudge' }
+  /** In the lobby: how long the match runs, best of three or five. */
+  | { a: 'bestOf'; n: number }
+  | { a: 'pick'; choice: string }
+  | { a: 'cell'; i: number }
+  | { a: 'word'; text: string }
+  | { a: 'answer'; text: string };
 
 export type TableError = 'full' | 'started' | 'not_seated' | 'not_your_turn' | 'too_few' | 'bad';
 
@@ -120,6 +155,8 @@ function lobby(host: TableSeat, kind: TableKind, now: number): Table {
     high: GUESS_RANGE.high,
     guess: null,
     winners: [],
+    parlor: null,
+    bestOf: 3,
   };
 }
 
@@ -141,13 +178,14 @@ export function tableAction(
   if (!record) return { record, error: 'bad' };
   const table = JSON.parse(JSON.stringify(record.table)) as Table;
   const next: TableRecord = { table, secret: record.secret };
+  if (record.hidden) next.hidden = JSON.parse(JSON.stringify(record.hidden)) as ParlorHidden;
   const seat = table.players.findIndex((p) => p.id === ctx.id);
 
   switch (action.a) {
     case 'join': {
       if (seat >= 0) return { record };
       if (table.phase !== 'lobby') return { record, error: 'started' };
-      if (table.players.length >= TABLE_PLAYERS.max) return { record, error: 'full' };
+      if (table.players.length >= maxPlayers(kind)) return { record, error: 'full' };
       table.players.push(me);
       table.scores.push(0);
       return { record: next };
@@ -161,6 +199,7 @@ export function tableAction(
         .map((d) => (d.player > seat ? { ...d, player: d.player - 1 } : d));
       if (table.players.length === 0) return { record: null };
       if (table.host === ctx.id) table.host = table.players[0]?.id ?? '';
+      if (table.parlor && next.hidden) parlorLeave(table.parlor, next.hidden, seat);
       if (table.phase === 'playing') {
         if (table.players.length < minPlayers(table.kind)) {
           // Left alone at the table: the one who stayed wins.
@@ -186,13 +225,33 @@ export function tableAction(
       table.scores = table.players.map(() => 0);
       next.secret =
         GUESS_RANGE.low + Math.floor(ctx.random() * (GUESS_RANGE.high - GUESS_RANGE.low + 1));
+      if (isParlor(kind)) {
+        const match = newParlor(kind, table.bestOf ?? 3, table.players.length, ctx.random);
+        table.parlor = match.state;
+        next.hidden = match.hidden;
+        table.winners = [];
+      }
+      return { record: next };
+    }
+    case 'bestOf': {
+      if (table.phase !== 'lobby' || seat < 0) return { record, error: 'bad' };
+      if (!(BEST_OF as readonly number[]).includes(action.n)) return { record, error: 'bad' };
+      table.bestOf = action.n as BestOf;
       return { record: next };
     }
     case 'nudge': {
       if (table.phase !== 'playing') return { record };
       if (ctx.now - table.turnStartedAt < TURN_MS) return { record };
       // The turn is played for whoever wandered off.
-      if (table.kind === 'darts') {
+      if (isParlor(kind) && table.parlor && next.hidden) {
+        const seats = { count: table.players.length, turn: table.turn };
+        applyParlor(
+          kind,
+          next,
+          parlorTimeout(kind, table.parlor, next.hidden, seats, ctx.random),
+          ctx.now,
+        );
+      } else if (table.kind === 'darts') {
         const thrown = table.darts.filter((d) => d.player === table.turn).length;
         for (let i = thrown; i < DARTS_PER_TURN; i++) {
           table.darts.push({ player: table.turn, x: 2, y: 2, score: 0 });
@@ -210,6 +269,22 @@ export function tableAction(
   // Moves of the game itself.
   if (table.phase !== 'playing') return { record, error: 'bad' };
   if (seat < 0) return { record, error: 'not_seated' };
+  if (isParlor(kind)) {
+    if (!table.parlor || !next.hidden) return { record, error: 'bad' };
+    if (
+      action.a !== 'pick' &&
+      action.a !== 'roll' &&
+      action.a !== 'cell' &&
+      action.a !== 'word' &&
+      action.a !== 'answer'
+    )
+      return { record, error: 'bad' };
+    const seats = { count: table.players.length, turn: table.turn };
+    const outcome = parlorMove(kind, table.parlor, next.hidden, seats, seat, action, ctx.random);
+    if (outcome.error) return { record, error: outcome.error };
+    applyParlor(kind, next, outcome, ctx.now);
+    return { record: next };
+  }
   if (seat !== table.turn) return { record, error: 'not_your_turn' };
 
   if (action.a === 'throw' && table.kind === 'darts') {
@@ -259,6 +334,40 @@ export function tableAction(
     return { record: next };
   }
   return { record, error: 'bad' };
+}
+
+/**
+ * A quick game's move or timeout on the table: points onto the scoreboard,
+ * the turn passed on (or the round clock restarted), and the match over once
+ * someone reaches the target.
+ */
+function applyParlor(
+  kind: ParlorKind,
+  record: TableRecord,
+  outcome: ParlorOutcome,
+  now: number,
+): void {
+  const table = record.table;
+  const round = table.parlor?.round;
+  table.parlor = outcome.state;
+  record.hidden = outcome.hidden;
+  outcome.points.forEach((p, i) => (table.scores[i] = (table.scores[i] ?? 0) + p));
+  if (outcome.passTurn) {
+    table.turn = (table.turn + 1) % table.players.length;
+    table.turnStartedAt = now;
+  } else if (!parlorTurns(kind) && outcome.state.round !== round) {
+    table.turnStartedAt = now;
+  } else if (kind === 'ttt' && outcome.state.round !== round) {
+    // A finished board: whoever starts the new one plays.
+    table.turn = outcome.state.starter;
+    table.turnStartedAt = now;
+  }
+  const target = parlorTarget(kind, table.bestOf ?? 3);
+  const best = Math.max(...table.scores);
+  if (best >= target) {
+    table.phase = 'over';
+    table.winners = table.players.filter((_, i) => table.scores[i] === best).map((p) => p.id);
+  }
 }
 
 function clamp(n: number, low: number, high: number): number {
