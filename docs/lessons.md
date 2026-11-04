@@ -87,3 +87,19 @@ The Turkish "Ne zaman (senin saatinle)" left the date field a few pixels wide in
 ## A fixed fake clock can stall the page
 
 Playwright's `clock.setFixedTime` froze the loader; shifting `Date` by an offset (time still runs) is what the clock tests need.
+
+## A sleeping room forgets what it had in memory
+
+A player who left while the area room was hibernating stayed seated at a table game forever: the close handler ran before the tables were loaded, found none, and skipped getting them up. Every handler that touches state loaded on a message (close, error, kick) has to load it first, and the room's sweep now also gets absent players up from tables.
+
+## A stacked fixed panel can swallow a dialog's clicks
+
+The smoking room's music card sat at a higher z-index than dialogs, so on a phone its header covered the table game's buttons. Anything that floats over the world stays below the dialog layer.
+
+## Folding letters makes new collisions
+
+Folding Turkish letters to plain ones (ı→i, ö→o) is what lets the swear filter see "sikerim" written as "s1kerim", but it also turns "sıkıntı" and "göt" into "sikinti" and "got". Short words that collide with everyday words are matched only on a form that keeps the Turkish letters.
+
+## A copied record must carry all of its parts
+
+The table logic copied `{ table, secret }` for each move; the new hidden picks of the quick games were dropped on every move until the copy carried them too.
