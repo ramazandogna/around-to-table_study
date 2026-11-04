@@ -107,3 +107,7 @@ The table logic copied `{ table, secret }` for each move; the new hidden picks o
 ## A rule only the screen enforces is not a rule
 
 Round F stopped people from presenting off the stage, but anyone could still walk up and stand there. A place that belongs to someone is closed in the shared grid, so the client's routes and the server's move check say the same thing; the client only explains it.
+
+## Ask again while the connection is down
+
+The first check after a lost connection ran once, 2.5 seconds in, while a deploy still had the server away: it got no answer and never asked again, so nobody saw the door. A disconnection is explained by asking every few seconds until there is an answer.

@@ -23,7 +23,7 @@ const en: More = {
   gate: {
     badge: 'Early beta',
     title: 'We are still building it',
-    text: 'Around the Table is in early beta. Without this week’s access code you can’t walk in yet, but you can look around the game’s door, or explore the site first.',
+    text: 'Around the Table is in a closed beta. You sign in with Google, and you also need this week’s access code to walk in. You can look at the game’s door anyway, or explore the site first.',
     ask: 'No code yet? Write to us and we’ll send one.',
     play: 'See the game',
     explore: 'Explore the site',
@@ -41,7 +41,7 @@ const tr: More = {
   gate: {
     badge: 'Erken beta',
     title: 'Henüz yapım aşamasında',
-    text: 'Around the Table erken betada. Bu haftanın erişim kodu olmadan henüz içeri giremezsin; ama oyunun kapısına göz atabilir ya da önce siteyi inceleyebilirsin.',
+    text: 'Around the Table kapalı betada. Google ile giriş yaparsın; içeri girmek için ayrıca bu haftanın erişim kodu gerekir. Yine de oyunun kapısına göz atabilir ya da önce siteyi inceleyebilirsin.',
     ask: 'Kodun yok mu? Bize yaz, gönderelim.',
     play: 'Oyunu gör',
     explore: 'Siteyi incele',
@@ -59,7 +59,7 @@ const zh: More = {
   gate: {
     badge: '早期测试',
     title: '我们还在建造中',
-    text: 'Around the Table 正处于早期测试阶段。没有本周的访问码还不能进入，但你可以先看看游戏的大门，或者先浏览网站。',
+    text: 'Around the Table 正处于封闭测试阶段。用 Google 账号登录，并且还需要本周的访问码才能进入。你也可以先看看游戏的大门，或者先浏览网站。',
     ask: '还没有访问码？写信给我们，我们会发给你。',
     play: '看看游戏',
     explore: '浏览网站',
@@ -77,7 +77,7 @@ const ja: More = {
   gate: {
     badge: 'アーリーベータ',
     title: 'まだ建設中です',
-    text: 'Around the Table はアーリーベータです。今週のアクセスコードがないとまだ入れませんが、ゲームの入口をのぞいたり、先にサイトを見たりできます。',
+    text: 'Around the Table はクローズドベータです。Google でサインインし、さらに今週のアクセスコードがあれば入れます。ゲームの入口をのぞいたり、先にサイトを見たりもできます。',
     ask: 'コードがない？メールをくれれば送ります。',
     play: 'ゲームを見る',
     explore: 'サイトを見る',
