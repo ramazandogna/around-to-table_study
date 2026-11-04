@@ -10,32 +10,22 @@ import {
   type Point,
   type StaffId,
 } from '@att/shared';
-import {
-  BoxGeometry,
-  CylinderGeometry,
-  Group,
-  Mesh,
-  MeshStandardMaterial,
-  type Material,
-} from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { t, type MessageKey } from '../i18n/t';
 import { Avatar, type AvatarContext } from './Avatar';
-import { FLOOR_Y } from './buildArea';
 import type { CharacterKit } from './characters';
 
 /**
  * The people behind the desks: the librarians and the receptionists. Who sits
  * there follows the shifts (see shared `SHIFTS`): a woman in the library from
- * 9 to 15, a man from 15 to 22, and a sleepy night librarian who keeps dozing
- * off at the desk until morning; the reception has a day and a night receptionist.
+ * 9 to 15, a man from 15 to 22, nobody at night; the reception has a day and a
+ * night receptionist.
  *
  * What they do is worked out from the clock in slots of a few seconds, each
  * picked by a seeded random, so it never repeats like a loop and yet every
  * visitor sees the same person at the same shelf at the same moment. Mostly
  * they stay at the desk (typing, a coffee, a stretch, a yawn in the late
- * hours); now and then they run an errand, and the librarian mops a stretch
- * of floor and leaves a wet floor sign for a while. The receptionist also walks
+ * hours); now and then they run an errand. The receptionist also walks
  * someone to the elevator when they open a private room (on that person's
  * screen). Staff are not players: they take no seat and count in no numbers.
  */
@@ -51,8 +41,6 @@ type Person = {
   errands: number;
   /** Chance per slot of a yawn. */
   sleepy: number;
-  /** Dozes off at the desk most of the time and walks sleepily (the night shift). */
-  drowsy?: boolean;
 };
 
 const PEOPLE: Record<StaffId, Person> = {
@@ -71,20 +59,6 @@ const PEOPLE: Record<StaffId, Person> = {
     lines: ['staff.librarianEvening.1', 'staff.librarianEvening.2', 'staff.librarianEvening.3'],
     errands: 0.45,
     sleepy: 0.1,
-  },
-  librarianNight: {
-    kind: 'librarian',
-    look: { character: 6, top: 2, bottom: 5, hair: 6 },
-    name: 'staff.librarianNight',
-    lines: [
-      'staff.librarianNight.1',
-      'staff.librarianNight.2',
-      'staff.librarianNight.3',
-      'staff.librarianNight.4',
-    ],
-    errands: 0.25,
-    sleepy: 0.3,
-    drowsy: true,
   },
   receptionDay: {
     kind: 'receptionist',
@@ -142,28 +116,10 @@ export type StaffRoom = {
 };
 
 /** Where a staff member is wanted right now. */
-type Wanted =
-  | { at: 'desk' }
-  | { at: 'errand'; spot: number }
-  | { at: 'escort' }
-  | { at: 'chore' }
-  | { at: 'mop'; stretch: number; leg: number };
+type Wanted = { at: 'desk' } | { at: 'errand'; spot: number } | { at: 'escort' } | { at: 'chore' };
 
 /** A chore takes this long once there: a push, a little tidy. */
 const CHORE_SECONDS = 1.1;
-/** The night librarian gets round to a chore only after this long, yawning. */
-const NIGHT_CHORE_DELAY = 45;
-
-/**
- * Mopping: the clock is cut into windows of this many slots; in some of them
- * the librarian mops one stretch of floor, back and forth, for `MOP_LEGS`
- * slots, and the wet floor sign stays up for the rest of the window.
- */
-const MOP_WINDOW = 25;
-const MOP_LEGS = 4;
-const MOP_CHANCE = 0.25;
-/** Of the night librarian's slots at the desk, this share is spent asleep. */
-const DOZE_SHARE = 0.65;
 
 export class Staff {
   readonly avatar: Avatar;
@@ -183,17 +139,6 @@ export class Staff {
   /** The window opened or shut on this visit, so it happens once per trip. */
   private windowDone = false;
   private readonly windowCount: number;
-  /** Straight stretches of open floor to mop: from one end to the other. */
-  private readonly stretches: { a: Point; b: Point }[];
-  /** The mop, its bucket and the wet floor sign, put in the room by `AreaWorld`. */
-  readonly props = new Group();
-  private readonly mop: Group;
-  private readonly bucket: Group;
-  private readonly wetSign: Group;
-  private readonly propMaterials: Material[] = [];
-  /** When each waiting chore was added, for the night librarian who takes their time. */
-  private readonly choreSince = new Map<Chore, number>();
-  private mopTime = 0;
 
   /**
    * Whoever is on duty at a desk in this room right now, or null (no desk, or
@@ -242,15 +187,6 @@ export class Staff {
     };
     this.avatar = new Avatar(kit, this.person.look, chair, t(this.person.name), false, own);
     this.avatar.onTap = () => this.talk();
-    this.avatar.setSleepy(!!this.person.drowsy);
-    this.stretches = this.person.kind === 'librarian' ? mopStretches(grid) : [];
-    const built = mopProps(this.propMaterials);
-    this.mop = built.mop;
-    this.bucket = built.bucket;
-    this.wetSign = built.sign;
-    this.bucket.visible = false;
-    this.wetSign.visible = false;
-    this.props.add(this.bucket, this.wetSign);
   }
 
   get kind(): Kind {
@@ -268,7 +204,6 @@ export class Staff {
   addChore(chore: Chore): void {
     if (this.person.kind !== 'librarian') return;
     this.chores.push(chore);
-    this.choreSince.set(chore, performance.now());
   }
 
   /** Chores waiting, e.g. to tell which chairs are already on the list. */
@@ -294,33 +229,20 @@ export class Staff {
         ? `errand:${wanted.spot}`
         : chore
           ? `chore:${chore.stand.x},${chore.stand.y}`
-          : wanted.at === 'mop'
-            ? `mop:${wanted.stretch}:${wanted.leg}`
-            : wanted.at;
+          : wanted.at;
     if (key !== this.at) {
       this.windowDone = false;
       this.choreLeft = CHORE_SECONDS;
       this.go(wanted, this.at === null);
     }
     this.at = key;
-    this.updateMop(wanted, slot, delta);
-    this.avatar.setDozing(
-      !!this.person.drowsy &&
-        wanted.at === 'desk' &&
-        !this.avatar.isMoving &&
-        chance(slot * 7 + 3) < DOZE_SHARE,
-    );
     if (chore && !this.avatar.isMoving) {
       this.avatar.face(chore.facing.x, chore.facing.y);
-      if (this.choreLeft === CHORE_SECONDS) {
-        this.avatar.play('poke');
-        if (this.person.drowsy) this.avatar.emote('sleepy', true);
-      }
+      if (this.choreLeft === CHORE_SECONDS) this.avatar.play('poke');
       this.choreLeft -= delta;
       if (this.choreLeft <= 0) {
         chore.done();
         this.chores.shift();
-        this.choreSince.delete(chore);
       }
     }
 
@@ -351,57 +273,11 @@ export class Staff {
     this.avatar.update(delta);
   }
 
-  /**
-   * The mop in hand and swishing while mopping; the bucket left at the
-   * stretch's start, and the wet floor sign up there until the window ends.
-   */
-  private updateMop(wanted: Wanted, slot: number, delta: number): void {
-    const mop = this.mopWindow(slot);
-    const mopping = wanted.at === 'mop';
-    if (mopping !== (this.mop.parent !== null)) {
-      this.avatar.hold(mopping ? this.mop : null);
-      if (mopping && wanted.leg === 0) this.avatar.say(t('staff.wetFloor'));
-    }
-    this.avatar.setSleepy(!!this.person.drowsy || mopping);
-    if (mopping) {
-      this.mopTime += delta;
-      this.mop.rotation.y = Math.sin(this.mopTime * 5) * 0.45;
-    }
-    const stretch = mop ? this.stretches[mop.stretch] : undefined;
-    const offset = slot % MOP_WINDOW;
-    this.bucket.visible =
-      !!stretch && mop !== null && offset >= mop.start && offset < mop.start + MOP_LEGS;
-    this.wetSign.visible = !!stretch && mop !== null && offset >= mop.start;
-    if (stretch) {
-      this.bucket.position.set(stretch.a.x + 0.25, FLOOR_Y, stretch.a.y + 0.75);
-      const middle = { x: (stretch.a.x + stretch.b.x) / 2, y: (stretch.a.y + stretch.b.y) / 2 };
-      this.wetSign.position.set(middle.x + 0.5, FLOOR_Y, middle.y + 0.2);
-    }
-  }
-
-  /** This window's mopping, the same on every screen: which stretch and from which slot, or null. */
-  private mopWindow(slot: number): { stretch: number; start: number } | null {
-    if (this.stretches.length === 0) return null;
-    const window = Math.floor(slot / MOP_WINDOW);
-    if (chance(window * 11 + 5) >= MOP_CHANCE) return null;
-    const start = Math.floor(chance(window * 11 + 6) * (MOP_WINDOW - MOP_LEGS - 6));
-    const stretch = Math.floor(chance(window * 11 + 7) * this.stretches.length);
-    return { stretch, start };
-  }
-
   /** Where the clock (or the player's room) wants them this slot. */
   private wanted(slot: number): Wanted {
     if (this.escortLeft > 0) return { at: 'escort' };
-    // A chair left out comes before the rounds (the night librarian takes a while to notice).
-    const chore = this.chores[0];
-    const since = chore ? (this.choreSince.get(chore) ?? 0) : 0;
-    const late = this.person.drowsy ? NIGHT_CHORE_DELAY * 1000 : 0;
-    if (chore && performance.now() - since >= late) return { at: 'chore' };
-    const mop = this.mopWindow(slot);
-    const inWindow = slot % MOP_WINDOW;
-    if (mop && inWindow >= mop.start && inWindow < mop.start + MOP_LEGS) {
-      return { at: 'mop', stretch: mop.stretch, leg: inWindow - mop.start };
-    }
+    // A chair left out comes before the rounds.
+    if (this.chores.length > 0) return { at: 'chore' };
     if (this.errands.length === 0) return { at: 'desk' };
     const block = Math.floor(slot / BLOCK);
     const salt = this.id.length * 977;
@@ -437,7 +313,6 @@ export class Staff {
 
   /** Walks to the desk or somewhere else; on arrival in the room they are simply already there. */
   private go(to: Wanted, now: boolean): void {
-    const stretch = to.at === 'mop' ? this.stretches[to.stretch] : undefined;
     const spot =
       to.at === 'errand'
         ? this.errands[to.spot]
@@ -445,9 +320,7 @@ export class Staff {
           ? this.elevator
           : to.at === 'chore'
             ? (this.chores[0] ?? null)
-            : stretch && to.at === 'mop'
-              ? { stand: to.leg % 2 === 0 ? stretch.b : stretch.a, facing: { x: 1, y: 0 } }
-              : null;
+            : null;
     const goal = spot ? spot.stand : this.chair;
     if (now) {
       this.avatar.teleport(goal);
@@ -467,86 +340,8 @@ export class Staff {
   }
 
   dispose(): void {
-    this.avatar.hold(null);
     this.avatar.dispose();
-    this.props.removeFromParent();
-    this.props.traverse((node) => (node as Mesh).geometry?.dispose());
-    this.mop.traverse((node) => (node as Mesh).geometry?.dispose());
-    for (const material of this.propMaterials) material.dispose();
   }
-}
-
-/**
- * Straight runs of open floor, four to seven tiles long, away from chairs:
- * where the librarian mops. A few spread over the room.
- */
-function mopStretches(grid: AreaGrid): { a: Point; b: Point }[] {
-  const found: { a: Point; b: Point }[] = [];
-  const clear = (p: Point) =>
-    grid.isWalkable(p) &&
-    !grid.isSeat(p) &&
-    grid.doorTarget(p) === null &&
-    !SIDES.some((d) => grid.isSeat({ x: p.x + d.x, y: p.y + d.y }));
-  for (let y = 0; y < grid.height; y++) {
-    let run: Point[] = [];
-    for (let x = 0; x <= grid.width; x++) {
-      const p = { x, y };
-      if (x < grid.width && clear(p)) {
-        run.push(p);
-        continue;
-      }
-      if (run.length >= 4) {
-        const a = run[0] as Point;
-        found.push({ a, b: { x: a.x + Math.min(run.length, 7) - 1, y } });
-      }
-      run = [];
-    }
-  }
-  return found.filter((_, i) => i % 2 === 0).slice(0, 6);
-}
-
-/** A mop (held in front, swished side to side), its bucket and a yellow wet floor sign. */
-function mopProps(materials: Material[]): { mop: Group; bucket: Group; sign: Group } {
-  const wood = new MeshStandardMaterial({ color: 0xb08a5a, roughness: 0.7 });
-  const strands = new MeshStandardMaterial({ color: 0xe8e2d0, roughness: 1 });
-  const blue = new MeshStandardMaterial({ color: 0x3b6fb6, roughness: 0.5 });
-  const water = new MeshStandardMaterial({ color: 0x8fb8c9, roughness: 0.2 });
-  const yellow = new MeshStandardMaterial({ color: 0xf2c230, roughness: 0.55 });
-  const ink = new MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
-  materials.push(wood, strands, blue, water, yellow, ink);
-
-  const mop = new Group();
-  const handle = new Mesh(new CylinderGeometry(0.018, 0.018, 1.25, 8), wood);
-  handle.rotation.x = 0.55;
-  handle.position.set(0.12, 0.62, 0.32);
-  const head = new Mesh(new CylinderGeometry(0.1, 0.16, 0.12, 10), strands);
-  head.position.set(0.12, 0.06, 0.62);
-  mop.add(handle, head);
-
-  const bucket = new Group();
-  const pail = new Mesh(new CylinderGeometry(0.19, 0.15, 0.3, 14), blue);
-  pail.position.y = 0.15;
-  const surface = new Mesh(new CylinderGeometry(0.17, 0.17, 0.01, 14), water);
-  surface.position.y = 0.27;
-  bucket.add(pail, surface);
-
-  // An A-frame: two yellow boards leaning together, a dark band across each.
-  const sign = new Group();
-  for (const side of [-1, 1]) {
-    const board = new Mesh(new BoxGeometry(0.34, 0.56, 0.02), yellow);
-    board.position.set(0, 0.27, side * 0.09);
-    board.rotation.x = side * 0.3;
-    const band = new Mesh(new BoxGeometry(0.26, 0.07, 0.022), ink);
-    band.position.set(0, 0.36, side * 0.064 + side * 0.006);
-    band.rotation.x = side * 0.3;
-    sign.add(board, band);
-  }
-  for (const group of [mop, bucket, sign]) {
-    group.traverse((node) => {
-      if ((node as Mesh).isMesh) (node as Mesh).castShadow = true;
-    });
-  }
-  return { mop, bucket, sign };
 }
 
 /** The staff chair in a room, if it has one. */

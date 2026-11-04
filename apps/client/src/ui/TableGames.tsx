@@ -1,12 +1,10 @@
 import {
   DARTS_PER_TURN,
-  isParlor,
   isRoomArea,
-  maxPlayers,
-  parlorTurns,
   minPlayers,
   PIG_GOAL,
   TABLE_GAMES,
+  TABLE_PLAYERS,
   TURN_MS,
   type Table,
   type TableAction,
@@ -19,7 +17,6 @@ import { useGameStore } from '../state/store';
 import { drawDartboard } from '../world/smokingProps';
 import { useNow } from './Calendar';
 import { Dialog, Panel } from './Panel';
-import { BestOfPicker, ParlorView } from './ParlorGames';
 
 /**
  * The smoking room's table games, for two to four people: darts at the
@@ -28,18 +25,7 @@ import { BestOfPicker, ParlorView } from './ParlorGames';
  * the buttons for the player's own turn. Anyone in the room can watch.
  */
 
-const ICON: Record<TableKind, string> = {
-  darts: '🎯',
-  pig: '🎲',
-  guess: '🔢',
-  rps: '✊',
-  coin: '🪙',
-  duel: '🎲',
-  ttt: '⭕',
-  chain: '🔤',
-  math: '➗',
-  emoji: '🤔',
-};
+const ICON: Record<TableKind, string> = { darts: '🎯', pig: '🎲', guess: '🔢' };
 /** Colours of each seat's darts and name, in seat order. */
 const SEAT_COLOURS = ['#e65f4f', '#4f7fd8', '#5cc37c', '#f2b340'];
 
@@ -91,59 +77,34 @@ function Menu() {
   const area = useGameStore((s) => s.area);
   const kinds = isRoomArea(area) ? TABLE_GAMES.filter((k) => k !== 'darts') : TABLE_GAMES;
   return (
-    <>
-      <MenuGroup
-        title={t('table.group.board')}
-        kinds={kinds.filter((k) => !isParlor(k))}
-        tables={tables}
-      />
-      <MenuGroup title={t('table.group.quick')} kinds={kinds.filter(isParlor)} tables={tables} />
-    </>
-  );
-}
-
-function MenuGroup({
-  title,
-  kinds,
-  tables,
-}: {
-  title: string;
-  kinds: readonly TableKind[];
-  tables: Partial<Record<TableKind, Table>>;
-}) {
-  if (kinds.length === 0) return null;
-  return (
-    <>
-      <h4 className="table-group">{title}</h4>
-      <ul className="table-menu">
-        {kinds.map((kind) => {
-          const table = tables[kind];
-          const state = !table
-            ? t('table.state.free')
-            : table.phase === 'lobby'
-              ? t('table.state.lobby', { n: table.players.length, of: maxPlayers(kind) })
-              : table.phase === 'playing'
-                ? t('table.state.playing')
-                : t('table.state.over');
-          return (
-            <li key={kind}>
-              <button
-                type="button"
-                className="pet-card table-card"
-                onClick={() => useGameStore.getState().setTableOpen(kind)}
-              >
-                <span className="pet-card-icon" aria-hidden>
-                  {ICON[kind]}
-                </span>
-                <b>{t(`table.${kind}.title`)}</b>
-                <span className="room-size-hint">{t(`table.${kind}.short`)}</span>
-                <span className="table-card-state">{state}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </>
+    <ul className="table-menu">
+      {kinds.map((kind) => {
+        const table = tables[kind];
+        const state = !table
+          ? t('table.state.free')
+          : table.phase === 'lobby'
+            ? t('table.state.lobby', { n: table.players.length, of: TABLE_PLAYERS.max })
+            : table.phase === 'playing'
+              ? t('table.state.playing')
+              : t('table.state.over');
+        return (
+          <li key={kind}>
+            <button
+              type="button"
+              className="pet-card table-card"
+              onClick={() => useGameStore.getState().setTableOpen(kind)}
+            >
+              <span className="pet-card-icon" aria-hidden>
+                {ICON[kind]}
+              </span>
+              <b>{t(`table.${kind}.title`)}</b>
+              <span className="room-size-hint">{t(`table.${kind}.short`)}</span>
+              <span className="table-card-state">{state}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -175,9 +136,6 @@ function TableView({ kind }: { kind: TableKind }) {
       {table.phase !== 'lobby' && kind === 'darts' && <Darts table={table} seat={seat} />}
       {table.phase !== 'lobby' && kind === 'pig' && <Pig table={table} seat={seat} />}
       {table.phase !== 'lobby' && kind === 'guess' && <Guess table={table} seat={seat} />}
-      {table.phase !== 'lobby' && isParlor(kind) && (
-        <ParlorView kind={kind} table={table} seat={seat} />
-      )}
       {table.phase === 'playing' && <TurnClock kind={kind} table={table} seated={seated} />}
       {table.phase === 'over' && <Over kind={kind} table={table} />}
       {seated && table.phase !== 'over' && (
@@ -191,19 +149,16 @@ function TableView({ kind }: { kind: TableKind }) {
 
 /** Who sits at the table, their points, and an arrow at whose turn it is. */
 function Seats({ table, myId }: { table: Table; myId: string }) {
-  // The quick games played all at once have no "whose turn".
-  const turns = !isParlor(table.kind) || parlorTurns(table.kind);
-  const isTurn = (i: number) => turns && table.phase === 'playing' && table.turn === i;
   return (
     <ol className="table-seats">
       {table.players.map((player, i) => (
         <li
           key={player.id}
-          className={`table-seat${isTurn(i) ? ' table-seat--turn' : ''}`}
+          className={`table-seat${table.phase === 'playing' && table.turn === i ? ' table-seat--turn' : ''}`}
           style={{ borderColor: SEAT_COLOURS[i] }}
         >
           <span className="table-seat-name">
-            {isTurn(i) ? '▶ ' : ''}
+            {table.phase === 'playing' && table.turn === i ? '▶ ' : ''}
             {player.id === table.host ? '👑 ' : ''}
             {player.id === myId ? t('table.you') : player.name}
           </span>
@@ -219,11 +174,10 @@ function Seats({ table, myId }: { table: Table; myId: string }) {
 
 function Lobby({ kind, table, seated }: { kind: TableKind; table: Table; seated: boolean }) {
   const missing = Math.max(0, minPlayers(kind) - table.players.length);
-  const full = table.players.length >= maxPlayers(kind);
+  const full = table.players.length >= TABLE_PLAYERS.max;
   return (
     <>
       <p className="panel-text">{t(`table.${kind}.rules`)}</p>
-      {isParlor(kind) && <BestOfPicker kind={kind} table={table} />}
       <p className="game-status">
         {missing > 0
           ? t('table.waiting', { n: missing })

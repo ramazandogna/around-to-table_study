@@ -9,8 +9,6 @@ import { InboxLink } from './Inbox';
 import { PhoneLink } from './Phone';
 import { StartOver } from './StartOver';
 import { StatusDialog } from './StatusDialog';
-import { ExitGame } from './ExitGame';
-import { GoalsLink, QuestsPanel } from './Goals';
 import { Wardrobe } from './Wardrobe';
 
 const AREA_ICON: Record<AreaId, string> = {
@@ -66,10 +64,8 @@ export function HudPlate() {
           </span>
         </span>
       </div>
-      {/* On a phone the open plate would cover what a link opens, so it folds away after the tap. */}
-      <nav className="hud-links" aria-label={t('hud.menu')} onClickCapture={foldOnPhone}>
+      <nav className="hud-links" aria-label={t('hud.menu')}>
         <StatusDialog />
-        <GoalsLink />
         <FriendsLink />
         <PhoneLink />
         <InboxLink />
@@ -77,17 +73,10 @@ export function HudPlate() {
         <SoundToggle />
         <LanguageToggle />
         <IntroLink />
-        <ExitGame />
         <StartOver />
       </nav>
     </header>
   );
-}
-
-/** Folds the plate after a tap on one of its links, where the plate folds at all (narrow screens). */
-function foldOnPhone(): void {
-  if (!window.matchMedia('(max-width: 700px)').matches) return;
-  window.setTimeout(() => useGameStore.getState().setPlateOpen(false), 0);
 }
 
 /** Turns every sound in the game off or on; remembered on this device. */
@@ -192,7 +181,6 @@ export function MapCorner() {
         </p>
       )}
       <WorldClock />
-      <QuestsPanel />
     </aside>
   );
 }

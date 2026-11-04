@@ -266,7 +266,7 @@ export const RENOVATION_NOTES: readonly string[] = [
   'A note taped to a paint can: “Back on Monday. Please don’t sit on the wet chairs. — the painters”',
   'A cardboard box labelled “BOOKS — handle with care (and curiosity)”. The tape is already open.',
   'Half the wall is a fresh warm cream. The other half is waiting for more people to come.',
-  'A stack of new desks, still wrapped. Each one has a sticker: “for two” or “for four”.',
+  'A stack of new desks, still wrapped. Each one has a sticker: “for two”.',
 ];
 
 export type Flaw = { title: string; text: string };
