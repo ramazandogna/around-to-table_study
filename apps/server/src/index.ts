@@ -14,6 +14,22 @@ import {
   type RoomSize,
 } from '@att/shared';
 import { AREA_HEADERS } from './area-room';
+import {
+  betaMode,
+  clearCookie,
+  clearOauthCookie,
+  cookie,
+  doorOpen,
+  emailListed,
+  googleFinish,
+  googleStart,
+  PASS_COOKIE,
+  randomId,
+  readCookie,
+  SESSION_COOKIE,
+  SESSION_MS,
+  signPass,
+} from './accounts';
 import { signRoomPass, signSession, verifyRoomPass, verifySession, type Session } from './auth';
 import type { Env } from './env';
 import { SOCIAL_HEADERS } from './social-hub';
@@ -48,84 +64,259 @@ function sameText(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/**
- * Whether the door needs the password, and whether a token the browser holds
- * still opens it (after a new password, it does not).
- */
-async function access(request: Request, env: Env): Promise<Response> {
-  const secret = secretOf(env);
-  const token = new URL(request.url).searchParams.get('token') ?? '';
-  const valid = !!secret && !!token && (await verifySession(token, secret)) !== null;
-  return Response.json({ required: !!env.ACCESS_PASSWORD, valid });
+/* ---------- Accounts: who someone is ---------- */
+
+type Account = { id: string; email: string; name: string };
+
+/** The signed-in account behind the session cookie, or null. */
+async function accountFrom(request: Request, env: Env): Promise<Account | null> {
+  const sessionId = readCookie(request, SESSION_COOKIE);
+  if (!sessionId) return null;
+  return env.SOCIAL.getByName('hub').sessionAccount(sessionId, SESSION_MS);
 }
 
-async function createGuest(request: Request, env: Env): Promise<Response> {
-  const secret = secretOf(env);
-  if (!secret) return error('server_misconfigured', 500);
+const isLocal = (request: Request) =>
+  ['localhost', '127.0.0.1'].includes(new URL(request.url).hostname);
 
-  const body = (await request.json().catch(() => null)) as {
-    name?: unknown;
-    password?: unknown;
-  } | null;
-  if (env.ACCESS_PASSWORD) {
-    const address = request.headers.get('cf-connecting-ip') ?? 'local';
-    if (!(await env.SOCIAL.getByName('hub').passwordTry(address))) {
-      return error('too_many_tries', 429);
-    }
-    const password = typeof body?.password === 'string' ? body.password.trim() : '';
-    if (!sameText(password, env.ACCESS_PASSWORD)) return error('wrong_password', 403);
+/** Signs an account in: a session row and its cookie, then back to the game. */
+async function startSession(request: Request, env: Env, accountId: string): Promise<Response> {
+  const sessionId = randomId(32);
+  await env.SOCIAL.getByName('hub').createSession(
+    accountId,
+    sessionId,
+    request.headers.get('user-agent') ?? '',
+    SESSION_MS,
+  );
+  const headers = new Headers({ location: '/' });
+  headers.append('set-cookie', cookie(request, SESSION_COOKIE, sessionId, SESSION_MS));
+  headers.append('set-cookie', clearOauthCookie(request));
+  return new Response(null, { status: 302, headers });
+}
+
+async function googleSignIn(request: Request, env: Env): Promise<Response> {
+  const secret = secretOf(env);
+  if (!secret || !env.GOOGLE_CLIENT_ID) return error('google_not_set', 503);
+  const { url, cookie: trip } = await googleStart(request, env.GOOGLE_CLIENT_ID, secret);
+  return new Response(null, { status: 302, headers: { location: url, 'set-cookie': trip } });
+}
+
+async function googleCallback(request: Request, env: Env): Promise<Response> {
+  const secret = secretOf(env);
+  if (!secret || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+    return error('google_not_set', 503);
   }
-  const name = typeof body?.name === 'string' ? normalizeName(body.name) : null;
-  if (!name) return error('invalid_name', 400);
-
-  const session = { id: crypto.randomUUID(), name, iat: Math.floor(Date.now() / 1000) };
-  return Response.json({ token: await signSession(session, secret), id: session.id, name });
-}
-
-/** The session from a socket URL's `token`, or an error response. */
-async function sessionFrom(request: Request, env: Env): Promise<Session | Response> {
-  const secret = secretOf(env);
-  if (!secret) return error('server_misconfigured', 500);
-  const token = new URL(request.url).searchParams.get('token') ?? '';
-  return (await verifySession(token, secret)) ?? error('unauthorized', 401);
+  const user = await googleFinish(request, {
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    secret,
+  });
+  if (!user) return Response.redirect(`${new URL(request.url).origin}/?signin=failed`, 302);
+  const accountId = await env.SOCIAL.getByName('hub').signIn(user);
+  if (!accountId) return Response.redirect(`${new URL(request.url).origin}/?signin=disabled`, 302);
+  return startSession(request, env, accountId);
 }
 
 /**
- * The profile behind a token: the character select screen shows each of the
- * device's characters with their badges and hours, without entering the world.
+ * For tests and local play only: signs in as a made-up Google user. It exists
+ * only on a local server with no Google client set; in production it is a 404.
+ */
+async function devSignIn(request: Request, env: Env): Promise<Response> {
+  if (env.GOOGLE_CLIENT_ID || !isLocal(request)) return error('not_found', 404);
+  const email = (new URL(request.url).searchParams.get('email') ?? '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+$/.test(email)) return error('invalid_email', 400);
+  const accountId = await env.SOCIAL.getByName('hub').signIn({
+    sub: `dev:${email}`,
+    email,
+    name: email.split('@')[0] ?? 'player',
+  });
+  return accountId ? startSession(request, env, accountId) : error('disabled', 403);
+}
+
+async function logout(request: Request, env: Env): Promise<Response> {
+  const sessionId = readCookie(request, SESSION_COOKIE);
+  if (sessionId) await env.SOCIAL.getByName('hub').endSession(sessionId);
+  const headers = new Headers();
+  headers.append('set-cookie', clearCookie(request, SESSION_COOKIE));
+  headers.append('set-cookie', clearCookie(request, PASS_COOKIE));
+  return Response.json({ ok: true }, { headers });
+}
+
+/** Whether this account may walk into the game now (see `doorOpen`). */
+async function doorOpenFor(request: Request, env: Env, account: Account): Promise<boolean> {
+  const secret = secretOf(env);
+  if (!secret) return false;
+  return doorOpen({
+    mode: betaMode(env.BETA_MODE),
+    accessCode: env.ACCESS_PASSWORD,
+    pass: readCookie(request, PASS_COOKIE),
+    accountId: account.id,
+    email: account.email,
+    allowed: env.ALLOWED_EMAILS,
+    secret,
+  });
+}
+
+/**
+ * Who is signed in, whether the game's door is open to them, their characters
+ * and, with `?presence=`, whether that tab's presence is still the account's.
+ */
+async function me(request: Request, env: Env): Promise<Response> {
+  const google = !!env.GOOGLE_CLIENT_ID;
+  const devSignIn = !google && isLocal(request);
+  const account = await accountFrom(request, env);
+  if (!account) return Response.json({ account: null, google, devSignIn });
+  const hub = env.SOCIAL.getByName('hub');
+  const nonce = new URL(request.url).searchParams.get('presence');
+  return Response.json({
+    account: {
+      name: account.name,
+      email: account.email,
+      role: emailListed(env.ADMIN_EMAILS, account.email) ? 'admin' : 'user',
+    },
+    mode: betaMode(env.BETA_MODE),
+    door: await doorOpenFor(request, env, account),
+    characters: await hub.charactersOf(account.id),
+    ...(nonce ? { presence: await hub.presenceIs(account.id, nonce) } : {}),
+    google,
+    devSignIn,
+  });
+}
+
+/** The door: this deploy's access code, tried a few times at most, gives a pass for this account. */
+async function door(request: Request, env: Env): Promise<Response> {
+  const account = await accountFrom(request, env);
+  if (!account) return error('signed_out', 401);
+  const secret = secretOf(env);
+  if (!secret) return error('server_misconfigured', 500);
+  if (!env.ACCESS_PASSWORD) return Response.json({ ok: true });
+  const hub = env.SOCIAL.getByName('hub');
+  const address = request.headers.get('cf-connecting-ip') ?? 'local';
+  const [byAccount, byAddress] = await Promise.all([
+    hub.passwordTry(`acct:${account.id}`),
+    hub.passwordTry(`ip:${address}`),
+  ]);
+  if (!byAccount || !byAddress) return error('too_many_tries', 429);
+  const body = (await request.json().catch(() => null)) as { code?: unknown } | null;
+  const code = typeof body?.code === 'string' ? body.code.trim() : '';
+  if (!sameText(code, env.ACCESS_PASSWORD)) return error('wrong_code', 403);
+  const pass = await signPass(account.id, secret, env.ACCESS_PASSWORD);
+  // The pass lasts until the next deploy changes the code; the cookie may outlive that harmlessly.
+  return Response.json(
+    { ok: true },
+    { headers: { 'set-cookie': cookie(request, PASS_COOKIE, pass, SESSION_MS) } },
+  );
+}
+
+const CHARACTER_PATH = /^\/api\/characters(?:\/([0-9a-f-]{36})(?:\/(look|save))?)?$/;
+
+/** Making, changing and deleting the account's characters (the door need not be open). */
+async function characters(request: Request, env: Env, pathname: string): Promise<Response> {
+  const account = await accountFrom(request, env);
+  if (!account) return error('signed_out', 401);
+  const hub = env.SOCIAL.getByName('hub');
+  const match = CHARACTER_PATH.exec(pathname);
+  if (!match) return error('not_found', 404);
+  const [, id, part] = match;
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!id && request.method === 'POST') {
+    const name = typeof body?.name === 'string' ? normalizeName(body.name) : null;
+    if (!name) return error('invalid_name', 400);
+    const made = await hub.createCharacter(account.id, name, body?.look);
+    return 'error' in made ? error(made.error, 400) : Response.json(made);
+  }
+  if (id && !part && request.method === 'DELETE') {
+    const gone = await hub.deleteCharacter(account.id, id);
+    if (gone) await sendOut(env, [id]);
+    return gone ? Response.json({ ok: true }) : error('not_found', 404);
+  }
+  if (id && part === 'look' && request.method === 'PUT') {
+    return (await hub.setCharacterLook(account.id, id, body?.look))
+      ? Response.json({ ok: true })
+      : error('invalid', 400);
+  }
+  if (id && part === 'save' && request.method === 'PUT') {
+    const save = JSON.stringify(body?.save ?? {});
+    return (await hub.saveCharacter(account.id, id, save))
+      ? Response.json({ ok: true })
+      : error('invalid', 400);
+  }
+  return error('not_found', 404);
+}
+
+/** Sends characters out of every room they are in (another tab took over, or one was deleted). */
+async function sendOut(env: Env, ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const [rooms] = await Promise.all([
+    env.SOCIAL.getByName('hub').kick(ids),
+    ...PUBLIC_AREAS.map((area) => env.AREAS.getByName(area).kick(ids)),
+  ]);
+  await Promise.all(rooms.map((code) => env.AREAS.getByName(`room:${code}`).kick(ids)));
+}
+
+/**
+ * Into the game as one character: the door must be open, the character the
+ * account's own, and this becomes the account's one presence (any other tab
+ * or device is sent out). The answer is the game token the sockets use.
+ */
+async function play(request: Request, env: Env): Promise<Response> {
+  const account = await accountFrom(request, env);
+  if (!account) return error('signed_out', 401);
+  if (!(await doorOpenFor(request, env, account))) return error('door_closed', 403);
+  const secret = secretOf(env);
+  if (!secret) return error('server_misconfigured', 500);
+  const body = (await request.json().catch(() => null)) as { id?: unknown } | null;
+  const hub = env.SOCIAL.getByName('hub');
+  const character =
+    typeof body?.id === 'string' ? await hub.characterOf(account.id, body.id) : null;
+  if (!character) return error('not_found', 404);
+  const { nonce, previous } = await hub.takePresence(account.id, character.id);
+  await sendOut(env, previous);
+  const session: Session = {
+    id: character.id,
+    name: character.name,
+    iat: Math.floor(Date.now() / 1000),
+    acct: account.id,
+    p: nonce,
+  };
+  return Response.json({
+    token: await signSession(session, secret),
+    id: character.id,
+    name: character.name,
+    presence: nonce,
+  });
+}
+
+/**
+ * The game token from a socket URL's `token`, or an error: signed with this
+ * deploy's key, made for the account signed in on this browser, and still the
+ * account's current presence.
+ */
+async function sessionFrom(request: Request, env: Env): Promise<Session | Response> {
+  const token = new URL(request.url).searchParams.get('token') ?? '';
+  return checkToken(request, env, token);
+}
+
+async function checkToken(request: Request, env: Env, token: string): Promise<Session | Response> {
+  const secret = secretOf(env);
+  if (!secret) return error('server_misconfigured', 500);
+  const session = await verifySession(token, secret);
+  if (!session) return error('unauthorized', 401);
+  const account = await accountFrom(request, env);
+  if (!account || account.id !== session.acct) return error('unauthorized', 401);
+  if (!(await env.SOCIAL.getByName('hub').presenceIs(account.id, session.p))) {
+    return error('elsewhere', 409);
+  }
+  return session;
+}
+
+/**
+ * The profile of one of the account's characters, for the character select.
  */
 async function ownProfile(request: Request, env: Env): Promise<Response> {
   const session = await sessionFrom(request, env);
   if (session instanceof Response) return session;
   const profile = await env.SOCIAL.getByName('hub').profileOf(session.id);
   return profile ? Response.json({ profile }) : error('not_found', 404);
-}
-
-/** Tokens one "start over" may clear: this device's current and past guests. */
-const MAX_LEAVE_TOKENS = 10;
-
-/**
- * Starting over: every guest this device has been leaves the building now,
- * instead of lingering until their sockets time out. Only tokens the device
- * holds count, so nobody can send anyone else away.
- */
-async function leave(request: Request, env: Env): Promise<Response> {
-  const secret = secretOf(env);
-  if (!secret) return error('server_misconfigured', 500);
-  const body = (await request.json().catch(() => null)) as { tokens?: unknown } | null;
-  const tokens = Array.isArray(body?.tokens) ? body.tokens.slice(0, MAX_LEAVE_TOKENS) : [];
-  const sessions = await Promise.all(
-    tokens.map((token) => (typeof token === 'string' ? verifySession(token, secret) : null)),
-  );
-  const ids = [...new Set(sessions.flatMap((session) => (session ? [session.id] : [])))];
-  if (ids.length > 0) {
-    const [rooms] = await Promise.all([
-      env.SOCIAL.getByName('hub').kick(ids),
-      ...PUBLIC_AREAS.map((area) => env.AREAS.getByName(area).kick(ids)),
-    ]);
-    await Promise.all(rooms.map((code) => env.AREAS.getByName(`room:${code}`).kick(ids)));
-  }
-  return Response.json({ left: ids.length });
 }
 
 async function joinSocial(request: Request, env: Env): Promise<Response> {
@@ -137,15 +328,13 @@ async function joinSocial(request: Request, env: Env): Promise<Response> {
   return env.SOCIAL.getByName('hub').fetch(new Request(request, { headers }));
 }
 
-/** The session from a JSON body's `token`, or an error response. */
+/** The game token from a JSON body's `token`, checked like a socket's. */
 async function sessionFromBody(
+  request: Request,
   body: { token?: unknown } | null,
   env: Env,
 ): Promise<Session | Response> {
-  const secret = secretOf(env);
-  if (!secret) return error('server_misconfigured', 500);
-  const token = typeof body?.token === 'string' ? body.token : '';
-  return (await verifySession(token, secret)) ?? error('unauthorized', 401);
+  return checkToken(request, env, typeof body?.token === 'string' ? body.token : '');
 }
 
 /**
@@ -169,7 +358,7 @@ async function rooms(request: Request, env: Env, pathname: string): Promise<Resp
       password?: unknown;
       rules?: unknown;
     } | null;
-    const session = await sessionFromBody(body, env);
+    const session = await sessionFromBody(request, body, env);
     if (session instanceof Response) return session;
     const name = typeof body?.name === 'string' ? cleanRoomName(body.name) : null;
     const size = ROOM_SIZES.find((s) => s === body?.size);
@@ -200,7 +389,7 @@ async function rooms(request: Request, env: Env, pathname: string): Promise<Resp
     token?: unknown;
     password?: unknown;
   } | null;
-  const session = await sessionFromBody(body, env);
+  const session = await sessionFromBody(request, body, env);
   if (session instanceof Response) return session;
   const password = typeof body?.password === 'string' ? body.password : null;
   const check = await hub.checkRoom(code, password, session.id);
@@ -260,11 +449,17 @@ export default {
     const { pathname } = new URL(request.url);
 
     if (pathname === '/api/health') return Response.json(createHealthResponse());
-    if (pathname === '/api/guest' && request.method === 'POST') return createGuest(request, env);
-    if (pathname === '/api/access') return access(request, env);
+    if (pathname === '/api/auth/google') return googleSignIn(request, env);
+    if (pathname === '/api/auth/google/callback') return googleCallback(request, env);
+    if (pathname === '/api/auth/dev') return devSignIn(request, env);
+    if (pathname === '/api/me') return me(request, env);
+    if (pathname === '/api/logout' && request.method === 'POST') return logout(request, env);
+    if (pathname === '/api/door' && request.method === 'POST') return door(request, env);
+    if (pathname === '/api/play' && request.method === 'POST') return play(request, env);
+    if (pathname === '/api/characters' || pathname.startsWith('/api/characters/'))
+      return characters(request, env, pathname);
     if (pathname === '/api/profile') return ownProfile(request, env);
 
-    if (pathname === '/api/leave' && request.method === 'POST') return leave(request, env);
     if (pathname === '/api/rooms' || pathname.startsWith('/api/rooms/'))
       return rooms(request, env, pathname);
     if (pathname === '/api/social/ws') return joinSocial(request, env);

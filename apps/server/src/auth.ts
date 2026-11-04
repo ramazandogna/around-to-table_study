@@ -1,10 +1,20 @@
 import { normalizeName } from '@att/shared';
 
+/**
+ * A game token: one character of one account, playing now. It is signed with
+ * a key that includes the access code, so every deploy ends it, and it names
+ * the account's presence, so only the newest tab or device keeps playing.
+ */
 export type Session = {
+  /** The character's id: what everyone else sees as "who". */
   id: string;
   name: string;
   /** Issued-at, seconds since epoch. */
   iat: number;
+  /** The account it belongs to. */
+  acct: string;
+  /** The account's presence it was made for (see `takePresence`). */
+  p: string;
 };
 
 const encoder = new TextEncoder();
@@ -77,7 +87,8 @@ export async function verifySession(token: string, secret: string): Promise<Sess
   const session = await verifyPayload(token, secret);
   if (!session || typeof session.id !== 'string' || typeof session.iat !== 'number') return null;
   const name = typeof session.name === 'string' ? normalizeName(session.name) : null;
-  return name ? { id: session.id, name, iat: session.iat } : null;
+  if (typeof session.acct !== 'string' || typeof session.p !== 'string') return null;
+  return name ? { id: session.id, name, iat: session.iat, acct: session.acct, p: session.p } : null;
 }
 
 /** How long a room pass lets someone (re)connect to a private room. */

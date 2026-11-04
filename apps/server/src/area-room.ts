@@ -39,6 +39,7 @@ import {
 } from '@att/shared';
 import { cleanStage, controlStage, STAGE_LIMITS, type StageState } from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
+import { doorTag } from './accounts';
 import type { Env } from './env';
 import { takeToken, type RateWindow } from './rate-limit';
 
@@ -71,6 +72,8 @@ type Connection = {
   tableMoves?: RateWindow;
   /** Stage changes lately (see `STAGE_LIMITS.perMinute`). */
   stageChanges?: RateWindow;
+  /** The access code's tag when it connected: a deploy changes the code and sends it out. */
+  door?: string;
   /** When the socket connected, for telling vanished ones apart (see `sweep`). */
   since: number;
 };
@@ -179,6 +182,7 @@ export class AreaRoom extends DurableObject<Env> {
       afk: false,
       smoking: false,
       presenter: request.headers.get(AREA_HEADERS.role) === 'presenter',
+      door: await this.doorTag(),
       since: Date.now(),
     });
     await this.armSweep();
@@ -189,6 +193,11 @@ export class AreaRoom extends DurableObject<Env> {
     const message = typeof raw === 'string' ? parseClientMessage(raw) : null;
     const me = this.load(ws);
     if (!message || !me) return this.send(ws, { t: 'error', code: 'bad_message' });
+    // A deploy changed the access code: everyone who came in with the old one goes out.
+    if (me.door !== (await this.doorTag())) {
+      await this.loadPlay();
+      return this.leave(ws);
+    }
     // Nothing personal passes between two people when one blocked the other.
     if (
       (message.t === 'poke' || message.t === 'whisper' || message.t === 'invite') &&
@@ -233,12 +242,13 @@ export class AreaRoom extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     const now = Date.now();
+    await this.loadPlay();
+    const door = await this.doorTag();
     for (const ws of this.ctx.getWebSockets()) {
       const me = this.load(ws);
       const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
-      if (!me || isStale(now, me.since ?? 0, ping)) this.leave(ws);
+      if (!me || me.door !== door || isStale(now, me.since ?? 0, ping)) this.leave(ws);
     }
-    await this.loadPlay();
     this.advanceIfOver(now);
     this.dropAbsentPlayers(now);
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
@@ -286,6 +296,14 @@ export class AreaRoom extends DurableObject<Env> {
       void this.ctx.storage.delete(tableKey(kind));
     }
     this.broadcast({ t: 'table', kind, table: record?.table ?? null });
+  }
+
+  private doorTagValue: string | null = null;
+
+  /** The current access code's tag (see `doorTag` in accounts.ts). */
+  private async doorTag(): Promise<string> {
+    this.doorTagValue ??= await doorTag(this.env.ACCESS_PASSWORD);
+    return this.doorTagValue;
   }
 
   /** Loads the tables and the jukebox once per wake-up. */

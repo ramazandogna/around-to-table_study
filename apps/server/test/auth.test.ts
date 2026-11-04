@@ -8,7 +8,7 @@ import {
 } from '../src/auth';
 
 const secret = 'test-secret-that-is-long-enough-1234567890';
-const session = { id: 'abc', name: 'Ayşe', iat: 1 };
+const session = { id: 'abc', name: 'Ayşe', iat: 1, acct: 'a1', p: 'p1' };
 
 describe('guest tokens', () => {
   it('round-trips a session', async () => {

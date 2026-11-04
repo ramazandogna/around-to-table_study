@@ -51,6 +51,7 @@ import {
   type WaitingPet,
 } from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
+import { doorTag, emailListed } from './accounts';
 import type { Env } from './env';
 import { takeToken, type RateWindow } from './rate-limit';
 
@@ -69,6 +70,8 @@ type Member = {
   look?: Appearance;
   /** When the socket connected, for telling vanished ones apart (see `alarm`). */
   since?: number;
+  /** The access code's tag when it connected: a deploy changes the code and sends it out. */
+  door?: string;
   /** The private room they are in, if any. */
   room?: string | undefined;
   /** Their status lines in short, for friends' phones. */
@@ -130,6 +133,18 @@ type EventRow = {
 const EVENT_KEEP_MS = 24 * 60 * 60 * 1000;
 /** How many focus blocks are read for someone's best streak. */
 const STREAK_ROWS = 3000;
+/** Characters per account. */
+const MAX_CHARACTERS = 2;
+/** The most a character's saved progress may weigh, as JSON. */
+const SAVE_MAX = 32_000;
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
 
 /** Passwords are kept only as a salted hash. */
 async function hashPassword(code: string, password: string): Promise<string> {
@@ -235,6 +250,40 @@ export class SocialHub extends DurableObject<Env> {
         PRIMARY KEY (code, user)
       );
     `);
+    // Accounts outlive data epochs: they are who people are, not what the building holds.
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS accounts (
+        id TEXT PRIMARY KEY,
+        google_sub TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        last_login_at INTEGER NOT NULL,
+        disabled INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        user_agent TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS characters (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL UNIQUE,
+        look TEXT NOT NULL,
+        save TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS presence (
+        account_id TEXT PRIMARY KEY,
+        nonce TEXT NOT NULL,
+        character_id TEXT NOT NULL,
+        at INTEGER NOT NULL
+      );
+    `);
     // Columns added after the first tables were made; adding one twice fails, which is fine.
     for (const column of [
       'ALTER TABLE users ADD COLUMN created_at INTEGER',
@@ -267,6 +316,7 @@ export class SocialHub extends DurableObject<Env> {
       name: decodeURIComponent(name),
       area: null,
       since: Date.now(),
+      door: await this.doorTag(),
       changes: { start: 0, count: 0 },
       messages: { start: 0, count: 0 },
     };
@@ -288,6 +338,8 @@ export class SocialHub extends DurableObject<Env> {
     const message = typeof raw === 'string' ? parseSocialMessage(raw) : null;
     const stored = ws.deserializeAttachment() as Member | null;
     if (!message || !stored) return send(ws, { t: 'error', code: 'bad_message' });
+    // A deploy changed the access code: whoever came in with the old one goes out.
+    if (stored.door !== (await this.doorTag())) return this.leave(ws);
     // Sockets from before the phone have no message window yet.
     const me: Member = { ...stored, messages: stored.messages ?? { start: 0, count: 0 } };
     this.handle(ws, me, message);
@@ -307,10 +359,11 @@ export class SocialHub extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     const now = Date.now();
+    const door = await this.doorTag();
     for (const ws of this.ctx.getWebSockets()) {
       const me = ws.deserializeAttachment() as Member | null;
       const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
-      if (!me || isStale(now, me.since ?? 0, ping)) this.leave(ws);
+      if (!me || me.door !== door || isStale(now, me.since ?? 0, ping)) this.leave(ws);
     }
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
   }
@@ -346,6 +399,233 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   /** One more try at the access password from an address; false once it tried too often. */
+  private doorTagValue: string | null = null;
+
+  /** The current access code's tag (see `doorTag` in accounts.ts). */
+  private async doorTag(): Promise<string> {
+    this.doorTagValue ??= await doorTag(this.env.ACCESS_PASSWORD);
+    return this.doorTagValue;
+  }
+
+  /* ---------- Accounts, sessions and characters ---------- */
+
+  /** Finds the account for a Google user, or makes one; its id. */
+  async signIn(user: { sub: string; email: string; name: string }): Promise<string | null> {
+    const now = Date.now();
+    const found = this.sql
+      .exec<{ id: string; disabled: number }>(
+        'SELECT id, disabled FROM accounts WHERE google_sub = ?',
+        user.sub,
+      )
+      .toArray()[0];
+    if (found) {
+      if (found.disabled) return null;
+      this.sql.exec(
+        'UPDATE accounts SET email = ?, name = ?, last_login_at = ? WHERE id = ?',
+        user.email,
+        user.name.slice(0, 60),
+        now,
+        found.id,
+      );
+      return found.id;
+    }
+    const id = crypto.randomUUID();
+    this.sql.exec(
+      'INSERT INTO accounts (id, google_sub, email, name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)',
+      id,
+      user.sub,
+      user.email,
+      user.name.slice(0, 60),
+      now,
+      now,
+    );
+    return id;
+  }
+
+  async createSession(
+    accountId: string,
+    sessionId: string,
+    userAgent: string,
+    ms: number,
+  ): Promise<void> {
+    const now = Date.now();
+    this.sql.exec(
+      'INSERT INTO sessions (id, account_id, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)',
+      sessionId,
+      accountId,
+      now,
+      now + ms,
+      userAgent.slice(0, 200),
+    );
+  }
+
+  /** The account behind a session, sliding its end along; null when gone or expired. */
+  async sessionAccount(
+    sessionId: string,
+    ms: number,
+  ): Promise<{ id: string; email: string; name: string } | null> {
+    const now = Date.now();
+    const row = this.sql
+      .exec<{ id: string; email: string; name: string; expires_at: number; disabled: number }>(
+        `SELECT a.id, a.email, a.name, s.expires_at, a.disabled
+         FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?`,
+        sessionId,
+      )
+      .toArray()[0];
+    if (!row || row.disabled || row.expires_at < now) {
+      if (row) this.sql.exec('DELETE FROM sessions WHERE id = ?', sessionId);
+      return null;
+    }
+    // Slide once an hour at most, not on every request.
+    if (row.expires_at - now < ms - 60 * 60_000) {
+      this.sql.exec('UPDATE sessions SET expires_at = ? WHERE id = ?', now + ms, sessionId);
+    }
+    return { id: row.id, email: row.email, name: row.name };
+  }
+
+  async endSession(sessionId: string): Promise<void> {
+    this.sql.exec('DELETE FROM sessions WHERE id = ?', sessionId);
+  }
+
+  /** An account's characters, with what the character select shows of each. */
+  async charactersOf(
+    accountId: string,
+  ): Promise<
+    { id: string; name: string; look: unknown; save: unknown; profile: Profile | null }[]
+  > {
+    return this.sql
+      .exec<{ id: string; name: string; look: string; save: string }>(
+        'SELECT id, name, look, save FROM characters WHERE account_id = ? ORDER BY created_at',
+        accountId,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        look: parseJson(row.look),
+        save: parseJson(row.save),
+        profile: this.profile(row.id),
+      }));
+  }
+
+  /** A new character for an account: at most two, and a name nobody else has. */
+  async createCharacter(
+    accountId: string,
+    name: string,
+    look: unknown,
+  ): Promise<{ id: string } | { error: 'too_many' | 'name_taken' | 'invalid' }> {
+    if (!isValidAppearance(look)) return { error: 'invalid' };
+    const count = this.sql
+      .exec<{ n: number }>('SELECT COUNT(*) AS n FROM characters WHERE account_id = ?', accountId)
+      .toArray()[0]?.n;
+    if ((count ?? 0) >= MAX_CHARACTERS) return { error: 'too_many' };
+    const key = name.toLocaleLowerCase('tr');
+    if (this.sql.exec('SELECT 1 FROM characters WHERE name_key = ?', key).toArray().length > 0) {
+      return { error: 'name_taken' };
+    }
+    const id = crypto.randomUUID();
+    this.sql.exec(
+      'INSERT INTO characters (id, account_id, name, name_key, look, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      id,
+      accountId,
+      name,
+      key,
+      JSON.stringify(look),
+      Date.now(),
+    );
+    return { id };
+  }
+
+  async deleteCharacter(accountId: string, id: string): Promise<boolean> {
+    const done = this.sql.exec(
+      'DELETE FROM characters WHERE id = ? AND account_id = ?',
+      id,
+      accountId,
+    ).rowsWritten;
+    if (done > 0) this.sql.exec('DELETE FROM presence WHERE character_id = ?', id);
+    return done > 0;
+  }
+
+  /** A character of this account, or null. */
+  async characterOf(accountId: string, id: string): Promise<{ id: string; name: string } | null> {
+    return (
+      this.sql
+        .exec<{ id: string; name: string }>(
+          'SELECT id, name FROM characters WHERE id = ? AND account_id = ?',
+          id,
+          accountId,
+        )
+        .toArray()[0] ?? null
+    );
+  }
+
+  async setCharacterLook(accountId: string, id: string, look: unknown): Promise<boolean> {
+    if (!isValidAppearance(look)) return false;
+    return (
+      this.sql.exec(
+        'UPDATE characters SET look = ? WHERE id = ? AND account_id = ?',
+        JSON.stringify(look),
+        id,
+        accountId,
+      ).rowsWritten > 0
+    );
+  }
+
+  /** What the character keeps between visits (focus totals, goals, tasks…), as the client sends it. */
+  async saveCharacter(accountId: string, id: string, save: string): Promise<boolean> {
+    if (save.length > SAVE_MAX) return false;
+    return (
+      this.sql.exec(
+        'UPDATE characters SET save = ? WHERE id = ? AND account_id = ?',
+        save,
+        id,
+        accountId,
+      ).rowsWritten > 0
+    );
+  }
+
+  /**
+   * The account plays here now: a new presence replaces the one before it.
+   * Returns the new presence's nonce and the characters to send out of the
+   * building (all of the account's, if it was somewhere already).
+   */
+  async takePresence(
+    accountId: string,
+    characterId: string,
+  ): Promise<{ nonce: string; previous: string[] }> {
+    const before = this.sql
+      .exec<{ character_id: string }>(
+        'SELECT character_id FROM presence WHERE account_id = ?',
+        accountId,
+      )
+      .toArray()[0];
+    const nonce = crypto.randomUUID();
+    this.sql.exec(
+      `INSERT INTO presence (account_id, nonce, character_id, at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (account_id) DO UPDATE SET nonce = excluded.nonce, character_id = excluded.character_id, at = excluded.at`,
+      accountId,
+      nonce,
+      characterId,
+      Date.now(),
+    );
+    const previous = before
+      ? this.sql
+          .exec<{ id: string }>('SELECT id FROM characters WHERE account_id = ?', accountId)
+          .toArray()
+          .map((r) => r.id)
+      : [];
+    return { nonce, previous };
+  }
+
+  /** Whether a presence is still the account's current one. */
+  async presenceIs(accountId: string, nonce: string): Promise<boolean> {
+    return (
+      this.sql
+        .exec('SELECT 1 FROM presence WHERE account_id = ? AND nonce = ?', accountId, nonce)
+        .toArray().length > 0
+    );
+  }
+
   async passwordTry(address: string): Promise<boolean> {
     const window = takeToken(
       this.passwordTries.get(address) ?? { start: 0, count: 0 },
@@ -924,11 +1204,15 @@ export class SocialHub extends DurableObject<Env> {
 
   /* ---------- Roles ---------- */
 
+  /** The owners' characters: every character of an account whose email is in ADMIN_EMAILS. */
   private ownerIds(): string[] {
-    return (this.env.ADMIN_IDS ?? '')
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean);
+    return this.sql
+      .exec<{ id: string; email: string }>(
+        'SELECT c.id, a.email FROM characters c JOIN accounts a ON a.id = c.account_id',
+      )
+      .toArray()
+      .filter((row) => emailListed(this.env.ADMIN_EMAILS, row.email))
+      .map((row) => row.id);
   }
 
   /**
