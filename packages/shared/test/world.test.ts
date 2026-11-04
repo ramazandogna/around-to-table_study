@@ -73,24 +73,17 @@ describe('renovation zone', () => {
     expect(createAreaGrid('library', zone.expansions.length).isWalkable(inside)).toBe(true);
   });
 
-  it('starts with twelve chairs; the strips add a table for four, then two desks for two', () => {
-    const chairs = [0, 1, 2, 3].map((opened) => createAreaGrid('library', opened).openChairs());
-    expect(chairs.map((open) => open.length)).toEqual([12, 16, 18, 20]);
-    expect(zone.expansions).toHaveLength(3);
-  });
-
-  it('keeps twenty chairs in all: two tables for four and two desks for two open, the rest behind', () => {
-    const seats = AREAS.library.layout
-      .join('')
-      .split('')
-      .filter((c) => c === 'S');
-    expect(seats).toHaveLength(20);
+  it('starts with twelve chairs, and each strip adds a desk for two', () => {
+    expect(createAreaGrid('library', 0).openChairs()).toHaveLength(12);
+    for (let opened = 1; opened <= zone.expansions.length; opened++) {
+      expect(createAreaGrid('library', opened).openChairs()).toHaveLength(12 + opened * 2);
+    }
   });
 
   it('opens a desk when the thirteenth person comes in, and never closes it again', () => {
     expect(stripsNeeded('library', 12, 0)).toBe(0);
     expect(stripsNeeded('library', 13, 0)).toBe(1);
-    expect(stripsNeeded('library', 17, 1)).toBe(2);
+    expect(stripsNeeded('library', 15, 1)).toBe(2);
     expect(stripsNeeded('library', 2, 2)).toBe(2);
     expect(stripsNeeded('library', 500, 0)).toBe(zone.expansions.length);
     expect(stripsNeeded('hall', 500, 0)).toBe(0);
@@ -230,8 +223,8 @@ describe('smoothPath', () => {
   it('does not cut through chairs on the way to a seat', () => {
     const library = createAreaGrid('library');
     const goal = { x: 8, y: 6 };
-    const path = findPath(library, { x: 11, y: 9 }, goal) ?? [];
-    let at = { x: 11.5, y: 9.5 };
+    const path = findPath(library, { x: 8, y: 10 }, goal) ?? [];
+    let at = { x: 8.5, y: 10.5 };
     for (const point of smoothPath(library, at, path)) {
       expect(hasClearLine(library, at, point, goal)).toBe(true);
       at = point;

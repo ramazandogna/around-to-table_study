@@ -24,7 +24,7 @@ export type Rect = { x: number; y: number; w: number; h: number };
 /**
  * The closed part of a room. It opens strip by strip as the room fills up:
  * whenever more people are inside than there are open seats, the next strip
- * (holding a table for four or a desk for two) opens, and it stays open.
+ * (each holding a desk for two) opens, and it stays open.
  */
 export type Renovation = Rect & { expansions: readonly Rect[] };
 
@@ -73,12 +73,11 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
   },
   library: {
     id: 'library',
-    // A tidy mix of tables for four (two facing two) and desks for two, so a pair
-    // and a small group both find their place and people see each other while
-    // studying. Around them the room reads as a library: three back-to-back stacks,
-    // wall shelves, a librarian's desk facing the way in, and a reading corner with
-    // a sofa by the door. The right side is closed for renovation and opens a table
-    // at a time as the room fills up.
+    // Desks for two, in two loose rows that face each other across an aisle, so
+    // people study side by side and see each other. Around them the room reads as a
+    // library: three back-to-back stacks, wall shelves, a librarian's desk facing the
+    // way in, and a reading corner with a sofa by the door. The right side is closed
+    // for renovation and opens a desk at a time as the room fills up.
     layout: [
       '##############################',
       '#BBBB.BBBB.BBBB.BBBB.BBBB.BBB#',
@@ -86,12 +85,12 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
       '#P.BBBB..BBBB..BBB...........#',
       '#..BBBB..BBBB..BBB...........#',
       '#............................#',
-      '#..SS...SS...SS....SS..SS....#',
-      '#..TT...TT...TT....TT..TT....#',
-      '#..SS........SS....SS........#',
+      '#..SS...SS....SS.....SS...SS.#',
+      '#..TT...TT....TT.....TT...TT.#',
       '#............................#',
-      '#.......TT................TT.#',
-      '#B......SS................SS.#',
+      '#....TT....TT...TT.TT...TT...#',
+      '#....SS....SS...SS.SS...SS...#',
+      '#B...........................#',
       '#B..N.....CCC................#',
       '#B.........Q.................#',
       '#bbA.........................#',
@@ -106,8 +105,9 @@ export const AREAS: Record<AreaId, AreaDefinition> = {
       w: 11,
       h: 14,
       expansions: [
-        { x: 18, y: 2, w: 4, h: 14 },
-        { x: 22, y: 2, w: 4, h: 14 },
+        { x: 18, y: 2, w: 3, h: 14 },
+        { x: 21, y: 2, w: 3, h: 14 },
+        { x: 24, y: 2, w: 2, h: 14 },
         { x: 26, y: 2, w: 3, h: 14 },
       ],
     },

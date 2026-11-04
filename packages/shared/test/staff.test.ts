@@ -9,14 +9,11 @@ describe('staff shifts', () => {
     expect(onDuty('library', 21.5)).toBe('librarianEvening');
   });
 
-  it('never leaves a desk empty: a night librarian keeps the library from 22 to 9', () => {
-    expect(onDuty('library', 22)).toBe('librarianNight');
-    expect(onDuty('library', 3)).toBe('librarianNight');
-    expect(onDuty('library', 8.9)).toBe('librarianNight');
-    for (let hour = 0; hour < 24; hour += 0.5) {
-      expect(onDuty('hall', hour)).not.toBeNull();
-      expect(onDuty('library', hour)).not.toBeNull();
-    }
+  it('leaves the library desk empty at night, but never the reception', () => {
+    expect(onDuty('library', 23)).toBeNull();
+    expect(onDuty('library', 3)).toBeNull();
+    expect(onDuty('library', 8.9)).toBeNull();
+    for (let hour = 0; hour < 24; hour += 0.5) expect(onDuty('hall', hour)).not.toBeNull();
     expect(onDuty('hall', 2)).toBe('receptionNight');
     expect(onDuty('hall', 12)).toBe('receptionDay');
   });

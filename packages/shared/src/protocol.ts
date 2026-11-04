@@ -24,7 +24,6 @@ import {
   DANCES,
 } from './status';
 import { ACTIVITIES, MAX_TIMER_MS, type StudyStatus } from './study';
-import { ANSWER_MAX, CHAIN_MAX } from './parlor';
 import { TABLE_GAMES, type Table, type TableError, type TableKind } from './tables';
 import type { RoomRules } from './rooms';
 import { STAGE_KINDS, STAGE_LIMITS, type StageState } from './stage';
@@ -90,17 +89,6 @@ const tableAction = z.discriminatedUnion('a', [
   z.object({ a: z.literal('hold') }),
   z.object({ a: z.literal('guess'), n: z.number().int().min(0).max(1000) }),
   z.object({ a: z.literal('nudge') }),
-  z.object({ a: z.literal('bestOf'), n: z.number().int().min(1).max(9) }),
-  z.object({ a: z.literal('pick'), choice: z.string().min(1).max(16) }),
-  z.object({ a: z.literal('cell'), i: z.number().int().min(0).max(8) }),
-  z.object({
-    a: z.literal('word'),
-    text: z
-      .string()
-      .min(1)
-      .max(CHAIN_MAX + 4),
-  }),
-  z.object({ a: z.literal('answer'), text: z.string().min(1).max(ANSWER_MAX) }),
 ]);
 const tuneId = z.string().min(1).max(32);
 
@@ -269,7 +257,7 @@ export type ServerMessage =
       presenter?: boolean;
     }
   /** The conference hall's big screen changed; `now` is the server's clock, to keep in step. */
-  | { t: 'staged'; stage: StageState | null; now: number; presenter?: boolean }
+  | { t: 'staged'; stage: StageState | null; now: number }
   | { t: 'lamped'; index: number; flipped: boolean }
   /** The room grew: another renovation strip (a desk for two) opened. */
   | { t: 'grew'; opened: number }

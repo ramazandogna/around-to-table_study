@@ -16,5 +16,4 @@ export * from './tables';
 export * from './time';
 export * from './world';
 export * from './profanity';
-export * from './parlor';
 export * from './stage';
