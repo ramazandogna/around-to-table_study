@@ -103,3 +103,7 @@ Folding Turkish letters to plain ones (ı→i, ö→o) is what lets the swear fi
 ## A copied record must carry all of its parts
 
 The table logic copied `{ table, secret }` for each move; the new hidden picks of the quick games were dropped on every move until the copy carried them too.
+
+## A rule only the screen enforces is not a rule
+
+Round F stopped people from presenting off the stage, but anyone could still walk up and stand there. A place that belongs to someone is closed in the shared grid, so the client's routes and the server's move check say the same thing; the client only explains it.

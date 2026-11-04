@@ -271,3 +271,22 @@ describe('the smoking room games', () => {
     }
   });
 });
+
+describe('the conference stage', () => {
+  const open = createAreaGrid('conference');
+  const closed = open.withStageClosed(true);
+
+  it('is closed to everyone but the host of the event on now', () => {
+    expect(open.isWalkable({ x: 12, y: 2 })).toBe(true);
+    expect(closed.isWalkable({ x: 12, y: 2 })).toBe(false);
+    expect(closed.blockReason({ x: 12, y: 2 })).toBe('stage');
+    expect(findPath(closed, { x: 14, y: 14 }, { x: 12, y: 2 })).toBeNull();
+    expect(findPath(open, { x: 14, y: 14 }, { x: 12, y: 2 })).not.toBeNull();
+  });
+
+  it('still lets the audience cross the hall, round the stage rather than over it', () => {
+    const path = findPath(closed, { x: 2, y: 2 }, { x: 27, y: 2 }) ?? [];
+    expect(path.length).toBeGreaterThan(0);
+    expect(path.some((p) => closed.isStage(p))).toBe(false);
+  });
+});

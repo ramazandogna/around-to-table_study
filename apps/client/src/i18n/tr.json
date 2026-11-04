@@ -987,5 +987,7 @@
   "daily.found": "{of} keşiften {n} tanesi",
   "daily.found.hint": "Binada bulduğun tablolar ve kitap anları",
   "notice.daily_done": "görev tamam: {name} ✅",
-  "music.borrowed.short": "sigara odası müziği"
+  "music.borrowed.short": "sigara odası müziği",
+  "blocked.stage": "sahne yalnızca şu anki etkinliğin sahibine açık.",
+  "tip.stage": "Sahne · etkinlik sahibine"
 }

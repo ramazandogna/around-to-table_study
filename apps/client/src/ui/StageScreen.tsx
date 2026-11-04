@@ -1,5 +1,4 @@
 import {
-  conferenceRole,
   guessStageKind,
   STAGE_KINDS,
   STAGE_LIMITS,
@@ -10,7 +9,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { unlockAudio } from '../audio/sound';
 import { t } from '../i18n/t';
-import { useGameStore } from '../state/store';
+import { presentingNow, useGameStore } from '../state/store';
 import { quadTransform, stageView, type ScreenQuad } from '../world/stageView';
 import { loadYouTube, type YTPlayer } from './youtube';
 
@@ -25,7 +24,7 @@ const PLAYING = 1;
 
 /** The room's moment in the video or sound, on this screen's clock. */
 function roomSeconds(stage: StageState): number {
-  return stagePosition(stage, Date.now() + useGameStore.getState().stageClockOffset);
+  return stagePosition(stage, Date.now() + useGameStore.getState().clockOffset);
 }
 
 /**
@@ -54,15 +53,15 @@ export function StageScreen() {
  * checks again on every change of the screen).
  */
 function usePresenter(): boolean {
-  const told = useGameStore((s) => s.presenter);
-  const proposed = useGameStore((s) => s.proposed);
-  const id = useGameStore((s) => s.session?.id ?? '');
+  // Re-read when the server says so, when the events change, and each half minute.
+  useGameStore((s) => s.presenter);
+  useGameStore((s) => s.proposed);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-  return told || conferenceRole(id, proposed, now, { open: false }) === 'presenter';
+  return presentingNow(useGameStore.getState(), now);
 }
 
 function Screen({ stage }: { stage: StageState }) {

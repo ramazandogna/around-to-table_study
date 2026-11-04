@@ -341,3 +341,8 @@ Hovering something that moves gives the game's soft footstep and a click gives a
 - **Membership:** open clubs are joined with a tap; others by request, accepted by the owner or a moderator. Leaving is always one tap. A member count and the badges of the club's members on its card.
 - **Club rooms and events:** a club can hold a private room (the existing room sizes) that only members enter, and propose events in the calendar under the club's name (the same approval as other events). A club tag by the name, shown to friends and in the people list.
 - **Moderation:** owners and moderators can remove members; admins can close a club; reports go to the existing admin inbox; the room rules (no phone, no games…) apply to club rooms as to any room.
+
+## Round H: the stage belongs to the event's host
+
+- **Only the host of the approved event on now may step onto the stage** (from 15 minutes before it until it ends), and admins. Everyone else can come into the conference hall, sit and listen, but the stage is closed to them like a wall: tapping it explains why, walking routes go round it, and the server refuses a move onto it (it asks the social hub again for that step, so a host whose event has just begun can go up without coming back in). A local server with no access password still lets everyone up, for testing.
+- **Table game turns count on the server's clock.** Every room's welcome carries the server's time; the client keeps the difference and the turn countdown uses it, so a phone whose clock is off no longer shows a wrong or empty countdown.

@@ -262,8 +262,9 @@ export type ServerMessage =
       opened: number;
       /** Library lamps someone switched against the house rule (by index). */
       lamps: number[];
-      /** In the conference hall: what is on the big screen, and the server's clock now. */
+      /** In the conference hall: what is on the big screen. */
       stage?: StageState | null;
+      /** The server's clock now, so timers (table turns, the stage) count on the same clock. */
       now?: number;
       /** In the conference hall: whether this person may present. */
       presenter?: boolean;

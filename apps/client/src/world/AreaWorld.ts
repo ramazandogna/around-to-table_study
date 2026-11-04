@@ -35,7 +35,13 @@ import { TOPICS } from '../content/topics';
 import { t, type MessageKey } from '../i18n/t';
 import { AreaConnection } from '../net/AreaConnection';
 import { isMuted, mayRing } from '../net/social';
-import { studyStatus, useGameStore, type ConfirmChoice, type RunningBlock } from '../state/store';
+import {
+  presentingNow,
+  studyStatus,
+  useGameStore,
+  type ConfirmChoice,
+  type RunningBlock,
+} from '../state/store';
 import { Avatar, type AvatarContext, type FloorPoint } from './Avatar';
 import { DAYLIGHT } from './ambience';
 import {
@@ -77,6 +83,7 @@ const DETAIL_EVERY_SECONDS = 0.3;
 const BLOCK_MESSAGES: Partial<Record<BlockReason, MessageKey>> = {
   renovation: 'blocked.renovation',
   elevator: 'blocked.elevator',
+  stage: 'blocked.stage',
 };
 const BLOCK_MESSAGE_COOLDOWN_MS = 2500;
 const CAMERA_LERP = 0.12;
@@ -286,7 +293,7 @@ export class AreaWorld {
       seats: (tile) => this.grid.seatAt(tile),
       props: createTableProps(assets.furniture),
       // Only the player steers with keys: someone else's seat is as good as a wall.
-      walkable: (tile) => this.grid.isWalkable(tile) && !this.seatTaken(tile),
+      walkable: (tile) => this.walkGrid().isWalkable(tile) && !this.seatTaken(tile),
     };
     this.petContext = { walkable: (tile) => this.grid.isWalkable(tile) };
     // The player's own look and status live in the store; the world shows them and the server shares them.
@@ -633,6 +640,7 @@ export class AreaWorld {
         this.lampFlips.clear();
         for (const index of message.lamps ?? []) this.lampFlips.set(index, performance.now());
         this.applyLamps();
+        store.setClock(message.now);
         if (this.areaId === 'conference') {
           store.setStage(message.stage ?? null, message.now, message.presenter ?? false);
           this.built?.stage?.setLit(!!message.stage);
@@ -2097,9 +2105,9 @@ export class AreaWorld {
   /** The cursor for a tile that does more than walking; null for plain floor. */
   private cursorKind(tile: Point): CursorKind | null {
     if (this.grid.doorTarget(tile)) return 'door';
-    const block = this.grid.blockReason(tile);
+    const block = this.walkGrid().blockReason(tile);
     if (block === 'elevator') return 'door';
-    if (block === 'renovation') return 'closed';
+    if (block === 'renovation' || block === 'stage') return 'closed';
     const c = this.grid.tileAt(tile);
     if (c === TILE.noticeBoard || c === TILE.receptionDesk) return 'read';
     if (this.grid.isSeat(tile)) {
@@ -2142,8 +2150,9 @@ export class AreaWorld {
     const { tile } = target;
     const to = this.grid.doorTarget(tile);
     if (to) return t('tip.door', { area: t(`area.${to}`) });
-    const block = this.grid.blockReason(tile);
+    const block = this.walkGrid().blockReason(tile);
     if (block === 'renovation') return t('tip.renovation');
+    if (block === 'stage') return t('tip.stage');
     if (block === 'elevator') return t('tip.elevator');
     const c = this.grid.tileAt(tile);
     if (c === TILE.noticeBoard) return t('tip.board');
@@ -2245,7 +2254,7 @@ export class AreaWorld {
       x: Math.floor(player.floorPosition.x + direction.x * 0.75),
       y: Math.floor(player.floorPosition.y + direction.y * 0.75),
     };
-    const reason = this.grid.blockReason(ahead);
+    const reason = this.walkGrid().blockReason(ahead);
     if (reason) this.explainBlock(reason);
     this.pending = null;
     if (this.steerDirection) {
@@ -2266,7 +2275,7 @@ export class AreaWorld {
   private sendSteering(player: Avatar, direction: FloorPoint): void {
     const { x, y } = player.floorPosition;
     const ahead = { x: Math.floor(x + direction.x * 0.9), y: Math.floor(y + direction.y * 0.9) };
-    const target = this.grid.isWalkable(ahead) ? ahead : player.tile;
+    const target = this.walkGrid().isWalkable(ahead) ? ahead : player.tile;
     if (this.steerSent && sameTile(this.steerSent, target)) return;
     this.steerSent = target;
     this.connection?.move(target);
@@ -2274,23 +2283,34 @@ export class AreaWorld {
 
   /** A straight-lined route from where an avatar is to a tile, or null when it cannot get there. */
   private routeFor(avatar: Avatar, goal: Point): FloorPoint[] | null {
-    const path = findPath(this.grid, avatar.tile, goal);
+    // The player keeps off a stage that is not theirs; others go where the server let them.
+    const grid = avatar === this.player ? this.walkGrid() : this.grid;
+    const path = findPath(grid, avatar.tile, goal);
     if (!path) return null;
     // Already on the tile: just finish onto its middle.
     if (path.length === 0) return [{ x: goal.x + 0.5, y: goal.y + 0.5 }];
-    return smoothPath(this.grid, avatar.floorPosition, path);
+    return smoothPath(grid, avatar.floorPosition, path);
+  }
+
+  /**
+   * The room as the player may walk it: in the conference hall the stage is
+   * closed unless they host the event on now (the server checks again).
+   */
+  private walkGrid(): AreaGrid {
+    return this.grid.withStageClosed(this.areaId === 'conference' && !presentingNow());
   }
 
   private walkTo(tile: Point): void {
     const player = this.player;
     if (!player || this.leaving) return;
-    const reason = this.grid.blockReason(tile);
+    const grid = this.walkGrid();
+    const reason = grid.blockReason(tile);
     if (reason && BLOCK_MESSAGES[reason]) {
       this.explainBlock(reason);
       return;
     }
     this.pending = null;
-    const goal = resolveWalkTarget(this.grid, player.tile, tile);
+    const goal = resolveWalkTarget(grid, player.tile, tile);
     if (goal && this.seatTaken(goal)) {
       useGameStore.getState().setNotice('seat_taken');
       return;

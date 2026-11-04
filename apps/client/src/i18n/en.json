@@ -987,5 +987,7 @@
   "daily.found": "found {n} of {of}",
   "daily.found.hint": "Paintings and book moments you have found in the building",
   "notice.daily_done": "task done: {name} ✅",
-  "music.borrowed.short": "smoking room music"
+  "music.borrowed.short": "smoking room music",
+  "blocked.stage": "the stage is for the host of the event on now.",
+  "tip.stage": "Stage · for the event's host"
 }

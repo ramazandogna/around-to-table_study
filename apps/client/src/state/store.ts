@@ -1,4 +1,5 @@
 import {
+  conferenceRole,
   type FoundPerson,
   DM_HISTORY,
   EMPTY_JUKEBOX,
@@ -394,7 +395,7 @@ type GameState = {
    * of this one (to play videos and sounds at the room's moment).
    */
   stage: StageState | null;
-  stageClockOffset: number;
+  clockOffset: number;
   /** In the conference hall: whether this player may present (from the stage). */
   presenter: boolean;
   /** Out of the world, on the character select screen. */
@@ -534,6 +535,8 @@ type GameState = {
   setTableOpen: (open: TableOpen | null) => void;
   setJukebox: (state: JukeboxState) => void;
   setStage: (stage: StageState | null, serverNow?: number, presenter?: boolean) => void;
+  /** The server's clock on joining a room: `clockOffset` is how far ahead of this device it is. */
+  setClock: (serverNow: number | undefined) => void;
   /** Someone pointed at in a crowd's chooser: a ring shows under them. */
   ringFor: string | null;
   setRingFor: (id: string | null) => void;
@@ -650,7 +653,7 @@ export const useGameStore = create<GameState>((set) => ({
   jukebox: EMPTY_JUKEBOX,
   stage: null,
   ringFor: null,
-  stageClockOffset: 0,
+  clockOffset: 0,
   presenter: false,
   lobby: false,
   setLobby: (lobby) => set({ lobby }),
@@ -827,10 +830,13 @@ export const useGameStore = create<GameState>((set) => ({
   setStage: (stage, serverNow, presenter) =>
     set((state) => ({
       stage,
-      stageClockOffset: serverNow === undefined ? state.stageClockOffset : serverNow - Date.now(),
+      clockOffset: serverNow === undefined ? state.clockOffset : serverNow - Date.now(),
       presenter: presenter ?? state.presenter,
     })),
   setRingFor: (ringFor) => set({ ringFor }),
+  setClock: (serverNow) => {
+    if (serverNow !== undefined) set({ clockOffset: serverNow - Date.now() });
+  },
   setStageView: ({ hidden, full }) =>
     set((state) => ({
       stageHidden: hidden ?? state.stageHidden,
@@ -1059,4 +1065,16 @@ export function studyStatus(state: GameState = useGameStore.getState()): StudySt
       : null,
     dnd,
   };
+}
+
+/**
+ * Whether the player may present in the conference hall now: as the server
+ * said on entry, or because their approved event there has just begun (the
+ * server checks again on every step onto the stage and every change of the screen).
+ */
+export function presentingNow(state = useGameStore.getState(), now = Date.now()): boolean {
+  if (state.presenter) return true;
+  return (
+    conferenceRole(state.session?.id ?? '', state.proposed, now, { open: false }) === 'presenter'
+  );
 }

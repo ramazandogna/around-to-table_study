@@ -260,7 +260,9 @@ function Lobby({ kind, table, seated }: { kind: TableKind; table: Table; seated:
 
 /** How long the turn has left; a turn left alone is played for the absent player. */
 function TurnClock({ kind, table, seated }: { kind: TableKind; table: Table; seated: boolean }) {
-  const now = useNow(500);
+  // The turn started on the server's clock, so count on it too (a phone's clock may be off).
+  const offset = useGameStore((s) => s.clockOffset);
+  const now = useNow(500) + offset;
   const left = Math.max(0, table.turnStartedAt + TURN_MS - now);
   const nudged = useRef(0);
   useEffect(() => {

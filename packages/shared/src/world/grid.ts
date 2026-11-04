@@ -4,7 +4,7 @@ import { TILE, isWalkableTile } from './tiles';
 
 export type Point = { x: number; y: number };
 
-export type BlockReason = 'wall' | 'renovation' | 'elevator';
+export type BlockReason = 'wall' | 'renovation' | 'elevator' | 'stage';
 
 /** Somewhere to sit: a chair at a table (for studying) or a sofa (for resting). */
 export type Seat = {
@@ -35,6 +35,11 @@ export class AreaGrid {
     readonly area: AreaDefinition,
     /** How many strips of the renovation have opened so far. */
     readonly opened = 0,
+    /**
+     * The conference hall's stage is closed to this person: only the host of
+     * the approved event on now (and admins) may step onto it.
+     */
+    readonly stageClosed = false,
   ) {
     this.height = area.layout.length;
     this.width = area.layout[0]?.length ?? 0;
@@ -57,7 +62,13 @@ export class AreaGrid {
     const tile = this.tileAt(p);
     if (tile === TILE.elevator) return 'elevator';
     if (this.isLockedRenovation(p)) return 'renovation';
+    if (this.stageClosed && (tile === TILE.stage || tile === TILE.microphone)) return 'stage';
     return isWalkableTile(tile) ? null : 'wall';
+  }
+
+  /** The same room with the stage closed (or open) to the person walking. */
+  withStageClosed(closed: boolean): AreaGrid {
+    return closed === this.stageClosed ? this : new AreaGrid(this.area, this.opened, closed);
   }
 
   isWalkable(p: Point): boolean {

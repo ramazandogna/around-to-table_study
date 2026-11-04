@@ -200,7 +200,9 @@ export class AreaRoom extends DurableObject<Env> {
     this.flippedLamps ??= new Set((await this.ctx.storage.get<number[]>(LAMPS_KEY)) ?? []);
     await this.loadPlay();
     // Who presents changes as events start and end, so it is asked again at each change of the screen.
-    if (me.area === 'conference' && message.t.startsWith('stage')) {
+    const toStage =
+      message.t === 'move' && me.area === 'conference' && this.grid(me.area).isStage(message.to);
+    if (me.area === 'conference' && (message.t.startsWith('stage') || toStage)) {
       const { role, until } = await this.env.SOCIAL.getByName('hub').conferenceRole(
         me.id,
         !this.env.ACCESS_PASSWORD,
@@ -425,8 +427,9 @@ export class AreaRoom extends DurableObject<Env> {
           players: this.players(now).filter((p) => p.id !== me.id),
           opened: this.opened ?? 0,
           lamps: [...(this.flippedLamps ?? [])],
+          now,
           ...(me.area === 'conference'
-            ? { stage: this.stage ?? null, now, presenter: !!me.presenter }
+            ? { stage: this.stage ?? null, presenter: !!me.presenter }
             : {}),
         });
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
@@ -449,7 +452,8 @@ export class AreaRoom extends DurableObject<Env> {
         if (!me.joined || !me.tile) return;
         const moves = takeToken(me.moves, now, MOVES_PER_SECOND, 1000);
         if (!moves) return this.send(ws, { t: 'error', code: 'rate_limited' });
-        const grid = this.grid(me.area);
+        // The stage is only for the host of the event on now (see `conferenceRole`).
+        const grid = this.grid(me.area).withStageClosed(me.area === 'conference' && !me.presenter);
         if (grid.isSeat(message.to) && this.seatedBy(message.to, me.id)) {
           this.save(ws, { ...me, moves });
           return this.send(ws, { t: 'error', code: 'seat_taken' });
