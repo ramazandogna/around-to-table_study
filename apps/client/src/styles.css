@@ -5014,3 +5014,51 @@ button:disabled {
     display: inline;
   }
 }
+
+/* ---------- The way in: sign in, the door, somewhere else ---------- */
+
+.gate-panel {
+  max-width: 460px;
+  text-align: center;
+}
+
+.gate-panel .field,
+.gate-panel .panel-actions {
+  text-align: left;
+}
+
+.gate-logo {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto;
+  image-rendering: pixelated;
+}
+
+.google-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  align-self: center;
+  text-decoration: none;
+}
+
+.google-g {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  color: #4285f4;
+  font-family: Arial, sans-serif;
+  font-weight: 700;
+}
+
+.lobby-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

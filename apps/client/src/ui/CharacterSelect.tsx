@@ -1,15 +1,16 @@
-import { earnedBadges, type Profile } from '@att/shared';
+import { earnedBadges } from '@att/shared';
 import { useEffect, useState } from 'react';
 import { t, type MessageKey } from '../i18n/t';
 import {
-  canCreate,
-  createAnother,
   deleteCharacter,
-  listCharacters,
-  MAX_CHARACTERS,
-  switchTo,
-  type Character,
-} from '../net/characters';
+  isError,
+  loadProgress,
+  playingId,
+  setPlayingId,
+  type ServerCharacter,
+} from '../net/account';
+import { enterAs, refreshAccount, signOut } from '../net/enter';
+import { readJson } from '../net/storage';
 import { useGameStore } from '../state/store';
 import {
   currentGoal,
@@ -23,34 +24,40 @@ import {
 import { portrait } from '../world/portrait';
 import { Dialog, Panel } from './Panel';
 
+/** Characters per account (the server holds the same limit). */
+export const MAX_CHARACTERS = 2;
+
 /**
- * Out of the world: the characters this device keeps (up to two), each with
- * what they did in the building. "Join" goes straight back in as the one just
- * played; the other one swaps in (the page starts again); an empty slot makes
- * a new character, and a character can be deleted here for good.
+ * Out of the world: the account's characters (up to two), each with what they
+ * did in the building. Choosing one plays as it (on any device: they live on
+ * the server); an empty slot makes a new one; one can be deleted for good.
  */
 export function CharacterSelect() {
-  const [characters, setCharacters] = useState(listCharacters);
-  const [deleting, setDeleting] = useState<Character | null>(null);
-  const empty = MAX_CHARACTERS - characters.length;
+  const characters = useGameStore((s) => s.characters);
+  const account = useGameStore((s) => s.account);
+  const [deleting, setDeleting] = useState<ServerCharacter | null>(null);
+  const [busy, setBusy] = useState(false);
+  const empty = Math.max(0, MAX_CHARACTERS - characters.length);
+  const live = playingId();
 
-  function enter(character: Character) {
-    if (character.active) useGameStore.getState().setLobby(false);
-    else switchTo(character.id);
+  async function enter(character: ServerCharacter) {
+    if (busy) return;
+    setBusy(true);
+    await enterAs(character);
+    setBusy(false);
   }
 
-  function confirmDelete(character: Character) {
-    deleteCharacter(character.id);
+  async function confirmDelete(character: ServerCharacter) {
     setDeleting(null);
-    const left = listCharacters();
-    if (character.active) {
-      // The live one is gone: play the other one, or make someone new.
-      const other = left[0];
-      if (other) switchTo(other.id);
-      else location.reload();
-      return;
+    const result = await deleteCharacter(character.id);
+    if (isError(result)) return useGameStore.getState().setNotice('offline');
+    if (live === character.id) {
+      // Its progress was in this browser: gone with it.
+      setPlayingId(null);
+      loadProgress(null);
+      useGameStore.setState({ session: null, presence: null });
     }
-    setCharacters(left);
+    await refreshAccount();
   }
 
   return (
@@ -62,7 +69,8 @@ export function CharacterSelect() {
             <CharacterCard
               key={character.id}
               character={character}
-              onEnter={() => enter(character)}
+              active={character.id === live}
+              onEnter={() => void enter(character)}
               onDelete={() => setDeleting(character)}
             />
           ))}
@@ -71,8 +79,7 @@ export function CharacterSelect() {
               <button
                 type="button"
                 className="lobby-new"
-                disabled={!canCreate()}
-                onClick={createAnother}
+                onClick={() => useGameStore.getState().setGate('create')}
               >
                 <span className="lobby-new-plus" aria-hidden>
                   ＋
@@ -82,7 +89,15 @@ export function CharacterSelect() {
             </li>
           ))}
         </ul>
-        <p className="lobby-note">{t('lobby.note', { max: MAX_CHARACTERS })}</p>
+        <div className="lobby-foot">
+          <p className="lobby-note">
+            {t('lobby.signedIn', { email: account?.email ?? '' })} ·{' '}
+            {t('lobby.note', { max: MAX_CHARACTERS })}
+          </p>
+          <button type="button" className="mini-button" onClick={() => void signOut()}>
+            {t('account.signOut')}
+          </button>
+        </div>
       </Panel>
       {deleting && (
         <Dialog>
@@ -95,7 +110,7 @@ export function CharacterSelect() {
               <button
                 type="button"
                 className="panel-ok lobby-delete-confirm"
-                onClick={() => confirmDelete(deleting)}
+                onClick={() => void confirmDelete(deleting)}
               >
                 {t('lobby.delete.confirm')}
               </button>
@@ -109,49 +124,52 @@ export function CharacterSelect() {
 
 function CharacterCard({
   character,
+  active,
   onEnter,
   onDelete,
 }: {
-  character: Character;
+  character: ServerCharacter;
+  active: boolean;
   onEnter: () => void;
   onDelete: () => void;
 }) {
   const [face, setFace] = useState<string | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [now] = useState(() => Date.now());
 
   useEffect(() => {
     let live = true;
     if (character.look) void portrait(character.look).then((url) => live && setFace(url));
-    void fetch(`/api/profile?token=${encodeURIComponent(character.token)}`)
-      .then((response) =>
-        response.ok ? (response.json() as Promise<{ profile?: Profile }>) : null,
-      )
-      .then((body) => live && body?.profile && setProfile(body.profile))
-      .catch(() => {
-        // Offline or an old session: the numbers kept on this device are shown instead.
-      });
     return () => {
       live = false;
     };
-  }, [character]);
+  }, [character.look]);
 
-  const stats = todayStats(now, character.read('att.stats'));
-  const goal = dailyGoal(character.read<{ minutes?: number }>('att.goal')?.minutes);
-  const goals = loadGoals(now, character.read<Goals>('att.goals'));
-  const quest = currentGoal(goals);
+  // The one played in this browser has fresher numbers here than on the server.
+  const read = <T,>(key: string): T | null => {
+    if (active) return readJson<T>(key);
+    const raw = character.save?.[key];
+    try {
+      return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      return null;
+    }
+  };
+  const profile = character.profile;
+  const stats = todayStats(now, read('att.stats'));
+  const goal = dailyGoal(read<{ minutes?: number }>('att.goal')?.minutes);
+  const quest = currentGoal(loadGoals(now, read<Goals>('att.goals')));
   const studied = Math.max(profile?.focusMs ?? 0, stats.totalMs ?? 0);
-  const played = Math.max(profile?.timeMs ?? 0, timePlayed(character.read<number>('att.played')));
+  const played = Math.max(profile?.timeMs ?? 0, timePlayed(read<number>('att.played')));
   const badges = profile ? earnedBadges(profile) : [];
   const share = Math.min(1, stats.focusMs / (goal * 60_000));
 
   return (
-    <li className={`lobby-card${character.active ? ' lobby-card--active' : ''}`}>
+    <li className={`lobby-card${active ? ' lobby-card--active' : ''}`}>
       <div className="lobby-face">
         {face ? <img src={face} alt="" /> : <span aria-hidden>🙂</span>}
       </div>
       <h3 className="lobby-name">{character.name}</h3>
-      {character.active && <p className="lobby-last">{t('lobby.last')}</p>}
+      {active && <p className="lobby-last">{t('lobby.last')}</p>}
       <p className="lobby-badges" aria-label={t('lobby.badges')}>
         {badges.length > 0 ? (
           badges.map((badge) => (
@@ -193,7 +211,7 @@ function CharacterCard({
       )}
       <div className="lobby-actions">
         <button type="button" className="panel-ok lobby-enter" onClick={onEnter}>
-          {t(character.active ? 'lobby.join' : 'lobby.enter')}
+          {t(active ? 'lobby.join' : 'lobby.enter')}
         </button>
         <button type="button" className="panel-button lobby-delete" onClick={onDelete}>
           🗑️ {t('lobby.delete')}

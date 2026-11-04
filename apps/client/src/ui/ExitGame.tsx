@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { Dialog, Panel } from './Panel';
+import { leaveToSelect } from '../net/enter';
 
 /** Seconds before "Exit" can be pressed, so it is never pressed by mistake. */
 const COUNTDOWN = 3;
@@ -42,9 +43,8 @@ function ExitDialog({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   function exit() {
-    const store = useGameStore.getState();
-    store.setPlateOpen(false);
-    store.setLobby(true);
+    useGameStore.getState().setPlateOpen(false);
+    leaveToSelect();
   }
 
   return (

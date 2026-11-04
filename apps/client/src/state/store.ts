@@ -53,14 +53,15 @@ function writeFlag(key: string, on: boolean): void {
     // Remembered for this visit only.
   }
 }
-import {
-  loadLines,
-  loadLook,
-  loadSession,
-  saveLines,
-  saveLook,
-  type GuestSession,
-} from '../net/session';
+import { saveLookOnServer, type AccountInfo, type ServerCharacter } from '../net/account';
+import { loadLines, saveLines, type GuestSession } from '../net/session';
+
+/**
+ * Where the player is before (and around) the game: signing in with Google,
+ * at the door (this deploy's code), choosing a character, in the game, or
+ * sent out because the account opened the game somewhere else.
+ */
+export type Gate = 'loading' | 'signin' | 'door' | 'select' | 'create' | 'game' | 'elsewhere';
 
 export type Notice =
   | 'quest_done'
@@ -457,8 +458,17 @@ type GameState = {
   eventFormOpen: boolean;
   /** Changing rooms: the loader shows while true. */
   loading: boolean;
-  /** The early beta asks for the access password when making a character. */
-  accessRequired: boolean;
+  /** The signed-in account, its characters, and which screen of the way in shows. */
+  account: AccountInfo | null;
+  characters: ServerCharacter[];
+  gate: Gate;
+  /** Why the door shows: the first time, or after a new version came out. */
+  doorReason: 'first' | 'update';
+  /** The account's presence the game token was made for. */
+  presence: string | null;
+  setAccount: (account: AccountInfo | null, characters: ServerCharacter[]) => void;
+  setGate: (gate: Gate, reason?: 'first' | 'update') => void;
+  setPresence: (presence: string | null) => void;
   /**
    * When each of the top panels last came up (the plate, the map, the timer),
    * so the one opened last sits on top of the others on a small screen.
@@ -568,7 +578,6 @@ type GameState = {
   setPeopleOpen: (open: boolean) => void;
   setEventFormOpen: (open: boolean) => void;
   setLoading: (loading: boolean) => void;
-  setAccessRequired: (required: boolean) => void;
   raise: (layer: Layer) => void;
   setStick: (stick: { x: number; y: number } | null) => void;
   setMuted: (muted: boolean) => void;
@@ -612,8 +621,16 @@ type GameState = {
 };
 
 export const useGameStore = create<GameState>((set) => ({
-  session: loadSession(),
-  look: loadLook(),
+  session: null,
+  look: null,
+  account: null,
+  characters: [],
+  gate: 'loading',
+  doorReason: 'first',
+  presence: null,
+  setAccount: (account, characters) => set({ account, characters }),
+  setGate: (gate, reason) => set((state) => ({ gate, doorReason: reason ?? state.doorReason })),
+  setPresence: (presence) => set({ presence }),
   lines: loadLines(),
   area: 'hall',
   connection: null,
@@ -712,7 +729,6 @@ export const useGameStore = create<GameState>((set) => ({
   peopleOpen: false,
   eventFormOpen: false,
   loading: true,
-  accessRequired: false,
   layers: { plate: 0, map: 0, timer: 0 },
   stick: null,
   muted: isMuted(),
@@ -738,10 +754,12 @@ export const useGameStore = create<GameState>((set) => ({
   dnd: false,
   cooldownUntil: {},
   setSession: (session) => set({ session }),
-  setLook: (look) => {
-    saveLook(look);
-    set({ look });
-  },
+  setLook: (look) =>
+    set((state) => {
+      // The character's look is kept on the server, for every device.
+      if (state.session && look) void saveLookOnServer(state.session.id, look);
+      return { look };
+    }),
   // Each room has its own chat and people, so nothing carries over.
   setArea: (area) =>
     set({
@@ -908,7 +926,6 @@ export const useGameStore = create<GameState>((set) => ({
   setPeopleOpen: (peopleOpen) => set({ peopleOpen }),
   setEventFormOpen: (eventFormOpen) => set({ eventFormOpen }),
   setLoading: (loading) => set({ loading }),
-  setAccessRequired: (accessRequired) => set({ accessRequired }),
   setStick: (stick) => set({ stick }),
   raise: (layer) =>
     set((state) => ({

@@ -1,5 +1,5 @@
 import { EMPTY_LINES, normalizeRoomCode } from '@att/shared';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { unlockAudio } from './audio/sound';
 import { t } from './i18n/t';
@@ -30,7 +30,9 @@ import { Notice } from './ui/Notice';
 import { RadialMenu } from './ui/RadialMenu';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
-import { checkAccess, forgetSession } from './net/session';
+import { fetchMe, saveProgress } from './net/account';
+import { explainDisconnect, refreshAccount } from './net/enter';
+import { Door, Elsewhere, SignIn } from './ui/Gate';
 import { startSocial } from './net/social';
 import { EmoteMenu } from './ui/EmoteMenu';
 import { FriendsPanel } from './ui/Friends';
@@ -42,20 +44,38 @@ export function App() {
   const session = useGameStore((s) => s.session);
   const look = useGameStore((s) => s.look);
   const layers = useGameStore((s) => s.layers);
-  const lobby = useGameStore((s) => s.lobby);
+  const gate = useGameStore((s) => s.gate);
+  const characters = useGameStore((s) => s.characters);
+  const connected = useGameStore((s) => s.connected);
+  const lobby = gate !== 'game';
+  const [signInOptions, setSignInOptions] = useState({ google: false, dev: false });
 
-  // The early beta's door: is the password needed, and does the session kept here still open it?
-  // A new password (each deploy) ends old sessions; the character's look stays.
+  // Who is signed in, and whether the door is open: the first screen comes from the server.
   useEffect(() => {
-    void checkAccess(useGameStore.getState().session?.token ?? null).then(({ required, valid }) => {
-      const store = useGameStore.getState();
-      store.setAccessRequired(required);
-      if (store.session && !valid) {
-        forgetSession();
-        store.setSession(null);
-      }
-    });
+    void fetchMe().then((me) => setSignInOptions({ google: !!me?.google, dev: !!me?.devSignIn }));
+    void refreshAccount();
   }, []);
+
+  // Lost the connection: a new version, another tab, or just the network? Asked again
+  // every few seconds while it lasts (during a deploy the server is briefly away).
+  useEffect(() => {
+    if (gate !== 'game' || connected) return;
+    const timer = window.setInterval(() => void explainDisconnect(), 3000);
+    return () => window.clearInterval(timer);
+  }, [gate, connected]);
+
+  // The playing character's progress goes to the server every minute and when the page closes.
+  useEffect(() => {
+    const id = session?.id;
+    if (!id || gate !== 'game') return;
+    const timer = window.setInterval(() => saveProgress(id), 60_000);
+    const leaving = () => saveProgress(id, true);
+    window.addEventListener('pagehide', leaving);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('pagehide', leaving);
+    };
+  }, [session?.id, gate]);
 
   // Friends and presence follow the player across rooms, so they live outside the world.
   // Out on the character select screen the player is out of the building, phone included.
@@ -182,16 +202,24 @@ export function App() {
     };
   }, []);
 
-  // Everyone makes a character first; players from before the creator only pick a look.
-  if (!session || !look) {
+  // The way in: sign in, the door, a character; then the game.
+  if (gate === 'loading') return <main className="gate" />;
+  if (gate === 'signin') return <SignIn google={signInOptions.google} dev={signInOptions.dev} />;
+  if (gate === 'door') return <Door />;
+  if (gate === 'elsewhere') return <Elsewhere />;
+  if (gate === 'create') {
     return (
       <main className="gate">
-        <CharacterCreator mode={session ? 'returning' : 'new'} />
+        <CharacterCreator
+          mode="new"
+          {...(characters.length > 0
+            ? { onClose: () => useGameStore.getState().setGate('select') }
+            : {})}
+        />
       </main>
     );
   }
-
-  if (lobby) return <CharacterSelect />;
+  if (gate === 'select' || !session || !look) return <CharacterSelect />;
 
   return (
     <main className="app">

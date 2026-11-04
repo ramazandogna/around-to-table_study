@@ -7,7 +7,7 @@ import { WorldClock } from './Calendar';
 import { FriendsLink } from './Friends';
 import { InboxLink } from './Inbox';
 import { PhoneLink } from './Phone';
-import { StartOver } from './StartOver';
+import { SignOutLink } from './Gate';
 import { StatusDialog } from './StatusDialog';
 import { ExitGame } from './ExitGame';
 import { GoalsLink, QuestsPanel } from './Goals';
@@ -78,7 +78,7 @@ export function HudPlate() {
         <LanguageToggle />
         <IntroLink />
         <ExitGame />
-        <StartOver />
+        <SignOutLink />
       </nav>
     </header>
   );

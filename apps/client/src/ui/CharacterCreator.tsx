@@ -16,7 +16,8 @@ import {
 import { useState, type FormEvent } from 'react';
 import { FOOTSTEPS, getFootsteps, previewStep, setFootsteps, type Footsteps } from '../audio/sound';
 import { getLanguage, t } from '../i18n/t';
-import { createGuest, type GuestError } from '../net/session';
+import { createCharacter, isError } from '../net/account';
+import { enterAs, refreshAccount } from '../net/enter';
 import { useGameStore } from '../state/store';
 import { CharacterPreview } from './CharacterPreview';
 import { Panel, Stepper, Swatches } from './Panel';
@@ -90,15 +91,17 @@ const ACCESSORY_ICON = {
   glasses: '👓',
 } as const;
 
+/** What can go wrong making a character. */
+const CREATE_ERRORS = ['invalid_name', 'name_taken', 'too_many', 'network'] as const;
+type CreateError = (typeof CREATE_ERRORS)[number];
+
 export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose?: () => void }) {
   const [look, setLook] = useState<Appearance>(
     () => useGameStore.getState().look ?? randomAppearance(),
   );
   const [yaw, setYaw] = useState(0);
   const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  const accessRequired = useGameStore((s) => s.accessRequired);
-  const [error, setError] = useState<GuestError | null>(null);
+  const [error, setError] = useState<CreateError | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('look');
   const [steps, setSteps] = useState<Footsteps>(getFootsteps);
@@ -127,13 +130,21 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
       onClose?.();
       return;
     }
-    if (!normalizeName(name)) return setError('invalid_name');
+    const clean = normalizeName(name);
+    if (!clean) return setError('invalid_name');
     setBusy(true);
-    const result = await createGuest(name, password);
+    const made = await createCharacter(clean, look);
+    if (isError(made)) {
+      setBusy(false);
+      return setError(
+        CREATE_ERRORS.includes(made.error as CreateError) ? (made.error as CreateError) : 'network',
+      );
+    }
+    // Into the game as the new character.
+    await refreshAccount();
+    const character = useGameStore.getState().characters.find((c) => c.id === made.id);
+    if (character) await enterAs(character);
     setBusy(false);
-    if (typeof result === 'string') return setError(result);
-    store.setLook(look);
-    store.setSession(result);
   }
 
   return (
@@ -188,23 +199,6 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                   placeholder={t('gate.placeholder')}
                   onChange={(e) => {
                     setName(e.target.value);
-                    setError(null);
-                  }}
-                />
-              </label>
-            )}
-            {mode === 'new' && accessRequired && (
-              <label className="field">
-                <span className="field-label">🔑 {t('gate.password')}</span>
-                <input
-                  value={password}
-                  maxLength={16}
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  placeholder={t('gate.password.placeholder')}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
                     setError(null);
                   }}
                 />
@@ -404,7 +398,7 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
         {error && <p className="panel-error">{t(`gate.error.${error}`)}</p>}
         {mode === 'new' && <LegalLine />}
         <div className="panel-actions">
-          {mode === 'wardrobe' && (
+          {onClose && (
             <button type="button" className="panel-button" onClick={onClose}>
               {t('creator.cancel')}
             </button>
