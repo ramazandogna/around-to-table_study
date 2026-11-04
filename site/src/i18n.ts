@@ -61,8 +61,9 @@ const en: Copy = {
     soon: 'Coming soon',
     invite: 'The beta is invite-only: ask for this week’s access code.',
   },
-  pillarsTitle: 'Five reasons to come back',
-  pillarsLead: 'Around the Table is a place first and a study tool second.',
+  pillarsTitle: 'A day inside the building',
+  pillarsLead:
+    'Real moments from the game: people meeting in the hall, playing in the smoking room, studying side by side and filling the conference hall.',
   pillars: [
     {
       title: 'A place to meet people',
@@ -70,7 +71,7 @@ const en: Copy = {
     },
     {
       title: 'The smoking room',
-      text: 'The break room where friendships start: chats, darts, dice, a claw machine and a jukebox with cozy music.',
+      text: 'The break room where friendships start: rock-paper-scissors, tic-tac-toe, emoji riddles, darts, dice and a jukebox, with the score kept until someone wins.',
     },
     {
       title: 'Private rooms',
@@ -82,7 +83,7 @@ const en: Copy = {
     },
     {
       title: 'Events',
-      text: 'A weekly meetup and events the community proposes, on one calendar everyone shares.',
+      text: 'A weekly meetup, themed days and talks on the conference hall’s big screen, proposed by the community on one calendar everyone shares.',
     },
   ],
   featuresTitle: 'Made with care',
@@ -112,11 +113,11 @@ const en: Copy = {
       text: 'Mute or block anyone, room owners can send people out, and the library stays quiet.',
     },
   ],
-  shotsTitle: 'Inside the building',
+  shotsTitle: 'New this week',
   shots: [
-    'The library: desks for two, quiet focus',
-    'The smoking room: games, music, conversation',
-    'The entrance hall and the reception',
+    'Quick games: best of five, scores kept to the end',
+    'Today’s goals and quests, filled by your focus time',
+    'Two characters per device, each with their own story',
   ],
   beta: {
     title: 'Test the early beta',
@@ -166,8 +167,9 @@ const tr: Copy = {
     soon: 'Yakında',
     invite: 'Beta davetle: bu haftanın giriş kodunu iste.',
   },
-  pillarsTitle: 'Geri gelmen için beş sebep',
-  pillarsLead: 'Around the Table önce bir mekân, sonra bir çalışma aracı.',
+  pillarsTitle: 'Binada bir gün',
+  pillarsLead:
+    'Oyundan gerçek anlar: holde tanışan, sigara odasında oyun oynayan, yan yana çalışan ve konferans salonunu dolduran insanlar.',
   pillars: [
     {
       title: 'İnsanlarla tanışacağın bir yer',
@@ -175,7 +177,7 @@ const tr: Copy = {
     },
     {
       title: 'Sigara odası',
-      text: 'Arkadaşlıkların başladığı mola odası: sohbet, dart, zar, pençeli makine ve sakin müzik çalan bir müzik kutusu.',
+      text: 'Arkadaşlıkların başladığı mola odası: taş-kâğıt-makas, XOX, emoji bilmece, dart, zar ve müzik kutusu; biri kazanana kadar skor tutulur.',
     },
     {
       title: 'Özel odalar',
@@ -187,7 +189,7 @@ const tr: Copy = {
     },
     {
       title: 'Etkinlikler',
-      text: 'Haftalık buluşma ve topluluğun önerdiği etkinlikler, herkesin paylaştığı tek bir takvimde.',
+      text: 'Haftalık buluşma, temalı günler ve konferans salonunun büyük ekranında sunumlar; topluluk önerir, herkes aynı takvimi paylaşır.',
     },
   ],
   featuresTitle: 'Özenle yapıldı',
@@ -217,11 +219,11 @@ const tr: Copy = {
       text: 'İstediğini sessize al ya da engelle; oda sahipleri birini çıkarabilir; kütüphane sessiz kalır.',
     },
   ],
-  shotsTitle: 'Binanın içinden',
+  shotsTitle: 'Bu hafta yeni',
   shots: [
-    'Kütüphane: iki kişilik masalar, sessiz odak',
-    'Sigara odası: oyunlar, müzik, sohbet',
-    'Giriş holü ve resepsiyon',
+    'Hızlı oyunlar: 5’te en iyi, skor sonuna kadar',
+    'Bugünün hedefleri ve görevleri, odak sürenle dolar',
+    'Bir cihazda iki karakter, her birinin kendi hikâyesi',
   ],
   beta: {
     title: 'Erken betayı test et',
@@ -264,8 +266,8 @@ const zh: Copy = {
     soon: '即将推出',
     invite: '测试仅限受邀：请索取本周的访问码。',
   },
-  pillarsTitle: '让你想回来的五个理由',
-  pillarsLead: 'Around the Table 首先是一个地方，其次才是学习工具。',
+  pillarsTitle: '楼里的一天',
+  pillarsLead: '来自游戏的真实瞬间：在大厅相识、在吸烟室玩游戏、并肩学习、坐满会议厅。',
   pillars: [
     {
       title: '认识新朋友的地方',
@@ -273,7 +275,7 @@ const zh: Copy = {
     },
     {
       title: '吸烟室',
-      text: '友谊开始的休息室：聊天、飞镖、骰子、抓娃娃机，还有播放舒缓音乐的点唱机。',
+      text: '友谊开始的休息室：石头剪刀布、井字棋、表情猜谜、飞镖、骰子和点唱机，比分一直记到有人获胜。',
     },
     {
       title: '私人房间',
@@ -285,7 +287,7 @@ const zh: Copy = {
     },
     {
       title: '活动',
-      text: '每周聚会，以及社区提议的活动，都在一个大家共享的日历上。',
+      text: '每周聚会、主题日，以及会议厅大屏幕上的分享，由社区提议，放在一个大家共享的日历上。',
     },
   ],
   featuresTitle: '用心打造',
@@ -315,8 +317,12 @@ const zh: Copy = {
       text: '可以静音或屏蔽任何人，房主可以请人离开，图书馆始终保持安静。',
     },
   ],
-  shotsTitle: '楼里的样子',
-  shots: ['图书馆：双人书桌，安静专注', '吸烟室：游戏、音乐、聊天', '入口大厅和前台'],
+  shotsTitle: '本周新增',
+  shots: [
+    '小游戏：五局三胜，比分记到最后',
+    '今天的目标和任务，用专注时间填满',
+    '一台设备两个角色，各有各的故事',
+  ],
   beta: {
     title: '参加抢先测试',
     lead: 'Around the Table 还很年轻，每周都在变化。来玩、来找问题，告诉我们你的想法。',
@@ -356,8 +362,9 @@ const ja: Copy = {
     soon: '近日公開',
     invite: 'ベータは招待制です。今週のアクセスコードをお問い合わせください。',
   },
-  pillarsTitle: 'また来たくなる五つの理由',
-  pillarsLead: 'Around the Table は、まず「場所」であり、勉強のための道具はその次です。',
+  pillarsTitle: '建物の一日',
+  pillarsLead:
+    'ゲームの中の本当の瞬間：ホールで出会い、喫煙室で遊び、並んで勉強し、会議ホールを満たす人たち。',
   pillars: [
     {
       title: '人と出会える場所',
@@ -365,7 +372,7 @@ const ja: Copy = {
     },
     {
       title: '喫煙室',
-      text: '友情が始まる休憩室。おしゃべり、ダーツ、サイコロ、クレーンゲーム、そして落ち着いた音楽のジュークボックス。',
+      text: '友情が始まる休憩室。じゃんけん、三目並べ、絵文字なぞなぞ、ダーツ、サイコロ、ジュークボックス。勝者が決まるまでスコアを記録。',
     },
     {
       title: 'プライベートルーム',
@@ -377,7 +384,7 @@ const ja: Copy = {
     },
     {
       title: 'イベント',
-      text: '毎週のミートアップと、コミュニティが提案するイベント。みんなで共有するひとつのカレンダーに。',
+      text: '毎週のミートアップ、テーマの日、会議ホールの大画面での発表。コミュニティが提案し、みんなで共有するひとつのカレンダーに。',
     },
   ],
   featuresTitle: 'ていねいに作っています',
@@ -407,11 +414,11 @@ const ja: Copy = {
       text: '誰でもミュートやブロックができ、部屋のオーナーは退出させることも。図書館はいつも静かです。',
     },
   ],
-  shotsTitle: '建物のなか',
+  shotsTitle: '今週の新機能',
   shots: [
-    '図書館：二人用の机と静かな集中',
-    '喫煙室：ゲーム、音楽、おしゃべり',
-    'エントランスホールと受付',
+    'ミニゲーム：5本勝負、最後までスコアを記録',
+    '今日の目標とクエスト、集中した時間で埋まる',
+    '1台に2人のキャラクター、それぞれの物語',
   ],
   beta: {
     title: 'アーリーベータに参加する',
