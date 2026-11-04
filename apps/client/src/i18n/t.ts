@@ -10,17 +10,15 @@ export type Language = (typeof LANGUAGES)[number];
 const CATALOGS: Record<Language, Record<string, string>> = { en, tr };
 const KEY = 'att.language';
 
-/** The saved choice, else Turkish on a Turkish device, else English. */
+/** The saved choice, else English: Turkish only when the player picks it. */
 function startLanguage(): Language {
   try {
     const saved = localStorage.getItem(KEY);
     if (LANGUAGES.includes(saved as Language)) return saved as Language;
   } catch {
-    // No storage: go by the device.
+    // No storage: English.
   }
-  return typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('tr')
-    ? 'tr'
-    : 'en';
+  return 'en';
 }
 
 let language: Language = startLanguage();
