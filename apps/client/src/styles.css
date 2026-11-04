@@ -27,6 +27,11 @@
   box-sizing: border-box;
 }
 
+/* A class that sets \`display\` would otherwise beat the hidden attribute (the 📳 by every name). */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #root {
@@ -3857,7 +3862,7 @@ button:disabled {
   position: fixed;
   left: 50%;
   bottom: calc(max(12px, env(safe-area-inset-bottom)) + 120px);
-  z-index: 6;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -4021,7 +4026,7 @@ button:disabled {
   position: fixed;
   left: max(12px, env(safe-area-inset-left));
   bottom: calc(max(12px, env(safe-area-inset-bottom)) + 96px);
-  z-index: 6;
+  z-index: 4;
   padding: 6px 10px;
   border: 3px solid var(--panel-edge);
   border-radius: 8px;
@@ -4493,4 +4498,519 @@ button:disabled {
   border-radius: 50%;
   background: var(--panel-well);
   box-shadow: inset 0 0 0 2px var(--panel-edge-mid);
+}
+
+/* ---------- Character select (out of the world) ---------- */
+
+.lobby-panel {
+  max-width: 720px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.lobby-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lobby-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 12px 12px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  text-align: center;
+}
+
+.lobby-card--active {
+  border-color: var(--panel-ok);
+  box-shadow: 0 0 0 2px rgb(63 127 31 / 0.25);
+}
+
+.lobby-card--empty {
+  justify-content: center;
+  min-height: 220px;
+  border-style: dashed;
+  background: transparent;
+}
+
+.lobby-face {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  overflow: hidden;
+  border: 3px solid var(--panel-edge);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #fff3d6, var(--panel-face));
+  font-size: 40px;
+}
+
+.lobby-face img {
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
+}
+
+.lobby-name {
+  margin: 2px 0 0;
+  font-size: 20px;
+}
+
+.lobby-last {
+  margin: 0;
+  color: var(--panel-ok);
+  font-size: 12px;
+}
+
+.lobby-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  min-height: 22px;
+  margin: 0;
+  font-size: 18px;
+}
+
+.lobby-muted {
+  color: var(--panel-ink-soft);
+  font-size: 12px;
+}
+
+.lobby-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  width: 100%;
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.lobby-stats div {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--panel-face);
+}
+
+.lobby-stats dt {
+  color: var(--panel-ink-soft);
+}
+
+.lobby-stats dd {
+  margin: 0;
+  font-size: 15px;
+}
+
+.lobby-goal {
+  width: 100%;
+  flex: none;
+}
+
+.lobby-quest {
+  margin: 0;
+  font-size: 12px;
+}
+
+.lobby-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.lobby-enter {
+  flex: 1;
+}
+
+.lobby-delete {
+  flex: none;
+  font-size: 12px;
+}
+
+.lobby-new {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.lobby-new:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.lobby-new-plus {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 3px dashed var(--panel-edge-mid);
+  border-radius: 50%;
+  color: var(--panel-face);
+  font-size: 30px;
+}
+
+.lobby-note {
+  margin: 0;
+  color: var(--panel-ink-soft);
+  font-size: 12px;
+}
+
+.exit-confirm:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* ---------- Goals and the quests list by the map ---------- */
+
+.goals-panel {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.goals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--panel-ink);
+}
+
+.goals-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--panel-well);
+}
+
+.goals-name {
+  flex: 1;
+}
+
+.goals-remove {
+  border: 0;
+  background: none;
+  color: var(--panel-ink-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.quests {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 230px;
+  padding: 6px 8px;
+  color: var(--panel-ink);
+  pointer-events: auto;
+}
+
+.quests-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.quests-count {
+  color: var(--panel-ok);
+}
+
+.quests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quest {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: var(--panel-well);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quest--now {
+  border-color: var(--panel-select);
+}
+
+.quest--done {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.quest .goal-track {
+  flex: 1 0 100%;
+}
+
+.quest-time {
+  color: var(--panel-ink-soft);
+}
+
+.quests-add {
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--panel-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.quests-fold {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-end;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 6px;
+  background: var(--panel-face);
+  color: var(--panel-ink);
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+@media (max-width: 700px) {
+  .quests {
+    max-width: 200px;
+  }
+
+  .lobby-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Quick games at the round table ---------- */
+
+.table-group {
+  margin: 4px 0 0;
+  color: var(--panel-ink-soft);
+  font-size: 13px;
+}
+
+.parlor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.parlor-round {
+  margin: 0;
+  color: var(--panel-ink-soft);
+  font-size: 12px;
+}
+
+.parlor-prompt {
+  padding: 8px 16px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font-size: 28px;
+  text-align: center;
+}
+
+.parlor-prompt--emoji {
+  font-size: 44px;
+  letter-spacing: 6px;
+}
+
+.parlor-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+}
+
+.parlor-reveal b {
+  flex-basis: 100%;
+  text-align: center;
+}
+
+.parlor-choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.parlor-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 84px;
+  padding: 8px 10px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.parlor-choice span {
+  font-size: 30px;
+}
+
+.parlor-choice:hover {
+  background: var(--panel-well-hover);
+}
+
+.parlor-words {
+  margin: 0;
+  color: var(--panel-ink);
+  text-align: center;
+  word-break: break-word;
+}
+
+.ttt-board {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  gap: 4px;
+}
+
+.ttt-cell {
+  width: 64px;
+  height: 64px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 30px;
+  cursor: pointer;
+}
+
+.ttt-cell--x {
+  color: #c4372a;
+}
+
+.ttt-cell--o {
+  color: #2f5fb0;
+}
+
+.ttt-cell:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+/* ---------- The smoking room's music, heard softly in the hall and the conference hall ---------- */
+
+.music-note {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 180px);
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: rgb(20 12 6 / 0.62);
+  color: var(--color-text);
+  font-size: 12px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.music-note-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-note-tap,
+.music-note-off {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.12);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.quests-daily {
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--panel-edge-mid);
+}
+
+.daily {
+  font-size: 12px;
+}
+
+.daily--done {
+  color: var(--panel-ink-soft);
+  text-decoration: line-through;
+}
+
+.quests-found {
+  margin: 0;
+  color: var(--panel-ink-soft);
+  font-size: 12px;
+}
+
+.music-note-text--short {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .music-note-text--long {
+    display: none;
+  }
+
+  .music-note-text--short {
+    display: inline;
+  }
 }

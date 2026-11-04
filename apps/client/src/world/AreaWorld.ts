@@ -1,5 +1,4 @@
 import {
-  conferenceRole,
   type Emote,
   AREA_RULES,
   EVENT_THEMES,
@@ -715,7 +714,7 @@ export class AreaWorld {
         store.setJukebox(message.state);
         break;
       case 'staged':
-        store.setStage(message.stage, message.now);
+        store.setStage(message.stage, message.now, message.presenter);
         this.built?.stage?.setLit(!!message.stage);
         break;
       case 'status':
@@ -862,6 +861,7 @@ export class AreaWorld {
     });
     if (this.staff) {
       this.view.add(this.staff.avatar.root);
+      this.view.add(this.staff.props);
       return;
     }
     this.deskSign = closedSign(this.grid, t('staff.closed'));
@@ -2361,25 +2361,9 @@ export class AreaWorld {
     }
   }
 
-  /**
-   * Whether the player may go into the conference hall now: around an event
-   * held there, or always for admins and on a local server. The server checks again.
-   */
-  private conferenceOpen(): boolean {
-    const store = useGameStore.getState();
-    const open = import.meta.env.DEV || store.role === 'admin';
-    return conferenceRole(store.session?.id ?? '', store.proposed, Date.now(), { open }) !== null;
-  }
-
   private checkDoor(tile: Point): void {
     const to = this.grid.doorTarget(tile);
     if (!to) return;
-    if (to === 'conference' && !this.conferenceOpen()) {
-      this.player?.halt();
-      useGameStore.getState().setNotice('conference_closed');
-      this.stepBackFrom(tile);
-      return;
-    }
     // A study timer belongs to the library, so leaving it asks first.
     if (this.areaId === 'library' && this.timerRunning()) {
       this.heldKeys.clear();
@@ -2454,10 +2438,6 @@ export class AreaWorld {
     store.setTravel(null);
     const player = this.player;
     if (!player || this.leaving || to === this.areaId || isRoomArea(to)) return;
-    if (to === 'conference' && !this.conferenceOpen()) {
-      store.setNotice('conference_closed');
-      return;
-    }
     const from = this.areaId === 'hall' || to === 'hall' ? this.areaId : 'hall';
     this.leaveSeat(player, () => this.goThrough(to, from));
   }

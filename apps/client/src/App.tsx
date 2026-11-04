@@ -21,6 +21,9 @@ import { InviteToast, RoomAdmin, RoomChip, RoomsPanel } from './ui/Rooms';
 import { NoticeBoard } from './ui/NoticeBoard';
 import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
+import { CharacterSelect, goalName } from './ui/CharacterSelect';
+import { GoalsDialog } from './ui/Goals';
+import { addTimePlayed, loadGoals, onFocus, onGoalTime } from './state/stats';
 import { HudPlate, MapCorner } from './ui/Hud';
 import { Intro } from './ui/Intro';
 import { Notice } from './ui/Notice';
@@ -39,6 +42,7 @@ export function App() {
   const session = useGameStore((s) => s.session);
   const look = useGameStore((s) => s.look);
   const layers = useGameStore((s) => s.layers);
+  const lobby = useGameStore((s) => s.lobby);
 
   // The early beta's door: is the password needed, and does the session kept here still open it?
   // A new password (each deploy) ends old sessions; the character's look stays.
@@ -54,7 +58,75 @@ export function App() {
   }, []);
 
   // Friends and presence follow the player across rooms, so they live outside the world.
-  useEffect(() => (session && look ? startSocial(session) : undefined), [session, look]);
+  // Out on the character select screen the player is out of the building, phone included.
+  useEffect(
+    () => (session && look && !lobby ? startSocial(session) : undefined),
+    [session, look, lobby],
+  );
+
+  // Time in the world, kept per character for the character select screen.
+  useEffect(() => {
+    if (!session || !look || lobby) return;
+    let last = Date.now();
+    const count = () => {
+      const now = Date.now();
+      addTimePlayed(now - last);
+      last = now;
+    };
+    const timer = window.setInterval(count, 60_000);
+    return () => {
+      window.clearInterval(timer);
+      count();
+    };
+  }, [session, look, lobby]);
+
+  // Today's small tasks tick themselves off as the player goes about the building.
+  useEffect(() => {
+    const store = useGameStore;
+    const offFocus = onFocus(() => store.getState().markDaily('study'));
+    const off = store.subscribe((now, before) => {
+      const mark = now.markDaily;
+      if (now.area !== before.area && (now.area === 'smoking' || now.area === 'conference')) {
+        mark(now.area);
+      }
+      const found = now.discovery;
+      if (found && found !== before.discovery) {
+        if (found.kind === 'painting' || found.kind === 'shelf' || found.kind === 'lost') {
+          mark(found.kind);
+        }
+        if (found.kind === 'painting') now.addFound(`painting:${found.index}`);
+        if (found.kind === 'shelf') now.addFound(`shelf:${found.index}:${found.pick}`);
+      }
+      if (now.dancing && !before.dancing) mark('dance');
+      const me = now.session?.id;
+      if (now.tables !== before.tables && me) {
+        const playing = Object.values(now.tables).some(
+          (table) => table?.phase === 'playing' && table.players.some((p) => p.id === me),
+        );
+        if (playing) mark('game');
+      }
+      const said = now.chatLog[now.chatLog.length - 1];
+      if (said !== before.chatLog[before.chatLog.length - 1] && said?.self && said.kind === 'say') {
+        mark('chat');
+      }
+    });
+    return () => {
+      off();
+      offFocus();
+    };
+  }, []);
+
+  // A goal filled by focus time gets a cheer.
+  useEffect(
+    () =>
+      onGoalTime((finished) => {
+        const store = useGameStore.getState();
+        store.setGoals(loadGoals());
+        const goal = finished[0];
+        if (goal) store.setNotice('quest_done', goalName(goal));
+      }),
+    [],
+  );
 
   // A link to a private room (…/?room=ABC123) opens the reception with its code filled in.
   useEffect(() => {
@@ -119,6 +191,8 @@ export function App() {
     );
   }
 
+  if (lobby) return <CharacterSelect />;
+
   return (
     <main className="app">
       <WorldCanvas />
@@ -163,6 +237,7 @@ export function App() {
       </footer>
       <SitDialog />
       <ConfirmDialog />
+      <GoalsDialog />
       <Intro />
       <Loader />
     </main>
