@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanStage,
+  conferenceEnd,
   conferenceRole,
   controlStage,
   DECOR_LEAD_MS,
@@ -124,26 +125,34 @@ describe('conferenceRole', () => {
     status: 'approved' as const,
   };
 
-  it('is closed with no event, and open to everyone on a local server', () => {
-    expect(conferenceRole('x', [], start, { open: false })).toBeNull();
+  it('lets everyone in; with no event only a local server presents', () => {
+    expect(conferenceRole('x', [], start, { open: false })).toBe('audience');
     expect(conferenceRole('x', [], start, { open: true })).toBe('presenter');
   });
 
-  it('opens around an approved event: its proposer presents, the rest watch', () => {
-    expect(conferenceRole('host', [event], start - DECOR_LEAD_MS - 1, { open: false })).toBeNull();
+  it('makes the proposer of an approved event the presenter around it', () => {
+    expect(conferenceRole('host', [event], start - DECOR_LEAD_MS - 1, { open: false })).toBe(
+      'audience',
+    );
     expect(conferenceRole('host', [event], start - DECOR_LEAD_MS, { open: false })).toBe(
       'presenter',
     );
     expect(conferenceRole('guest', [event], start + 1, { open: false })).toBe('audience');
-    expect(conferenceRole('guest', [event], start + 60 * 60_000, { open: false })).toBeNull();
+    expect(conferenceRole('host', [event], start + 60 * 60_000, { open: false })).toBe('audience');
   });
 
   it('ignores events still waiting and events in other rooms', () => {
-    expect(
-      conferenceRole('host', [{ ...event, status: 'pending' }], start, { open: false }),
-    ).toBeNull();
-    expect(
-      conferenceRole('host', [{ ...event, area: 'smoking' }], start, { open: false }),
-    ).toBeNull();
+    expect(conferenceRole('host', [{ ...event, status: 'pending' }], start, { open: false })).toBe(
+      'audience',
+    );
+    expect(conferenceRole('host', [{ ...event, area: 'smoking' }], start, { open: false })).toBe(
+      'audience',
+    );
+  });
+
+  it('says when the screen comes down: at the end of the live event', () => {
+    expect(conferenceEnd([], start)).toBeNull();
+    expect(conferenceEnd([event], start + 1)).toBe(start + 60 * 60_000);
+    expect(conferenceEnd([event], start + 60 * 60_000)).toBeNull();
   });
 });

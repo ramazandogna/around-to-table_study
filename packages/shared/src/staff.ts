@@ -3,11 +3,12 @@ import type { AreaId } from './world';
 /**
  * The people who work in the building. Each desk has its shifts, and who sits
  * behind it follows the hour on the viewer's own clock: the morning librarian
- * greets someone studying in their morning, wherever they are. At night the
- * library has nobody at the desk; the reception always has someone.
+ * greets someone studying in their morning, wherever they are. Both desks
+ * always have someone: at night a sleepy librarian keeps the library open.
  */
 
-export type StaffId = 'librarianDay' | 'librarianEvening' | 'receptionDay' | 'receptionNight';
+export type StaffId =
+  'librarianDay' | 'librarianEvening' | 'librarianNight' | 'receptionDay' | 'receptionNight';
 
 export type Shift = {
   staff: StaffId;
@@ -20,6 +21,7 @@ export type Shift = {
 export const SHIFTS: readonly Shift[] = [
   { staff: 'librarianDay', area: 'library', from: 9, to: 15 },
   { staff: 'librarianEvening', area: 'library', from: 15, to: 22 },
+  { staff: 'librarianNight', area: 'library', from: 22, to: 9 },
   { staff: 'receptionDay', area: 'hall', from: 7, to: 19 },
   { staff: 'receptionNight', area: 'hall', from: 19, to: 7 },
 ];
