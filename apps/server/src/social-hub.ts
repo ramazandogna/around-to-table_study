@@ -630,11 +630,7 @@ export class SocialHub extends DurableObject<Env> {
       this.sql.exec('DELETE FROM room_bans WHERE user = ?', id);
       this.sql.exec('DELETE FROM places WHERE id = ?', id);
       this.sql.exec('DELETE FROM reports WHERE reporter = ? OR target = ?', id, id);
-      this.sql.exec(
-        "DELETE FROM tries WHERE key = ? OR key LIKE 'room:%:' || ?",
-        `report:${id}`,
-        id,
-      );
+      this.sql.exec('DELETE FROM tries WHERE key = ?', `report:${id}`);
       this.sql.exec('DELETE FROM presence WHERE character_id = ?', id);
     }
     for (const code of rooms) {
@@ -646,7 +642,11 @@ export class SocialHub extends DurableObject<Env> {
         // The room is already gone.
       }
     }
-    this.sql.exec('DELETE FROM tries WHERE key = ?', `acct:${accountId}`);
+    this.sql.exec(
+      "DELETE FROM tries WHERE key = ? OR key LIKE 'room:%:' || ?",
+      `acct:${accountId}`,
+      accountId,
+    );
     this.sql.exec('DELETE FROM presence WHERE account_id = ?', accountId);
     this.sql.exec('DELETE FROM sessions WHERE account_id = ?', accountId);
     this.sql.exec('DELETE FROM characters WHERE account_id = ?', accountId);
@@ -836,6 +836,7 @@ export class SocialHub extends DurableObject<Env> {
     code: string,
     password: string | null,
     user: string,
+    account: string = user,
   ): Promise<'ok' | 'unknown' | 'password' | 'banned' | 'full' | 'too_many'> {
     const row = this.roomRow(code);
     if (!row) return 'unknown';
@@ -843,7 +844,7 @@ export class SocialHub extends DurableObject<Env> {
     if (row.password) {
       // Wrong passwords are counted per account and room, in storage; the right one is refused too
       // once the budget is spent, or guessing would still work.
-      const key = `room:${code}:${user}`;
+      const key = `room:${code}:${account}`;
       if (this.triesSpent(key) >= PASSWORD_TRIES) return 'too_many';
       if (!password || (await hashPassword(code, password)) !== row.password) {
         this.spendTry(key, PASSWORD_WINDOW_MS);

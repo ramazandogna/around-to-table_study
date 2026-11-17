@@ -124,7 +124,7 @@ async function seeded() {
   );
   sql.exec(
     'INSERT INTO tries (key, until, count) VALUES (?, ?, 3)',
-    `room:${bobsRoom?.code}:${a2.id}`,
+    `room:${bobsRoom?.code}:${accountA}`,
     now + 60_000,
   );
   sql.exec(
