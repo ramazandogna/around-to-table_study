@@ -64,7 +64,12 @@ try {
             if (m.t === 'left') ids.delete(m.id);
             if (m.t === 'error') refused = m.code;
           };
-          await new Promise((res) => (ws.onopen = res));
+          await new Promise((res) => {
+            ws.onopen = res;
+            ws.onerror = res;
+            ws.onclose = res;
+          });
+          if (ws.readyState !== 1) return { refused: 'upgrade' };
           ws.send(JSON.stringify({ t: 'hello', look: { character: 0 } }));
           await new Promise((res) => setTimeout(res, 3000));
           return { ids: [...ids], refused };

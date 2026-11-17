@@ -13,6 +13,7 @@ import type {
 } from '@att/shared';
 import ReconnectingWebSocket from 'partysocket/ws';
 import { isPong, keepAlive } from './heartbeat';
+import { findRoom } from './rooms';
 
 type Options = {
   area: AreaId;
@@ -27,6 +28,8 @@ type Options = {
   lines: () => StatusLines;
   onMessage: (message: ServerMessage) => void;
   onStatus: (connected: boolean) => void;
+  /** A private room's socket could not open because the room is full. */
+  onFull?: () => void;
 };
 
 /** One live connection to an area. Reconnects on its own and says hello again each time. */
@@ -55,7 +58,17 @@ export class AreaConnection {
         ...(options.from ? { from: options.from } : {}),
       });
     });
-    this.socket.addEventListener('close', () => options.onStatus(false));
+    // A refused upgrade (409 full) looks like a socket that never opens: ask the reception why.
+    let opened = false;
+    let failures = 0;
+    this.socket.addEventListener('open', () => (opened = true));
+    this.socket.addEventListener('close', () => {
+      options.onStatus(false);
+      if (opened || !room || !options.onFull || ++failures !== 2) return;
+      void findRoom(token, room.code).then((info) => {
+        if (typeof info !== 'string' && info.people >= info.size) options.onFull?.();
+      });
+    });
     this.socket.addEventListener('message', (event) => {
       if (typeof event.data !== 'string' || isPong(event.data)) return;
       try {

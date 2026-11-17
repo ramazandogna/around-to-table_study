@@ -426,6 +426,13 @@ export class AreaWorld {
       lines: () => useGameStore.getState().lines,
       onMessage: (message) => this.onServerMessage(message),
       onStatus: (connected) => useGameStore.getState().setConnected(connected),
+      onFull: () => {
+        const now = useGameStore.getState();
+        now.setRoom(null);
+        now.setNotice('room_full');
+        this.connection?.close();
+        this.goThrough('hall');
+      },
     });
     store.setConnection(this.connection);
     this.leaving = false;

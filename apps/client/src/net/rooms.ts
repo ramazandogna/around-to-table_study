@@ -10,6 +10,10 @@ export type RoomError =
   | 'wrong_password'
   /** The room's owner banned this player. */
   | 'banned'
+  /** The room holds as many people as it was opened for. */
+  | 'full'
+  /** Too many wrong passwords for now. */
+  | 'too_many_tries'
   | 'network';
 
 /** A room the player is in (or going into), with the pass its socket needs. */
