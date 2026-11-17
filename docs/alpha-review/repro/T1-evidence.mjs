@@ -1,4 +1,3 @@
-/* global console, process, fetch, WebSocket, setTimeout, location */
 // T1 evidence for the S3/S4 findings (protocol level, real local server, separate contexts).
 // Prints one line per check; exits 1 when any listed bug still reproduces.
 import { chromium, BASE, uniq } from './helpers.mjs';
@@ -16,7 +15,12 @@ async function person(name) {
   const page = await context.newPage();
   await page.goto(`${BASE}/api/auth/dev?email=t1ev${uniq()}@example.com`);
   const made = await page.evaluate(async (name) => {
-    const post = (u, b) => fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+    const post = (u, b) =>
+      fetch(u, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(b),
+      });
     const r = await post('/api/characters', { name, look: { character: 0 } });
     if (!r.ok) return { status: r.status };
     const { id } = await r.json();
@@ -32,7 +36,9 @@ const open = (p, key, path) =>
       new Promise((res) => {
         window.__m ??= {};
         window.__m[key] = [];
-        const ws = new WebSocket(`${location.origin.replace('http', 'ws')}${path}?token=${encodeURIComponent(token)}`);
+        const ws = new WebSocket(
+          `${location.origin.replace('http', 'ws')}${path}?token=${encodeURIComponent(token)}`,
+        );
         window.__ws ??= {};
         window.__ws[key] = ws;
         ws.onmessage = (e) => window.__m[key].push(JSON.parse(e.data));
@@ -40,7 +46,8 @@ const open = (p, key, path) =>
       }),
     { key, path, token: p.token },
   );
-const send = (p, key, msg) => p.page.evaluate(({ key, msg }) => window.__ws[key].send(JSON.stringify(msg)), { key, msg });
+const send = (p, key, msg) =>
+  p.page.evaluate(({ key, msg }) => window.__ws[key].send(JSON.stringify(msg)), { key, msg });
 const msgs = (p, key) => p.page.evaluate((key) => window.__m[key], key);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -49,8 +56,14 @@ try {
   // T1-05 names: case-insensitive uniqueness breaks on Latin capital I; fullwidth look-alikes pass.
   const n1 = await person('Iris' + u);
   const n2 = await person('iris' + u);
-  const n3 = await person([...('Iris' + u)].map((c) => String.fromCodePoint(c.codePointAt(0) + 0xfee0)).join(''));
-  note('T1-05', n2.status === 200 || n3.status === 200, `"Iris${u}" ${n1.status}, "iris${u}" ${n2.status}, fullwidth "Ｉｒｉｓ…" ${n3.status} (expected 400 name_taken)`);
+  const n3 = await person(
+    [...('Iris' + u)].map((c) => String.fromCodePoint(c.codePointAt(0) + 0xfee0)).join(''),
+  );
+  note(
+    'T1-05',
+    n2.status === 200 || n3.status === 200,
+    `"Iris${u}" ${n1.status}, "iris${u}" ${n2.status}, fullwidth "Ｉｒｉｓ…" ${n3.status} (expected 400 name_taken)`,
+  );
 
   const a = n1;
   const b = n2.status === 200 ? n2 : await person('Bee' + u);
@@ -76,7 +89,11 @@ try {
   await send(a, 'hall', { t: 'say', text: '​​' });
   await wait(3200);
   const blank = (await msgs(c, 'hall')).some((m) => m.t === 'said' && m.text === '​​');
-  note('T1-10', blank, `zero-width-only message ${blank ? 'broadcast as an empty bubble' : 'refused'}`);
+  note(
+    'T1-10',
+    blank,
+    `zero-width-only message ${blank ? 'broadcast as an empty bubble' : 'refused'}`,
+  );
 
   // T1-03 the friend-phone note skips the status-line filter (link, swear, 80 chars).
   await open(a, 'soc', '/api/social/ws');
@@ -99,10 +116,17 @@ try {
   await send(b, 'soc', { t: 'shout', text: 'from the library 1' });
   await wait(300);
   await send(b, 'soc', { t: 'where', area: 'hall' });
-  for (let i = 0; i < 8; i++) await send(b, 'soc', { t: 'shout', text: `from the library ${i + 2}` });
+  for (let i = 0; i < 8; i++)
+    await send(b, 'soc', { t: 'shout', text: `from the library ${i + 2}` });
   await wait(800);
-  const heard = (await msgs(a, 'soc')).filter((m) => m.t === 'shouted' && m.line.text.startsWith('from the library')).length;
-  note('T1-06', heard > 0, `${heard} building-wide shouts from a player whose area socket is in the library (8 in under a second)`);
+  const heard = (await msgs(a, 'soc')).filter(
+    (m) => m.t === 'shouted' && m.line.text.startsWith('from the library'),
+  ).length;
+  note(
+    'T1-06',
+    heard > 0,
+    `${heard} building-wide shouts from a player whose area socket is in the library (8 in under a second)`,
+  );
 
   // T1-08 refresh mid table game: the reconnecting player forfeits at once.
   const d = await person('Dee' + u);
@@ -126,11 +150,16 @@ try {
   await wait(800);
   const tables = (await msgs(d, 'sm')).filter((m) => m.t === 'table' && m.kind === 'coin');
   const t = tables.pop()?.table;
-  note('T1-08', t?.phase === 'over' && t.winners.includes(d.id), `after the opponent reconnects: phase ${t?.phase}, winners ${t?.winners?.length}`);
+  note(
+    'T1-08',
+    t?.phase === 'over' && t.winners.includes(d.id),
+    `after the opponent reconnects: phase ${t?.phase}, winners ${t?.winners?.length}`,
+  );
   for (const p of [d, e]) await send(p, 'sm', { t: 'table', kind: 'coin', action: { a: 'leave' } });
 
   // T1-12 darts: the client picks where the dart lands.
-  for (const p of [d, e]) await send(p, 'sm', { t: 'table', kind: 'darts', action: { a: 'leave' } });
+  for (const p of [d, e])
+    await send(p, 'sm', { t: 'table', kind: 'darts', action: { a: 'leave' } });
   await wait(300);
   await send(d, 'sm', { t: 'table', kind: 'darts', action: { a: 'open' } });
   await wait(300);
@@ -145,8 +174,13 @@ try {
     await wait(200);
   }
   dt = (await msgs(d, 'sm')).filter((m) => m.t === 'table' && m.kind === 'darts').pop()?.table;
-  note('T1-12', Math.max(...(dt?.scores ?? [0])) === 150, `three crafted throws score ${JSON.stringify(dt?.scores)}`);
-  for (const p of [d, e]) await send(p, 'sm', { t: 'table', kind: 'darts', action: { a: 'leave' } });
+  note(
+    'T1-12',
+    Math.max(...(dt?.scores ?? [0])) === 150,
+    `three crafted throws score ${JSON.stringify(dt?.scores)}`,
+  );
+  for (const p of [d, e])
+    await send(p, 'sm', { t: 'table', kind: 'darts', action: { a: 'leave' } });
   await wait(300);
 
   // T1-07 one character stands in several areas at once (no cross-area replace).
@@ -159,7 +193,11 @@ try {
   const inHall = (await msgs(a, 'hall')).some((m) => m.t === 'joined' && m.player.id === f.id);
   const inSmoking = (await msgs(d, 'sm')).some((m) => m.t === 'joined' && m.player.id === f.id);
   const libOpen = (await msgs(f, 'xlibrary')).some((m) => m.t === 'welcome');
-  note('T1-07', inHall && inSmoking && libOpen, `same character joined hall ${inHall}, smoking ${inSmoking}, library ${libOpen} at once`);
+  note(
+    'T1-07',
+    inHall && inSmoking && libOpen,
+    `same character joined hall ${inHall}, smoking ${inSmoking}, library ${libOpen} at once`,
+  );
 } catch (err) {
   console.error(err);
   await browser.close();

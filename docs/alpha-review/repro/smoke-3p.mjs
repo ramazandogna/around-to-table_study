@@ -1,4 +1,3 @@
-/* global console, process, document */
 // Opens 3 players in separate contexts and checks each sees all three ("3 here").
 import { chromium, newPlayer, shot, uniq } from './helpers.mjs';
 const browser = await chromium.launch();

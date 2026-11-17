@@ -12,6 +12,8 @@ export default tseslint.config(
       '**/worker-configuration.d.ts',
       // The site has its own Vue toolchain.
       'site/**',
+      // Agent worktrees are full copies of the repo.
+      '.claude/**',
     ],
   },
   js.configs.recommended,
@@ -25,6 +27,11 @@ export default tseslint.config(
   {
     files: ['scripts/**/*.mjs'],
     languageOptions: { globals: globals.node },
+  },
+  {
+    // Playwright repro scripts run in Node and pass callbacks into the page.
+    files: ['docs/alpha-review/repro/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     files: ['**/*.{ts,tsx}'],
