@@ -72,7 +72,10 @@ const bugLink = computed(() => mail(copy.value.beta.bugSubject));
 /** The links that go into the game carry the page's language. */
 const gameLink = computed(() => `${GAME_URL}?lang=${language.value}`);
 const codeLink = computed(() => mail(copy.value.beta.codeSubject));
-const privacyUrl = computed(() => `${GAME_URL}privacy.html${language.value === 'tr' ? '#tr' : ''}`);
+/** Terms and privacy live on the site itself; the Turkish text is anchored at #tr. */
+const legalHash = computed(() => (language.value === 'tr' ? '#tr' : ''));
+const termsUrl = computed(() => `${base}terms.html${legalHash.value}`);
+const privacyUrl = computed(() => `${base}privacy.html${legalHash.value}`);
 
 /* ---------- The bar: a menu on phones, and the language list ---------- */
 
@@ -209,7 +212,7 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
             <button
               type="button"
               class="lang-button"
-              :aria-label="extra.nav.language"
+              :aria-label="`${extra.nav.language}: ${langLabel}`"
               :aria-expanded="langOpen"
               aria-haspopup="listbox"
               @click="langOpen = !langOpen"
@@ -255,6 +258,7 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
             href="#beta"
             size="sm"
             class="play-cta shrink-0"
+            :aria-label="copy.nav.play"
             @click="openGate"
           >
             <Play class="size-4" aria-hidden="true" />
@@ -338,11 +342,7 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
                 :key="store"
                 :label="copy.hero.soon"
               >
-                <span
-                  class="store-soon inline-flex"
-                  tabindex="0"
-                  :aria-label="`${store}: ${copy.hero.soon}`"
-                >
+                <span class="store-soon inline-flex">
                   <BaseButton
                     variant="secondary"
                     size="lg"
@@ -612,18 +612,10 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
         <a :href="REI_KIT" class="nav-link flex items-center gap-2" rel="noopener">
           <Sparkles class="size-4 shrink-0" aria-hidden="true" /> {{ copy.footer.kit }}
         </a>
-        <a
-          :href="`${GAME_URL}terms.html${language === 'tr' ? '#tr' : ''}`"
-          class="nav-link"
-          rel="noopener"
-        >
+        <a :href="termsUrl" class="nav-link">
           {{ extra.nav.terms }}
         </a>
-        <a
-          :href="`${GAME_URL}privacy.html${language === 'tr' ? '#tr' : ''}`"
-          class="nav-link"
-          rel="noopener"
-        >
+        <a :href="privacyUrl" class="nav-link">
           {{ extra.nav.privacy }}
         </a>
         <span>{{ copy.footer.credits }}</span>
