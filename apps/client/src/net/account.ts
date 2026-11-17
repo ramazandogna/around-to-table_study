@@ -113,6 +113,13 @@ export const PROGRESS_KEYS = [
   'att.lastSit',
 ] as const;
 
+/**
+ * What the player has been shown (the welcome note, the room tips). Sent with
+ * the progress and put back, but never erased by another character's save, so
+ * the welcome shows once per account rather than once per character.
+ */
+export const SEEN_KEYS = ['att.intro', 'att.coach'] as const;
+
 /** Which character's progress is in localStorage now (and which one a reload goes back to). */
 const PLAYING_KEY = 'att.playing';
 
@@ -150,13 +157,30 @@ export function loadProgress(save: Record<string, string> | null): void {
     if (typeof value === 'string') store.setItem(key, value);
     else store.removeItem(key);
   }
+  for (const key of SEEN_KEYS) {
+    const value = save?.[key];
+    if (typeof value === 'string') store.setItem(key, mergeSeen(key, store.getItem(key), value));
+  }
+}
+
+/** The union of two "seen" records: the room tips are an object of rooms, the intro a flag. */
+export function mergeSeen(key: string, mine: string | null, theirs: string | null): string {
+  if (key !== 'att.coach') return mine ?? theirs ?? 'true';
+  try {
+    return JSON.stringify({
+      ...(JSON.parse(theirs ?? '{}') as object),
+      ...(JSON.parse(mine ?? '{}') as object),
+    });
+  } catch {
+    return mine ?? theirs ?? '{}';
+  }
 }
 
 function collectProgress(): Record<string, string> {
   const store = storage();
   const save: Record<string, string> = {};
   if (!store) return save;
-  for (const key of PROGRESS_KEYS) {
+  for (const key of [...PROGRESS_KEYS, ...SEEN_KEYS]) {
     const value = store.getItem(key);
     if (value !== null) save[key] = value;
   }

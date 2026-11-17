@@ -6,7 +6,7 @@ import { readJson, writeJson } from '../net/storage';
  * blocks finished today and how many days in a row they studied. Nobody else
  * sees it and there are no rankings; it is there to feel good about the day.
  */
-type Stats = {
+export type Stats = {
   /** The local day these numbers are for, as YYYY-MM-DD. */
   day: string;
   focusMs: number;
@@ -19,6 +19,8 @@ type Stats = {
   goalDay?: string | null;
   /** All the focus time ever kept on this device, for the character select screen. */
   totalMs?: number;
+  /** The last earlier day with focus time, for the welcome-back line. */
+  prev?: { day: string; focusMs: number };
 };
 
 const STATS_KEY = 'att.stats';
@@ -49,6 +51,11 @@ export function todayStats(now = Date.now(), saved = readJson<Stats>(STATS_KEY))
       streak,
       lastDay: saved?.lastDay ?? null,
       totalMs: saved?.totalMs ?? 0,
+      ...(saved && saved.focusMs > 0
+        ? { prev: { day: saved.day, focusMs: saved.focusMs } }
+        : saved?.prev
+          ? { prev: saved.prev }
+          : {}),
     };
   }
   return { ...saved, streak };

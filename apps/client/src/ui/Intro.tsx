@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { t, type MessageKey } from '../i18n/t';
 import { readJson, writeJson } from '../net/storage';
 import { useGameStore } from '../state/store';
+import { markCoachSeen } from './Coach';
 
 const SEEN_KEY = 'att.intro';
 
@@ -63,5 +64,7 @@ export function Intro() {
 
 function close() {
   writeJson(SEEN_KEY, true);
+  // The note was the welcome; the hall's tip would only repeat it.
+  markCoachSeen('hall');
   useGameStore.getState().setIntroOpen(false);
 }

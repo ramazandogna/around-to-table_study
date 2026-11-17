@@ -94,6 +94,8 @@ export type Notice =
   | 'finished'
   /** A running block came back after a reload; sit down to carry on. */
   | 'block_resume'
+  /** A returning player's one-line recap (the value is the line). */
+  | 'welcome_back'
   /** The player's own daily goal was reached today. */
   | 'goal_reached'
   /** An event just started (the value is its room). */
