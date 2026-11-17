@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useDialog } from './useDialog';
 
 /**
  * The one look for every screen from naming yourself to sitting at the table:
@@ -10,13 +11,23 @@ export function Panel({
   title,
   children,
   className = '',
+  onClose,
 }: {
   title?: string;
   children: ReactNode;
   className?: string;
+  /** For a panel opened on its own (not inside a `Dialog`): it takes focus, traps Tab and closes on Escape. */
+  onClose?: () => void;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  useDialog(ref, onClose, !!onClose);
   return (
-    <section className={`panel ${className}`} aria-label={title}>
+    <section
+      ref={ref}
+      className={`panel ${className}`}
+      aria-label={title}
+      {...(onClose ? { tabIndex: -1 } : {})}
+    >
       {title && <h2 className="panel-title">{title}</h2>}
       {children}
     </section>
@@ -29,9 +40,11 @@ export function Panel({
  * it is opened from, so a folded menu (phones) or a hidden button can never
  * hide it.
  */
-export function Dialog({ children }: { children: ReactNode }) {
+export function Dialog({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialog(ref, onClose);
   return createPortal(
-    <div className="dialog" role="dialog" aria-modal="true">
+    <div ref={ref} className="dialog" role="dialog" aria-modal="true" tabIndex={-1}>
       {children}
     </div>,
     document.body,

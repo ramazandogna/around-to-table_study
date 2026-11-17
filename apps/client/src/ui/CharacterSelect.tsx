@@ -100,7 +100,7 @@ export function CharacterSelect() {
         </div>
       </Panel>
       {deleting && (
-        <Dialog>
+        <Dialog onClose={() => setDeleting(null)}>
           <Panel title={t('lobby.delete.title', { name: deleting.name })} className="panel--dialog">
             <p className="panel-text">{t('lobby.delete.text')}</p>
             <div className="panel-actions">

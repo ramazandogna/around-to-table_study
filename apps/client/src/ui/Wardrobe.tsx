@@ -16,7 +16,7 @@ export function Wardrobe() {
         <span className="hud-label">{t('hud.wardrobe')}</span>
       </button>
       {open && (
-        <Dialog>
+        <Dialog onClose={() => setOpen(false)}>
           <CharacterCreator mode="wardrobe" onClose={() => setOpen(false)} />
         </Dialog>
       )}

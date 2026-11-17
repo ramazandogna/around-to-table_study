@@ -92,7 +92,7 @@ export function GoalsDialog() {
   }
 
   return (
-    <Dialog>
+    <Dialog onClose={close}>
       <form onSubmit={add} onKeyDown={(e) => e.key === 'Escape' && close()}>
         <Panel title={`🎯 ${t('goals.title')}`} className="panel--dialog goals-panel">
           <p className="panel-text">{t('goals.text')}</p>

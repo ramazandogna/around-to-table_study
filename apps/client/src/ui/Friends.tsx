@@ -35,7 +35,11 @@ export function FriendsPanel() {
   const outgoing = friends.filter((f) => f.state === 'outgoing');
 
   return (
-    <Panel title={t('friends.title')} className="panel--compact friends-panel">
+    <Panel
+      title={t('friends.title')}
+      className="panel--compact friends-panel"
+      onClose={() => useGameStore.getState().setFriendsOpen(false)}
+    >
       <button
         type="button"
         className="icon-button player-card-close"
