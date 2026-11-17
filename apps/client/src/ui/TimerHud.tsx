@@ -21,6 +21,7 @@ export function TimerHud() {
   const timer = useGameStore((s) => s.timer);
   const session = useGameStore((s) => s.study);
   const dnd = useGameStore((s) => s.dnd);
+  const seated = useGameStore((s) => s.seated);
   const [now, setNow] = useState(() => Date.now());
 
   const running = timer !== null || session !== null;
@@ -188,6 +189,7 @@ export function TimerHud() {
         <div className="timer-bar" aria-hidden>
           <div className="timer-bar-fill" style={{ width: `${progress * 100}%` }} />
         </div>
+        {!seated && <p className="timer-tip">{t('timer.sitagain')}</p>}
       </>
     );
   } else {

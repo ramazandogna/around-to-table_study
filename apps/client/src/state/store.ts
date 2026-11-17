@@ -92,6 +92,8 @@ export type Notice =
   | 'pet_waits'
   /** A study timer ran out. */
   | 'finished'
+  /** A running block came back after a reload; sit down to carry on. */
+  | 'block_resume'
   /** The player's own daily goal was reached today. */
   | 'goal_reached'
   /** An event just started (the value is its room). */
