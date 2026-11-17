@@ -18,9 +18,7 @@ export type Copy = {
     title: string;
     subtitle: string;
     web: string;
-    appStore: string;
-    googlePlay: string;
-    soon: string;
+    webOnly: string;
     invite: string;
     trust: string;
   };
@@ -41,7 +39,7 @@ export type Copy = {
     bugSubject: string;
     codeSubject: string;
   };
-  footer: { made: string; credits: string; kit: string };
+  footer: { made: string; note: string; credits: string; kit: string };
 };
 
 const en: Copy = {
@@ -56,11 +54,9 @@ const en: Copy = {
     badge: 'Early beta · test it now',
     title: "Don't study alone.",
     subtitle:
-      'A cozy little building where you study next to real people, take your breaks in the smoking room and make friends along the way.',
+      'Study quietly beside real people, chat on your breaks and slowly make friends. For students and anyone who works better in company.',
     web: 'Join the closed beta',
-    appStore: 'App Store',
-    googlePlay: 'Google Play',
-    soon: 'Coming soon',
+    webOnly: 'Web only for now',
     invite: 'The beta is invite-only: you sign in with Google and need this week’s access code.',
     trust:
       'Free. No ads. We keep your Google name and email, your characters and progress, and recent chat lines.',
@@ -148,6 +144,7 @@ const en: Copy = {
   },
   footer: {
     made: 'Made by Ramazan Doğan',
+    note: 'Living in Japan, I saw how many people spend their days alone at home, and some use apps just to find someone to have dinner with. I built Around the Table to make sitting down together easy.',
     credits: '3D models by Kenney (CC0). Music by Kevin MacLeod (CC BY 4.0). Built with rei-kit.',
     kit: 'rei-kit',
   },
@@ -163,13 +160,11 @@ const tr: Copy = {
   },
   hero: {
     badge: 'Erken beta · şimdi dene',
-    title: 'Yalnız çalışma.',
+    title: 'Tek başına çalışma.',
     subtitle:
-      'Gerçek insanların yanında ders çalıştığın, molalarını sigara odasında verdiğin ve yol boyunca arkadaş edindiğin sıcacık küçük bir bina.',
+      'Gerçek insanların yanında sessizce çalış, molada sohbet et, yavaş yavaş arkadaş ol. Kalabalıkta daha iyi odaklananlar için.',
     web: 'Kapalı betaya katıl',
-    appStore: 'App Store',
-    googlePlay: 'Google Play',
-    soon: 'Yakında',
+    webOnly: 'Şimdilik yalnızca web',
     invite: 'Beta davetle: Google ile giriş yaparsın ve bu haftanın giriş kodu gerekir.',
     trust:
       'Ücretsiz. Reklam yok. Google adını ve e-postanı, karakterlerini ve ilerlemeni, son sohbet satırlarını saklarız.',
@@ -257,6 +252,7 @@ const tr: Copy = {
   },
   footer: {
     made: 'Ramazan Doğan tarafından yapıldı',
+    note: 'Japonya’da yaşarken pek çok insanın günlerini evde yalnız geçirdiğini, bazılarının da sadece yemek yiyecek biri bulmak için uygulama kullandığını gördüm. Around the Table’ı, birlikte oturmak kolay olsun diye yaptım.',
     credits: '3B modeller: Kenney (CC0). Müzik: Kevin MacLeod (CC BY 4.0). rei-kit ile yapıldı.',
     kit: 'rei-kit',
   },
@@ -267,11 +263,10 @@ const zh: Copy = {
   hero: {
     badge: '抢先测试 · 现在就试',
     title: '别一个人学习。',
-    subtitle: '一栋温馨的小楼：在真人身边学习，到吸烟室休息，顺便交到朋友。',
+    subtitle:
+      '在真人身边安静地学习，休息时聊聊天，慢慢交到朋友。写给学生，也写给有人陪伴更专注的人。',
     web: '加入封闭测试',
-    appStore: 'App Store',
-    googlePlay: 'Google Play',
-    soon: '即将推出',
+    webOnly: '目前仅支持网页',
     invite: '测试仅限受邀：用 Google 账号登录，并需要本周的访问码。',
     trust: '免费，无广告。我们保存你的 Google 名称和邮箱、角色和进度，以及最近的聊天记录。',
   },
@@ -351,6 +346,7 @@ const zh: Copy = {
   },
   footer: {
     made: '由 Ramazan Doğan 制作',
+    note: '我在日本生活时发现，很多人整天独自待在家里，有人用交友软件只是为了找个人一起吃饭。我做 Around the Table，是想让“坐在一起”变得简单。',
     credits: '3D 模型：Kenney（CC0）。音乐：Kevin MacLeod（CC BY 4.0）。使用 rei-kit 构建。',
     kit: 'rei-kit',
   },
@@ -368,11 +364,9 @@ const ja: Copy = {
     badge: 'アーリーベータ・いますぐ試せます',
     title: 'ひとりで勉強しないで。',
     subtitle:
-      '本物の人たちのとなりで勉強して、休憩は喫煙室で。気がつけば友だちができている、あたたかな小さな建物です。',
+      '本物の人たちのとなりで静かに勉強して、休憩中はおしゃべり。ゆっくり友だちができます。学生や、誰かといると集中できる人のために。',
     web: 'クローズドベータに参加',
-    appStore: 'App Store',
-    googlePlay: 'Google Play',
-    soon: '近日公開',
+    webOnly: 'いまは Web のみ',
     invite: 'ベータは招待制です。Google でサインインし、今週のアクセスコードが必要です。',
     trust:
       '無料・広告なし。Google の名前とメール、キャラクターと進行状況、最近のチャットを保存します。',
@@ -460,6 +454,7 @@ const ja: Copy = {
   },
   footer: {
     made: '制作：Ramazan Doğan',
+    note: '日本に住んで、多くの人が家でひとり過ごし、ごはんを食べる相手を探すためだけにアプリを使う人もいると気づきました。Around the Table は、いっしょに座ることを気軽にするために作りました。',
     credits:
       '3Dモデル：Kenney（CC0）。音楽：Kevin MacLeod（CC BY 4.0）。rei-kit で作られています。',
     kit: 'rei-kit',

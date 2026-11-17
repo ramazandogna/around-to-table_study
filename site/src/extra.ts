@@ -57,13 +57,19 @@ const en: Extra = {
 };
 
 const tr: Extra = {
-  nav: { pets: 'Petler', menu: 'Menü', language: 'Dil', terms: 'Koşullar', privacy: 'Gizlilik' },
+  nav: {
+    pets: 'Evcil hayvanlar',
+    menu: 'Menü',
+    language: 'Dil',
+    terms: 'Koşullar',
+    privacy: 'Gizlilik',
+  },
   ticker: [
     '🍅 Arkadaşlarla pomodoro',
     '🎯 Sigara odasında dart',
     '🎵 Herkese sakin müzik',
     '📚 Sessiz kütüphane masaları',
-    '🐾 Peşinden gelen bir pet',
+    '🐾 Peşinden gelen bir evcil hayvan',
     '🌙 Gerçek zamanlı gece ve gündüz',
     '🔑 3, 5 ya da 9 kişilik özel odalar',
     '🏅 Odaklanmaya rozetler',
@@ -71,7 +77,7 @@ const tr: Extra = {
   pillarsHint: 'Bir sebebe dokun',
   pets: {
     title: 'Dört ayaklı bir dost getir',
-    lead: 'Her karakter yanında bir petle gelebilir. Peşinden gelir, başını belaya sokar ve kendi huyları vardır.',
+    lead: 'Her karakter yanında bir evcil hayvanla gelebilir. Peşinden gelir, başını belaya sokar ve kendi huyları vardır.',
     hint: 'Selam vermek için üstüne gel ya da dokun',
     list: [
       { name: 'Kedi', trait: 'Toz zerrelerini kovalar, masanda uyur.' },

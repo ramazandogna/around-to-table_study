@@ -16,7 +16,6 @@ import {
   PawPrint,
   Play,
   ShieldCheck,
-  Smartphone,
   SunMoon,
   Timer,
   Sparkles,
@@ -26,7 +25,6 @@ import {
   X,
 } from 'lucide-vue-next';
 import { BaseBadge, BaseButton } from 'rei-kit';
-import { BaseTooltip } from 'rei-kit/web';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import CodeAsk from './CodeAsk.vue';
 import Cursor from './Cursor.vue';
@@ -337,23 +335,9 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
               >
                 <Play class="size-5" aria-hidden="true" /> {{ copy.hero.web }}
               </BaseButton>
-              <BaseTooltip
-                v-for="store in [copy.hero.appStore, copy.hero.googlePlay]"
-                :key="store"
-                :label="copy.hero.soon"
-              >
-                <span class="store-soon inline-flex">
-                  <BaseButton
-                    variant="secondary"
-                    size="lg"
-                    disabled
-                    aria-hidden="true"
-                    tabindex="-1"
-                  >
-                    <Smartphone class="size-5" aria-hidden="true" /> {{ store }}
-                  </BaseButton>
-                </span>
-              </BaseTooltip>
+              <span class="store-soon inline-flex items-center gap-2 text-sm">
+                <Globe class="size-4" aria-hidden="true" /> {{ copy.hero.webOnly }}
+              </span>
             </div>
             <p class="hero-in invite text-ink-soft text-sm" style="--i: 7">
               <KeyRound class="size-4 shrink-0" aria-hidden="true" />
@@ -600,6 +584,9 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
     </main>
 
     <footer class="px-4 pt-6 pb-10">
+      <div class="mx-auto mb-6 max-w-(--measure-page)">
+        <p class="text-ink-soft max-w-prose text-sm italic">{{ copy.footer.note }}</p>
+      </div>
       <div
         class="text-ink-soft mx-auto flex max-w-(--measure-page) flex-wrap items-center gap-x-6 gap-y-2 text-sm"
       >
