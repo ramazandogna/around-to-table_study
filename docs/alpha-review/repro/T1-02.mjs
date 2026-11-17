@@ -3,6 +3,7 @@
 // A plain F5 does the same. Exits 1 while the bug exists, 0 when the block survives.
 // Navigation clicks are by screen position (1280x800); exit 2 means the walk to a seat failed.
 import { chromium, newPlayer, shot, uniq } from './helpers.mjs';
+import { reachLibrary, sitAndStartPomodoro } from './E2-lib.mjs';
 
 const browser = await chromium.launch();
 const { page } = await newPlayer(browser, {
@@ -17,25 +18,8 @@ const hud = () => page.evaluate(() => document.body.innerText);
 const timerShown = (text) => /(Round|Tur)\s*\d+\D+\d+\s*\n\s*\d{1,2}:\d\d/.test(text);
 let code = 2;
 try {
-  await gotIt();
-  // Hall -> library door -> library.
-  await page.locator('.world-sign--door', { hasText: 'Library' }).dispatchEvent('click');
-  await page.waitForTimeout(800);
-  await page.mouse.click(1000, 200);
-  await page.waitForTimeout(7000);
-  await page.mouse.click(640, 260);
-  await page.waitForTimeout(7000);
-  await gotIt();
-  // Sit at the desk to the right, pick "Just focusing", then a Pomodoro.
-  await page.mouse.click(948, 333);
-  await page.locator('[role=dialog] .choice').first().waitFor({ timeout: 10000 });
-  await page.locator('[role=dialog] .choice').first().click();
-  await page.locator('.study-ring-plan', { hasText: 'Pomodoro' }).click();
-  await page.locator('[role=dialog] .panel-ok').click();
-  await page.waitForTimeout(1000);
-  const confirm = page.locator('[role=dialog] .panel-ok');
-  if (await confirm.isVisible().catch(() => false)) await confirm.click();
-  await page.waitForTimeout(1500);
+  await reachLibrary(page);
+  await sitAndStartPomodoro(page);
   const before = await hud();
   if (!timerShown(before))
     throw new Error('could not start the Pomodoro (navigation by position failed)');

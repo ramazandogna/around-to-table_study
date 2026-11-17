@@ -57,3 +57,4 @@ Owners: E1 = server and shared, E2 = game client, E3 = website. "E1→E2" means 
 ## Rejected or deferred
 - **Renaming the "smoking room" (W1-6).** Settled in the decisions, so it is not reopened. Recorded as a Decision proposal for the owner.
 - **A waitlist form with a backend (W2-2 variant).** The site is static Pages, and a form needs a store. The copy button is the static fix for now.
+- Round J re-test (T2): on a 390px phone the create screen's "Gir" button sits below the fold and the terms line is cut off; the welcome-back toast fades too fast; reception's greeting bubble can sit off the top edge.

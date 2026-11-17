@@ -3,6 +3,11 @@
 What building the prototype taught us, as rules for the next phases. Newest first within each group.
 
 ## Testing and verification
+- **Let a client's report only end something the server started.** Focus credit trusted the client's timer; the server now keeps when a block began and credits only what it saw. Any "finished" from a client is a claim, not a fact.
+- **Test every limit across two characters of one account.** Room password tries were counted per character, so a second character got fresh tries; the review caught it only because the criteria said "per account".
+- **Reload state after every await in a handler.** A block check between loading and writing let a burst of messages read the same cooldown.
+- **Keep evidence when someone deletes themselves.** Deleting an account first erased the reports about it.
+- **Pick test clicks by name, not by screen position.** Fixed click points stopped reaching the library after the camera and HUD changed.
 - **Test like a player.** Tap what a player would tap (the glass of a door, a chair, a person), not a tile coordinate. A door you could only enter by tapping the floor behind it felt like an invisible wall, and tile-based tests missed it.
 - **Check every screen on a phone and a desktop size** before calling it done, with screenshots.
 - **Measure, don't guess.** The walk looked like sliding until its speed was measured from the clip. Fonts are checked for clear digits and Turkish letters before they are adopted (Pixelify Sans turned 2 and 5 into Z and S).
