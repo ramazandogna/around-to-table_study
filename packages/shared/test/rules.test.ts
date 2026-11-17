@@ -18,7 +18,34 @@ describe('containsLink', () => {
     expect(containsLink(text)).toBe(true);
   });
 
-  it.each(['chapter 3.5 is hard', 'ok. see you', 'i.e. tomorrow'])('ignores %s', (text) => {
+  it.each([
+    'evil.ru/x',
+    'example.info',
+    'evil．com',
+    'ｅｖｉｌ．ｃｏｍ',
+    'evil。com',
+    'evil｡com',
+    'visit my-site.xyz now',
+    'x.co',
+    'EXAMPLE.ORG/Path',
+  ])('finds the bare address %s', (text) => {
+    expect(containsLink(text)).toBe(true);
+  });
+
+  it.each([
+    'chapter 3.5 is hard',
+    'ok. see you',
+    'i.e. tomorrow',
+    'e.g. tea',
+    'Dr.Ali is here',
+    'it ended.Then we left',
+    'at 5.30 pm',
+    'ok。 see you',
+  ])('ignores %s', (text) => {
+    expect(containsLink(text)).toBe(false);
+  });
+
+  it.each(['chapter 3.5 is hard', 'ok. see you', 'i.e. tomorrow'])('still ignores %s', (text) => {
     expect(containsLink(text)).toBe(false);
   });
 });

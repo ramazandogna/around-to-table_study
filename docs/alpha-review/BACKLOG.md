@@ -49,6 +49,7 @@ Owners: E1 = server and shared, E2 = game client, E3 = website. "E1→E2" means 
 - HUD "More" menu (A3-11). Touch targets and contrast (A3-8, A3-12, A3-13, A3-15, A3-16). Pomodoro double confirm (T2-4). Tappable door signs (T2-7).
 - Site: performance and TBT, vue-router removal (W2-8). hreflang routes (W2-10).
 - Site (E3): the Tiny5 pixel font draws Turkish ş, ç and ı poorly in the TR hero title. The sound toggle labels are English only. site/public terms.html and privacy.html are copies of the game's, so they can drift apart (one source needed). The footer still links a raw github.com profile (W2-11).
+- Server follow-ups from round J (E1): a reconnect (`hello` with a timer) restarts the measured block, so a flaky connection loses the earlier minutes; the hub could keep the block start per character. Reports keep area chat lines in room memory only (lost on hibernation). `smoked`, `status` and `joined` still reach someone who blocked the sender. Players' last known area in `places` can go stale if an area room dies without a close. The client still handles the retired `blockedBy` message.
 
 ## Rejected or deferred
 - **Renaming the "smoking room" (W1-6).** Settled in the decisions, so it is not reopened. Recorded as a Decision proposal for the owner.

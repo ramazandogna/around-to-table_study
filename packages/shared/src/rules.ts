@@ -141,10 +141,18 @@ export function quietCase(text: string): string {
     .toLowerCase();
 }
 
-const LINK = /(https?:\/\/|www\.)\S|\b[\w-]+\.(com|net|org|io|dev|app|me|gg|co|tr|jp|ly|xyz)\b/i;
+/** Web endings people type bare ("name.info"); any two-letter country ending counts as well. */
+const WEB_ENDINGS =
+  'com|net|org|info|biz|edu|gov|io|dev|app|gg|xyz|online|site|shop|store|club|top|vip|live|link|click|page|cloud|tech|ai|tv|ly';
+const LINK = new RegExp(
+  String.raw`(https?:\/\/|www\.)\S|[\p{L}\p{N}-]+\.(?:${WEB_ENDINGS}|[a-z]{2})(?![\p{L}\p{N}])`,
+  'iu',
+);
+/** Full stops of other scripts and widths, so "evil．com" reads as "evil.com". */
+const OTHER_DOTS = /[．。｡․﹒]/g;
 
 export function containsLink(text: string): boolean {
-  return LINK.test(text);
+  return LINK.test(text.normalize('NFKC').replace(OTHER_DOTS, '.'));
 }
 
 export type AreaTextResult =

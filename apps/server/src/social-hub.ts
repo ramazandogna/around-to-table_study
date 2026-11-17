@@ -15,6 +15,14 @@ import {
   type FoundPerson,
   checkProposal,
   cleanDm,
+  cleanNote,
+  normalizeChat,
+  isRoomArea,
+  REPORT_NOTE_MAX,
+  REPORTS_PER_HOUR,
+  type Report,
+  type ReportLine,
+  type ReportReason,
   cleanOffset,
   cleanRoomRules,
   DEFAULT_ROOM_RULES,
@@ -101,6 +109,10 @@ const MESSAGE_WINDOW_MS = 10_000;
 const WORLD_EVERY_MS = 1_500;
 /** How often sockets that went quiet are looked for while anyone is connected. */
 const SWEEP_MS = 30_000;
+/** Lines of the target's kept with a report, per kind. */
+const REPORT_LINES = 5;
+/** How long wrong passwords are counted for (see `PASSWORD_TRIES`). */
+const PASSWORD_WINDOW_MS = 10 * 60_000;
 /** Rooms one person may open per hour, so nobody fills the reception. */
 const ROOMS_PER_HOUR = 5;
 
@@ -167,8 +179,6 @@ export class SocialHub extends DurableObject<Env> {
   /** A socket being closed may still be listed for a moment; it no longer counts as online. */
   private closing: WebSocket | null = null;
   private worldTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Access password tries per address (kept while the hub is awake). */
-  private readonly passwordTries = new Map<string, RateWindow>();
   /** Friend requests per person (kept while the hub is awake). */
   private readonly requestTries = new Map<string, RateWindow>();
 
@@ -248,6 +258,26 @@ export class SocialHub extends DurableObject<Env> {
         code TEXT NOT NULL,
         user TEXT NOT NULL,
         PRIMARY KEY (code, user)
+      );
+      CREATE TABLE IF NOT EXISTS places (
+        id TEXT PRIMARY KEY,
+        area TEXT NOT NULL,
+        at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS tries (
+        key TEXT PRIMARY KEY,
+        until INTEGER NOT NULL,
+        count INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporter TEXT NOT NULL,
+        target TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        note TEXT NOT NULL,
+        area TEXT,
+        lines TEXT NOT NULL,
+        at INTEGER NOT NULL
       );
     `);
     // Accounts outlive data epochs: they are who people are, not what the building holds.
@@ -342,7 +372,7 @@ export class SocialHub extends DurableObject<Env> {
     if (stored.door !== (await this.doorTag())) return this.leave(ws);
     // Sockets from before the phone have no message window yet.
     const me: Member = { ...stored, messages: stored.messages ?? { start: 0, count: 0 } };
-    this.handle(ws, me, message);
+    await this.handle(ws, me, message);
   }
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
@@ -389,6 +419,9 @@ export class SocialHub extends DurableObject<Env> {
       'events',
       'shouts',
       'room_bans',
+      'tries',
+      'places',
+      'reports',
     ]) {
       this.sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
@@ -546,6 +579,82 @@ export class SocialHub extends DurableObject<Env> {
     return done > 0;
   }
 
+  /** The ids of an account's characters. */
+  async characterIds(accountId: string): Promise<string[]> {
+    return this.sql
+      .exec<{ id: string }>('SELECT id FROM characters WHERE account_id = ?', accountId)
+      .toArray()
+      .map((row) => row.id);
+  }
+
+  /**
+   * Erases an account: every row about it or its characters in every table
+   * (friendships, phone messages, blocks, focus blocks, shouts, reports,
+   * events, rooms it opened, tries, whereabouts, presence), the sessions and
+   * the Google identity. Its characters leave the building first; their
+   * friends see the friendships go. Returns the characters' ids (for the area
+   * rooms to let them go too), or null when there is no such account.
+   */
+  async deleteAccount(accountId: string): Promise<string[] | null> {
+    const found = this.sql.exec('SELECT 1 FROM accounts WHERE id = ?', accountId).toArray();
+    if (found.length === 0) return null;
+    const ids = this.sql
+      .exec<{ id: string }>('SELECT id FROM characters WHERE account_id = ?', accountId)
+      .toArray()
+      .map((row) => row.id);
+    // Out of the building while their rows still say who their friends are.
+    await this.kick(ids);
+    const friends = new Set<string>();
+    const rooms: string[] = [];
+    for (const id of ids) {
+      for (const row of this.sql
+        .exec<{ a: string; b: string }>('SELECT a, b FROM friends WHERE a = ? OR b = ?', id, id)
+        .toArray()) {
+        friends.add(row.a === id ? row.b : row.a);
+      }
+      for (const row of this.sql
+        .exec<{ code: string }>('SELECT code FROM rooms WHERE owner = ?', id)
+        .toArray()) {
+        rooms.push(row.code);
+      }
+    }
+    for (const id of ids) {
+      this.sql.exec('DELETE FROM users WHERE id = ?', id);
+      this.sql.exec('DELETE FROM friends WHERE a = ? OR b = ?', id, id);
+      this.sql.exec('DELETE FROM messages WHERE a = ? OR b = ? OR sender = ?', id, id, id);
+      this.sql.exec('DELETE FROM admins WHERE id = ? OR granted_by = ?', id, id);
+      this.sql.exec('DELETE FROM blocks WHERE blocker = ? OR blocked = ?', id, id);
+      this.sql.exec('DELETE FROM focus_blocks WHERE user = ?', id);
+      this.sql.exec('DELETE FROM events WHERE by = ?', id);
+      this.sql.exec('DELETE FROM shouts WHERE sender = ?', id);
+      this.sql.exec('DELETE FROM room_bans WHERE user = ?', id);
+      this.sql.exec('DELETE FROM places WHERE id = ?', id);
+      this.sql.exec('DELETE FROM reports WHERE reporter = ? OR target = ?', id, id);
+      this.sql.exec(
+        "DELETE FROM tries WHERE key = ? OR key LIKE 'room:%:' || ?",
+        `report:${id}`,
+        id,
+      );
+      this.sql.exec('DELETE FROM presence WHERE character_id = ?', id);
+    }
+    for (const code of rooms) {
+      this.sql.exec('DELETE FROM room_bans WHERE code = ?', code);
+      this.sql.exec('DELETE FROM rooms WHERE code = ?', code);
+      try {
+        await this.env.AREAS.getByName(`room:${code}`).sendOff(null, 'room_closed');
+      } catch {
+        // The room is already gone.
+      }
+    }
+    this.sql.exec('DELETE FROM tries WHERE key = ?', `acct:${accountId}`);
+    this.sql.exec('DELETE FROM presence WHERE account_id = ?', accountId);
+    this.sql.exec('DELETE FROM sessions WHERE account_id = ?', accountId);
+    this.sql.exec('DELETE FROM characters WHERE account_id = ?', accountId);
+    this.sql.exec('DELETE FROM accounts WHERE id = ?', accountId);
+    for (const friend of friends) this.sendList(friend);
+    return ids;
+  }
+
   /** A character of this account, or null. */
   async characterOf(accountId: string, id: string): Promise<{ id: string; name: string } | null> {
     return (
@@ -626,16 +735,38 @@ export class SocialHub extends DurableObject<Env> {
     );
   }
 
+  /**
+   * One more try at the access code, for an account or an address; false once
+   * it tried too often. Kept in storage, so waking up fresh does not reset it.
+   */
   async passwordTry(address: string): Promise<boolean> {
-    const window = takeToken(
-      this.passwordTries.get(address) ?? { start: 0, count: 0 },
-      Date.now(),
-      PASSWORD_TRIES,
-      10 * 60_000,
-    );
-    if (!window) return false;
-    this.passwordTries.set(address, window);
+    if (this.triesSpent(address) >= PASSWORD_TRIES) return false;
+    this.spendTry(address, PASSWORD_WINDOW_MS);
     return true;
+  }
+
+  /** Tries counted under a key inside their window; spent windows are dropped as they are met. */
+  private triesSpent(key: string): number {
+    this.sql.exec('DELETE FROM tries WHERE until <= ?', Date.now());
+    return (
+      this.sql.exec<{ count: number }>('SELECT count FROM tries WHERE key = ?', key).toArray()[0]
+        ?.count ?? 0
+    );
+  }
+
+  /** Counts one try under a key; the first one opens a window of `windowMs`. */
+  private spendTry(key: string, windowMs: number): void {
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO tries (key, until, count) VALUES (?, ?, 1)
+       ON CONFLICT (key) DO UPDATE SET
+         count = CASE WHEN until <= ? THEN 1 ELSE count + 1 END,
+         until = CASE WHEN until <= ? THEN excluded.until ELSE until END`,
+      key,
+      now + windowMs,
+      now,
+      now,
+    );
   }
 
   /**
@@ -699,19 +830,29 @@ export class SocialHub extends DurableObject<Env> {
 
   /**
    * Whether someone may come into a room: 'ok', 'unknown' (no such room or
-   * forgotten) or 'password' (missing or wrong). Coming in keeps it alive.
+   * forgotten), 'full' (no place left) or 'password' (missing or wrong). Coming in keeps it alive.
    */
   async checkRoom(
     code: string,
     password: string | null,
     user: string,
-  ): Promise<'ok' | 'unknown' | 'password' | 'banned'> {
+  ): Promise<'ok' | 'unknown' | 'password' | 'banned' | 'full' | 'too_many'> {
     const row = this.roomRow(code);
     if (!row) return 'unknown';
     if (this.isBanned(code, user)) return 'banned';
-    if (row.password && (!password || (await hashPassword(code, password)) !== row.password)) {
-      return 'password';
+    if (row.password) {
+      // Wrong passwords are counted per account and room, in storage; the right one is refused too
+      // once the budget is spent, or guessing would still work.
+      const key = `room:${code}:${user}`;
+      if (this.triesSpent(key) >= PASSWORD_TRIES) return 'too_many';
+      if (!password || (await hashPassword(code, password)) !== row.password) {
+        this.spendTry(key, PASSWORD_WINDOW_MS);
+        return 'password';
+      }
     }
+    // A room holds as many people as it was opened for; someone already inside may come back.
+    const inside = await this.env.AREAS.getByName(`room:${code}`).occupants();
+    if (!inside.includes(user) && inside.length >= row.size) return 'full';
     this.sql.exec('UPDATE rooms SET used_at = ? WHERE code = ?', Date.now(), code);
     return 'ok';
   }
@@ -764,13 +905,13 @@ export class SocialHub extends DurableObject<Env> {
     }
   }
 
-  private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void {
+  private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void | Promise<void> {
     if (message.t === 'where') {
       const lines = {
         vibe: message.vibe ?? null,
         mood: message.mood ?? null,
         doing: message.doing ?? null,
-        note: message.note?.slice(0, 80) ?? '',
+        note: cleanNote(message.note ?? ''),
       };
       const next: Member = {
         ...me,
@@ -842,6 +983,11 @@ export class SocialHub extends DurableObject<Env> {
       return send(ws, { t: 'roomBans', code: message.code, banned: this.bannedFrom(message.code) });
     }
     if (message.t === 'roomClose') return void this.closeRoom(ws, me, message.code);
+    if (message.t === 'report') return this.report(ws, me, message);
+    if (message.t === 'reports') {
+      if (!this.isAdmin(me.id)) return send(ws, { t: 'error', code: 'forbidden' });
+      return send(ws, { t: 'reports', reports: this.reportList() });
+    }
     const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
     if (!changes) return send(ws, { t: 'error', code: 'rate_limited' });
     ws.serializeAttachment({ ...me, changes });
@@ -934,7 +1080,8 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   private dm(ws: WebSocket, me: Member, to: string, raw: string): void {
-    if (me.area && !AREA_RULES[me.area].phone) {
+    const area = this.areaOf(me);
+    if (area && !AREA_RULES[area].phone) {
       return send(ws, { t: 'error', code: 'phone_silent' });
     }
     if (this.blockedBetween(me.id, to)) return send(ws, { t: 'error', code: 'blocked' });
@@ -1096,6 +1243,10 @@ export class SocialHub extends DurableObject<Env> {
     this.tellFriends(me.id);
     this.closing = null;
     this.tellWorld();
+    // Nobody left to speak for them: no room still has them.
+    if (!this.ctx.getWebSockets(me.id).some((socket) => socket !== ws)) {
+      this.sql.exec('DELETE FROM places WHERE id = ?', me.id);
+    }
   }
 
   /**
@@ -1294,7 +1445,134 @@ export class SocialHub extends DurableObject<Env> {
     );
   }
 
+  /* ---------- Reports ---------- */
+
+  /**
+   * Keeps a report for the admins: who, why, where the target was as the rooms
+   * know it, and what they said lately (in the room, to the building, and to
+   * the reporter) as it stood.
+   */
+  private async report(
+    ws: WebSocket,
+    me: Member,
+    message: Extract<SocialClientMessage, { t: 'report' }>,
+  ): Promise<void> {
+    const target = message.id;
+    if (target === me.id || !this.nameOf(target)) {
+      return send(ws, { t: 'error', code: 'unknown_user' });
+    }
+    const key = `report:${me.id}`;
+    if (this.triesSpent(key) >= REPORTS_PER_HOUR) {
+      return send(ws, { t: 'error', code: 'rate_limited' });
+    }
+    this.spendTry(key, 60 * 60_000);
+    const area = this.sql
+      .exec<{ area: AreaId }>('SELECT area FROM places WHERE id = ?', target)
+      .toArray()[0]?.area;
+    const lines: ReportLine[] = [];
+    if (area) {
+      const room = this.ctx
+        .getWebSockets(target)
+        .map((socket) => (socket.deserializeAttachment() as Member | null)?.room)
+        .find((code) => code);
+      try {
+        const name = isRoomArea(area) ? (room ? `room:${room}` : null) : area;
+        const said = name ? await this.env.AREAS.getByName(name).recentLines(target) : [];
+        for (const line of said) lines.push({ kind: 'say', text: line.text, at: line.at });
+      } catch {
+        // The room did not answer; the rest of the evidence still counts.
+      }
+    }
+    for (const row of this.sql
+      .exec<{ text: string; at: number }>(
+        'SELECT text, at FROM shouts WHERE sender = ? ORDER BY id DESC LIMIT ?',
+        target,
+        REPORT_LINES,
+      )
+      .toArray()) {
+      lines.push({ kind: 'shout', text: row.text, at: row.at });
+    }
+    const [a, b] = friendPair(me.id, target);
+    for (const row of this.sql
+      .exec<{ text: string; at: number }>(
+        'SELECT text, at FROM messages WHERE a = ? AND b = ? AND sender = ? ORDER BY id DESC LIMIT ?',
+        a,
+        b,
+        target,
+        REPORT_LINES,
+      )
+      .toArray()) {
+      lines.push({ kind: 'dm', text: row.text, at: row.at });
+    }
+    lines.sort((x, y) => x.at - y.at);
+    this.sql.exec(
+      'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      me.id,
+      target,
+      message.reason,
+      normalizeChat(message.note ?? '', REPORT_NOTE_MAX) ?? '',
+      area ?? null,
+      JSON.stringify(lines.slice(-REPORT_LINES * 3)),
+      Date.now(),
+    );
+    send(ws, { t: 'reported', id: target });
+  }
+
+  private reportList(): Report[] {
+    return this.sql
+      .exec<{
+        id: number;
+        reporter: string;
+        target: string;
+        reason: ReportReason;
+        note: string;
+        area: AreaId | null;
+        lines: string;
+        at: number;
+      }>('SELECT * FROM reports ORDER BY id DESC LIMIT 100')
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        at: row.at,
+        reporter: { id: row.reporter, name: this.nameOf(row.reporter) ?? '' },
+        target: { id: row.target, name: this.nameOf(row.target) ?? '' },
+        reason: row.reason,
+        note: row.note,
+        area: row.area,
+        lines: parseJson(row.lines) as ReportLine[],
+      }));
+  }
+
   /* ---------- Blocking ---------- */
+
+  /** An area room says someone came in: where they really are, whatever their phone claims. */
+  async placed(id: string, area: AreaId): Promise<void> {
+    this.sql.exec(
+      `INSERT INTO places (id, area, at) VALUES (?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET area = excluded.area, at = excluded.at`,
+      id,
+      area,
+      Date.now(),
+    );
+  }
+
+  /** And that they left; a newer area's entry is not undone by an older one closing late. */
+  async unplaced(id: string, area: AreaId): Promise<void> {
+    this.sql.exec('DELETE FROM places WHERE id = ? AND area = ?', id, area);
+  }
+
+  /** The area a person is in as the rooms know it; what their phone claims only when no room does. */
+  private areaOf(me: Member): AreaId | null {
+    const row = this.sql
+      .exec<{ area: AreaId }>('SELECT area FROM places WHERE id = ?', me.id)
+      .toArray()[0];
+    return row?.area ?? me.area;
+  }
+
+  /** Everyone a person blocked or was blocked by, for rooms to leave out of what they send. */
+  async blockedWith(id: string): Promise<string[]> {
+    return [...this.blockSet(id)];
+  }
 
   /** Whether either of the two blocked the other. Also asked by the rooms, for pokes and invites. */
   async isBlocked(a: string, b: string): Promise<boolean> {
@@ -1327,7 +1605,7 @@ export class SocialHub extends DurableObject<Env> {
     return new Set(rows.map((r) => (r.blocker === id ? r.blocked : r.blocker)));
   }
 
-  /** Blocking ends a friendship (and its conversation) and tells the other person. */
+  /** Blocking ends a friendship (and its conversation). The other person is not told. */
   private block(me: Member, to: string): void {
     if (to === me.id || !this.nameOf(to)) return;
     this.sql.exec(
@@ -1338,7 +1616,6 @@ export class SocialHub extends DurableObject<Env> {
     );
     this.unfriend(me.id, to);
     this.sendMe(me.id);
-    this.sendTo(to, { t: 'blockedBy', name: me.name });
   }
 
   /* ---------- Building-wide chat ---------- */
@@ -1357,7 +1634,7 @@ export class SocialHub extends DurableObject<Env> {
 
   /** A line for the whole building; the library listens but does not talk. */
   private shout(ws: WebSocket, me: Member, raw: string): void {
-    if (me.area === 'library') return send(ws, { t: 'error', code: 'phone_silent' });
+    if (this.areaOf(me) === 'library') return send(ws, { t: 'error', code: 'phone_silent' });
     const messages = takeToken(me.messages, Date.now(), MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
     if (!messages) return send(ws, { t: 'error', code: 'rate_limited' });
     ws.serializeAttachment({ ...me, messages });
