@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanDm, DM_MAX_CHARS, friendPair, parseSocialMessage } from '../src';
+import { cleanDm, DM_MAX_CHARS, friendPair, parseSocialMessage, REPORT_NOTE_MAX } from '../src';
 
 describe('social messages', () => {
   it('accepts where, befriend and unfriend', () => {
@@ -38,5 +38,28 @@ describe('social messages', () => {
     expect(cleanDm('see example.com')).toEqual({ ok: false, reason: 'link' });
     const long = cleanDm('a'.repeat(DM_MAX_CHARS + 50));
     expect(long.ok && long.text.length).toBe(DM_MAX_CHARS);
+  });
+
+  it('accepts a report with a known reason and a short note, and an admin listing', () => {
+    const report = { t: 'report', id: 'abc', reason: 'harassment', note: 'kept following me' };
+    expect(parseSocialMessage(JSON.stringify(report))).not.toBeNull();
+    expect(
+      parseSocialMessage(JSON.stringify({ t: 'report', id: 'abc', reason: 'spam' })),
+    ).not.toBeNull();
+    expect(parseSocialMessage(JSON.stringify({ t: 'reports' }))).not.toBeNull();
+  });
+
+  it('rejects a report with an unknown reason, no target or a huge note', () => {
+    expect(
+      parseSocialMessage(JSON.stringify({ t: 'report', id: 'abc', reason: 'meh' })),
+    ).toBeNull();
+    expect(parseSocialMessage(JSON.stringify({ t: 'report', reason: 'spam' }))).toBeNull();
+    const huge = {
+      t: 'report',
+      id: 'abc',
+      reason: 'spam',
+      note: 'x'.repeat(REPORT_NOTE_MAX * 2 + 1),
+    };
+    expect(parseSocialMessage(JSON.stringify(huge))).toBeNull();
   });
 });

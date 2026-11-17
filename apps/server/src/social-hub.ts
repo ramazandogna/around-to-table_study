@@ -16,6 +16,13 @@ import {
   checkProposal,
   cleanDm,
   cleanNote,
+  normalizeChat,
+  isRoomArea,
+  REPORT_NOTE_MAX,
+  REPORTS_PER_HOUR,
+  type Report,
+  type ReportLine,
+  type ReportReason,
   cleanOffset,
   cleanRoomRules,
   DEFAULT_ROOM_RULES,
@@ -102,6 +109,8 @@ const MESSAGE_WINDOW_MS = 10_000;
 const WORLD_EVERY_MS = 1_500;
 /** How often sockets that went quiet are looked for while anyone is connected. */
 const SWEEP_MS = 30_000;
+/** Lines of the target's kept with a report, per kind. */
+const REPORT_LINES = 5;
 /** How long wrong passwords are counted for (see `PASSWORD_TRIES`). */
 const PASSWORD_WINDOW_MS = 10 * 60_000;
 /** Rooms one person may open per hour, so nobody fills the reception. */
@@ -257,8 +266,18 @@ export class SocialHub extends DurableObject<Env> {
       );
       CREATE TABLE IF NOT EXISTS tries (
         key TEXT PRIMARY KEY,
-        start INTEGER NOT NULL,
+        until INTEGER NOT NULL,
         count INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporter TEXT NOT NULL,
+        target TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        note TEXT NOT NULL,
+        area TEXT,
+        lines TEXT NOT NULL,
+        at INTEGER NOT NULL
       );
     `);
     // Accounts outlive data epochs: they are who people are, not what the building holds.
@@ -353,7 +372,7 @@ export class SocialHub extends DurableObject<Env> {
     if (stored.door !== (await this.doorTag())) return this.leave(ws);
     // Sockets from before the phone have no message window yet.
     const me: Member = { ...stored, messages: stored.messages ?? { start: 0, count: 0 } };
-    this.handle(ws, me, message);
+    await this.handle(ws, me, message);
   }
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
@@ -402,6 +421,7 @@ export class SocialHub extends DurableObject<Env> {
       'room_bans',
       'tries',
       'places',
+      'reports',
     ]) {
       this.sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
@@ -644,27 +664,32 @@ export class SocialHub extends DurableObject<Env> {
    * it tried too often. Kept in storage, so waking up fresh does not reset it.
    */
   async passwordTry(address: string): Promise<boolean> {
-    if (this.triesSpent(address, PASSWORD_WINDOW_MS) >= PASSWORD_TRIES) return false;
-    this.spendTry(address);
+    if (this.triesSpent(address) >= PASSWORD_TRIES) return false;
+    this.spendTry(address, PASSWORD_WINDOW_MS);
     return true;
   }
 
-  /** Tries counted under a key inside the window; old keys are dropped as they are met. */
-  private triesSpent(key: string, windowMs: number): number {
-    const now = Date.now();
-    this.sql.exec('DELETE FROM tries WHERE start <= ?', now - windowMs);
+  /** Tries counted under a key inside their window; spent windows are dropped as they are met. */
+  private triesSpent(key: string): number {
+    this.sql.exec('DELETE FROM tries WHERE until <= ?', Date.now());
     return (
       this.sql.exec<{ count: number }>('SELECT count FROM tries WHERE key = ?', key).toArray()[0]
         ?.count ?? 0
     );
   }
 
-  private spendTry(key: string): void {
+  /** Counts one try under a key; the first one opens a window of `windowMs`. */
+  private spendTry(key: string, windowMs: number): void {
+    const now = Date.now();
     this.sql.exec(
-      `INSERT INTO tries (key, start, count) VALUES (?, ?, 1)
-       ON CONFLICT (key) DO UPDATE SET count = count + 1`,
+      `INSERT INTO tries (key, until, count) VALUES (?, ?, 1)
+       ON CONFLICT (key) DO UPDATE SET
+         count = CASE WHEN until <= ? THEN 1 ELSE count + 1 END,
+         until = CASE WHEN until <= ? THEN excluded.until ELSE until END`,
       key,
-      Date.now(),
+      now + windowMs,
+      now,
+      now,
     );
   }
 
@@ -743,9 +768,9 @@ export class SocialHub extends DurableObject<Env> {
       // Wrong passwords are counted per account and room, in storage; the right one is refused too
       // once the budget is spent, or guessing would still work.
       const key = `room:${code}:${user}`;
-      if (this.triesSpent(key, PASSWORD_WINDOW_MS) >= PASSWORD_TRIES) return 'too_many';
+      if (this.triesSpent(key) >= PASSWORD_TRIES) return 'too_many';
       if (!password || (await hashPassword(code, password)) !== row.password) {
-        this.spendTry(key);
+        this.spendTry(key, PASSWORD_WINDOW_MS);
         return 'password';
       }
     }
@@ -804,7 +829,7 @@ export class SocialHub extends DurableObject<Env> {
     }
   }
 
-  private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void {
+  private handle(ws: WebSocket, me: Member, message: SocialClientMessage): void | Promise<void> {
     if (message.t === 'where') {
       const lines = {
         vibe: message.vibe ?? null,
@@ -882,6 +907,11 @@ export class SocialHub extends DurableObject<Env> {
       return send(ws, { t: 'roomBans', code: message.code, banned: this.bannedFrom(message.code) });
     }
     if (message.t === 'roomClose') return void this.closeRoom(ws, me, message.code);
+    if (message.t === 'report') return this.report(ws, me, message);
+    if (message.t === 'reports') {
+      if (!this.isAdmin(me.id)) return send(ws, { t: 'error', code: 'forbidden' });
+      return send(ws, { t: 'reports', reports: this.reportList() });
+    }
     const changes = takeToken(me.changes, Date.now(), CHANGES_PER_MINUTE, 60_000);
     if (!changes) return send(ws, { t: 'error', code: 'rate_limited' });
     ws.serializeAttachment({ ...me, changes });
@@ -1337,6 +1367,104 @@ export class SocialHub extends DurableObject<Env> {
       this.sql.exec<{ name: string }>('SELECT name FROM users WHERE id = ?', id).toArray()[0]
         ?.name ?? null
     );
+  }
+
+  /* ---------- Reports ---------- */
+
+  /**
+   * Keeps a report for the admins: who, why, where the target was as the rooms
+   * know it, and what they said lately (in the room, to the building, and to
+   * the reporter) as it stood.
+   */
+  private async report(
+    ws: WebSocket,
+    me: Member,
+    message: Extract<SocialClientMessage, { t: 'report' }>,
+  ): Promise<void> {
+    const target = message.id;
+    if (target === me.id || !this.nameOf(target)) {
+      return send(ws, { t: 'error', code: 'unknown_user' });
+    }
+    const key = `report:${me.id}`;
+    if (this.triesSpent(key) >= REPORTS_PER_HOUR) {
+      return send(ws, { t: 'error', code: 'rate_limited' });
+    }
+    this.spendTry(key, 60 * 60_000);
+    const area = this.sql
+      .exec<{ area: AreaId }>('SELECT area FROM places WHERE id = ?', target)
+      .toArray()[0]?.area;
+    const lines: ReportLine[] = [];
+    if (area) {
+      const room = this.ctx
+        .getWebSockets(target)
+        .map((socket) => (socket.deserializeAttachment() as Member | null)?.room)
+        .find((code) => code);
+      try {
+        const name = isRoomArea(area) ? (room ? `room:${room}` : null) : area;
+        const said = name ? await this.env.AREAS.getByName(name).recentLines(target) : [];
+        for (const line of said) lines.push({ kind: 'say', text: line.text, at: line.at });
+      } catch {
+        // The room did not answer; the rest of the evidence still counts.
+      }
+    }
+    for (const row of this.sql
+      .exec<{ text: string; at: number }>(
+        'SELECT text, at FROM shouts WHERE sender = ? ORDER BY id DESC LIMIT ?',
+        target,
+        REPORT_LINES,
+      )
+      .toArray()) {
+      lines.push({ kind: 'shout', text: row.text, at: row.at });
+    }
+    const [a, b] = friendPair(me.id, target);
+    for (const row of this.sql
+      .exec<{ text: string; at: number }>(
+        'SELECT text, at FROM messages WHERE a = ? AND b = ? AND sender = ? ORDER BY id DESC LIMIT ?',
+        a,
+        b,
+        target,
+        REPORT_LINES,
+      )
+      .toArray()) {
+      lines.push({ kind: 'dm', text: row.text, at: row.at });
+    }
+    lines.sort((x, y) => x.at - y.at);
+    this.sql.exec(
+      'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      me.id,
+      target,
+      message.reason,
+      normalizeChat(message.note ?? '', REPORT_NOTE_MAX) ?? '',
+      area ?? null,
+      JSON.stringify(lines.slice(-REPORT_LINES * 3)),
+      Date.now(),
+    );
+    send(ws, { t: 'reported', id: target });
+  }
+
+  private reportList(): Report[] {
+    return this.sql
+      .exec<{
+        id: number;
+        reporter: string;
+        target: string;
+        reason: ReportReason;
+        note: string;
+        area: AreaId | null;
+        lines: string;
+        at: number;
+      }>('SELECT * FROM reports ORDER BY id DESC LIMIT 100')
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        at: row.at,
+        reporter: { id: row.reporter, name: this.nameOf(row.reporter) ?? '' },
+        target: { id: row.target, name: this.nameOf(row.target) ?? '' },
+        reason: row.reason,
+        note: row.note,
+        area: row.area,
+        lines: parseJson(row.lines) as ReportLine[],
+      }));
   }
 
   /* ---------- Blocking ---------- */

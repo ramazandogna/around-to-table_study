@@ -89,6 +89,9 @@ type StoredStudy = Omit<StudyStatus, 'timer'> & {
 };
 
 const NO_STUDY: StoredStudy = { activity: null, timer: null, dnd: false };
+/** Lines of chat remembered for reports, and how many of one person's are given. */
+const SAID_KEPT = 80;
+const REPORT_LINES_KEPT = 5;
 const MOVES_PER_SECOND = 10;
 const STATUSES_PER_SECOND = 4;
 const CLOSE_REPLACED = 4000;
@@ -322,6 +325,9 @@ export class AreaRoom extends DurableObject<Env> {
     this.broadcast({ t: 'table', kind, table: record?.table ?? null });
   }
 
+  /** The last lines said in the room (memory only; a report asks soon after). */
+  private readonly said: { id: string; text: string; at: number }[] = [];
+
   /**
    * While one message is handled: the people it must not reach (those the
    * sender blocked or who blocked them). Handling is synchronous, so it is
@@ -417,6 +423,14 @@ export class AreaRoom extends DurableObject<Env> {
       this.send(ws, { t: 'error', code: why });
       this.leave(ws);
     }
+  }
+
+  /** What a person said here lately, newest last: evidence for a report. */
+  async recentLines(id: string): Promise<{ text: string; at: number }[]> {
+    return this.said
+      .filter((line) => line.id === id)
+      .slice(-REPORT_LINES_KEPT)
+      .map(({ text, at }) => ({ text, at }));
   }
 
   /** Who has a socket in the room (joined or about to), once each: how a private room counts its people. */
@@ -586,6 +600,8 @@ export class AreaRoom extends DurableObject<Env> {
         }
         this.save(ws, { ...me, lastSayAt, swears });
         void this.ctx.storage.put(saidKey(me.id), lastSayAt);
+        this.said.push({ id: me.id, text: result.text, at: now });
+        if (this.said.length > SAID_KEPT) this.said.shift();
         this.broadcast({ t: 'said', id: me.id, text: result.text, at: now });
         return;
       }

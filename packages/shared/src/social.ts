@@ -49,6 +49,14 @@ export const DM_MAX_CHARS = 500;
 /** Messages kept per conversation; older ones are dropped. */
 export const DM_HISTORY = 200;
 
+/** Why someone is reported. The client words each one; the server stores the code. */
+export const REPORT_REASONS = ['harassment', 'spam', 'inappropriate', 'cheating', 'other'] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+/** The longest free note a report may carry. */
+export const REPORT_NOTE_MAX = 200;
+/** Reports one person may send per hour. */
+export const REPORTS_PER_HOUR = 5;
+
 export const socialClientSchema = z.discriminatedUnion('t', [
   /**
    * First message on every (re)connect, and again whenever the player changes
@@ -158,6 +166,18 @@ export const socialClientSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('roomClose'), code: roomCode }),
   /** A room's owner asks who is banned. */
   z.object({ t: z.literal('roomBans'), code: roomCode }),
+  /** Reports a player. The server keeps who, why and the target's last lines, for admins. */
+  z.object({
+    t: z.literal('report'),
+    id: userId,
+    reason: z.enum(REPORT_REASONS),
+    note: z
+      .string()
+      .max(REPORT_NOTE_MAX * 2)
+      .optional(),
+  }),
+  /** Admins: the reports sent in, newest first. */
+  z.object({ t: z.literal('reports') }),
 ]);
 
 export type SocialClientMessage = z.infer<typeof socialClientSchema>;
@@ -208,6 +228,30 @@ export type WaitingPet = {
 
 /** At most this many pets are drawn at the library door. */
 export const MAX_WAITING_PETS = 8;
+
+/** One of the target's last lines, kept with a report. */
+export type ReportLine = { kind: 'say' | 'shout' | 'dm'; text: string; at: number };
+
+/** A report as admins see it. */
+export type Report = {
+  id: number;
+  at: number;
+  reporter: { id: string; name: string };
+  target: { id: string; name: string };
+  reason: ReportReason;
+  note: string;
+  /** Where the target was when reported, as the server knew it (null when nowhere). */
+  area: AreaId | null;
+  /** What the target last said, oldest first: the evidence at the time. */
+  lines: ReportLine[];
+};
+
+/**
+ * Deleting an account is `POST /api/account/delete` with this body. The server
+ * answers `{ ok: true }` after everything is gone and every session has ended;
+ * the typed confirmation is the client's to ask for.
+ */
+export type DeleteAccountRequest = { confirm: true };
 
 export type SocialErrorCode =
   | 'bad_message'
@@ -260,6 +304,10 @@ export type SocialServerMessage =
   /** Someone blocked the player. */
   | { t: 'blockedBy'; name: string }
   | { t: 'admins'; admins: { id: string; name: string }[] }
+  /** The report was kept. */
+  | { t: 'reported'; id: string }
+  /** Admins: the reports, newest first. */
+  | { t: 'reports'; reports: Report[] }
   /** Who is banned from the owner's room. */
   | { t: 'roomBans'; code: string; banned: { id: string; name: string }[] }
   /**
