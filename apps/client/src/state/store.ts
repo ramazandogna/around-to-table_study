@@ -1080,6 +1080,27 @@ export const useGameStore = create<GameState>((set) => ({
     }),
 }));
 
+/** Whether any panel or dialog the player opened is up: the menu and the chat button then make room for it. */
+export function panelOpen(s: GameState): boolean {
+  return (
+    s.friendsOpen ||
+    s.phoneOpen ||
+    s.inboxOpen ||
+    s.calendarOpen ||
+    s.goalsOpen ||
+    s.roomsOpen ||
+    s.roomAdminOpen ||
+    s.peopleOpen ||
+    s.adminOpen ||
+    s.statusOpen ||
+    s.wardrobeOpen ||
+    s.jukeboxOpen ||
+    s.game !== null ||
+    s.tableOpen !== null ||
+    s.selected !== null
+  );
+}
+
 /** The state after the break ends and the next focus block starts now, or null when there is no plan to go on with. */
 function nextRoundOf(study: StudySession | null): Pick<GameState, 'study' | 'timer'> | null {
   if (!study?.rhythm) return null;
