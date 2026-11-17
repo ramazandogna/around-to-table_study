@@ -49,6 +49,9 @@ Owners: E1 = server and shared, E2 = game client, E3 = website. "E1→E2" means 
 - HUD "More" menu (A3-11). Touch targets and contrast (A3-8, A3-12, A3-13, A3-15, A3-16). Pomodoro double confirm (T2-4). Tappable door signs (T2-7).
 - Site: performance and TBT, vue-router removal (W2-8). hreflang routes (W2-10).
 
+- E2 leftovers: the Library door sign is still half cut off on phones (A3-9, second half). The chat line buttons are 40px wide on phones because 160px of input beside the joystick leaves no room for 44px (A3-8). The welcome and room-tip flags are kept per character in the server save, not per account (needs a server-side account field).
+- Repro scripts that walk by screen position (T1-02, E2-*) are slow and camera-dependent in a software-rendered browser; a test-only teleport hook would make them steady.
+
 ## Rejected or deferred
 - **Renaming the "smoking room" (W1-6).** Settled in the decisions, so it is not reopened. Recorded as a Decision proposal for the owner.
 - **A waitlist form with a backend (W2-2 variant).** The site is static Pages, and a form needs a store. The copy button is the static fix for now.
