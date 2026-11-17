@@ -1,4 +1,5 @@
 import type {
+  ReportReason,
   Appearance,
   AreaId,
   EventProposal,
@@ -115,6 +116,16 @@ export class SocialConnection {
 
   unblock(id: string): void {
     this.send({ t: 'unblock', id });
+  }
+
+  /** Reports a player; the server keeps their last lines with it, for admins. */
+  report(id: string, reason: ReportReason, note: string): void {
+    this.send({ t: 'report', id, reason, ...(note ? { note } : {}) });
+  }
+
+  /** Admins: asks for the reports. */
+  reports(): void {
+    this.send({ t: 'reports' });
   }
 
   profile(id: string): void {

@@ -27,6 +27,7 @@ import { addTimePlayed, loadGoals, onFocus, onGoalTime } from './state/stats';
 import { HudPlate, MapCorner } from './ui/Hud';
 import { Intro } from './ui/Intro';
 import { Notice } from './ui/Notice';
+import { ReportDialog } from './ui/Report';
 import { RadialMenu } from './ui/RadialMenu';
 import { SeatBar } from './ui/SeatBar';
 import { SitDialog } from './ui/SitDialog';
@@ -265,6 +266,7 @@ export function App() {
       </footer>
       <SitDialog />
       <ConfirmDialog />
+      <ReportDialog />
       <GoalsDialog />
       <Intro />
       <Loader />

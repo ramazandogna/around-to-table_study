@@ -5119,3 +5119,44 @@ button:disabled {
 .panel:focus {
   outline: none;
 }
+
+/* ---------- Reports ---------- */
+
+.report-panel .choice-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.report-note-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  color: var(--panel-ink);
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.report-list {
+  display: grid;
+  gap: 8px;
+  max-height: 40vh;
+  margin: 0 0 10px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 13px;
+}
+
+.report-item {
+  display: grid;
+  gap: 2px;
+}
+
+.report-note {
+  font-style: italic;
+}

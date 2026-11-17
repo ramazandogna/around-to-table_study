@@ -118,6 +118,19 @@ function Card({ id, name, lines, view }: Selected) {
           {t('card.yourId')} <code>{id}</code>
         </p>
       )}
+      {!mine && (
+        <button
+          type="button"
+          className="mini-button"
+          title={t('card.report.hint')}
+          onClick={() => {
+            store.setReportFor({ id, name });
+            close();
+          }}
+        >
+          🚩 {t('card.report')}
+        </button>
+      )}
       {!mine && role === 'admin' && profile && (
         <button
           type="button"

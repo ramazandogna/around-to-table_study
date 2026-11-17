@@ -75,8 +75,12 @@ export function startSocial(session: GuestSession): () => void {
           );
           if (mayRing()) play('chime');
           break;
-        case 'blockedBy':
-          store.notify({ kind: 'blocked_by', name: message.name }, 'blocked_by');
+        case 'reported':
+          store.setReportFor(null);
+          store.setNotice('report_sent');
+          break;
+        case 'reports':
+          store.setReports(message.reports);
           break;
         case 'admins':
           store.setAdmins(message.admins);
@@ -118,7 +122,11 @@ export function startSocial(session: GuestSession): () => void {
           } else if (message.code === 'blocked') {
             store.setNotice('blocked_between');
           } else if (message.code === 'rate_limited') {
-            store.setNotice('rate_limited');
+            // A report that goes over its hourly limit closes its dialog with its own note.
+            if (store.reportFor) {
+              store.setReportFor(null);
+              store.setNotice('report_limited');
+            } else store.setNotice('rate_limited');
           }
           break;
       }

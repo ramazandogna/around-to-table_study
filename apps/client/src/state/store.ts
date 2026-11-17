@@ -21,6 +21,7 @@ import {
   type Friend,
   type StatusLines,
   type StudyPlanId,
+  type Report,
   type StudyRhythm,
   type StudyStatus,
   type WaitingPet,
@@ -96,6 +97,10 @@ export type Notice =
   | 'finished'
   /** A running block came back after a reload; sit down to carry on. */
   | 'block_resume'
+  /** A report was kept. */
+  | 'report_sent'
+  /** Too many reports for now. */
+  | 'report_limited'
   /** The room filled up before the player got in. */
   | 'room_full'
   /** A returning player's one-line recap (the value is the line). */
@@ -135,8 +140,6 @@ export type Notice =
   | 'no_smoke'
   /** The status lines ran out and were cleared. */
   | 'lines_expired'
-  /** Someone blocked the player (the value is who). */
-  | 'blocked_by'
   /** The player blocked, muted or unmuted someone (the value is who). */
   | 'blocked'
   | 'muted_person'
@@ -201,7 +204,6 @@ export type InboxItem = {
     | 'buzz'
     | 'event_approved'
     | 'event_rejected'
-    | 'blocked_by'
     | 'kicked'
     | 'banned'
     | 'room_closed';
@@ -516,6 +518,10 @@ type GameState = {
   lastSeat: { x: number; y: number } | null;
   /** "Let's go" after a break was said and the player is on the way to a chair: the block starts on sitting. */
   walkBack: boolean;
+  /** The person being reported, while the report dialog is open. */
+  reportFor: { id: string; name: string } | null;
+  /** Admins: the reports sent in, newest first. */
+  reports: Report[];
   /** Focus blocks running in the room that could be joined. */
   blocksHere: RunningBlock[];
   dnd: boolean;
@@ -629,6 +635,8 @@ type GameState = {
   /** The last focus block of the session ended. */
   finishStudy: () => void;
   setBlocksHere: (blocks: RunningBlock[]) => void;
+  setReportFor: (person: { id: string; name: string } | null) => void;
+  setReports: (reports: Report[]) => void;
   setDnd: (dnd: boolean) => void;
   setCooldown: (area: AreaId, until: number) => void;
   /** Back to the name screen with nothing carried over. */
@@ -768,6 +776,8 @@ export const useGameStore = create<GameState>((set) => ({
   lastSeat: null,
   walkBack: false,
   blocksHere: [],
+  reportFor: null,
+  reports: [],
   dnd: false,
   cooldownUntil: {},
   setSession: (session) => set({ session }),
@@ -1046,6 +1056,8 @@ export const useGameStore = create<GameState>((set) => ({
   returnToSeat: () => set((state) => (state.study?.phase === 'between' ? { walkBack: true } : {})),
   setLastSeat: (lastSeat) => set({ lastSeat }),
   setBlocksHere: (blocksHere) => set({ blocksHere }),
+  setReportFor: (reportFor) => set({ reportFor }),
+  setReports: (reports) => set({ reports }),
   finishStudy: () =>
     set((state) => (state.study ? { study: { ...state.study, phase: 'done' }, dnd: false } : {})),
   setDnd: (dnd) => set({ dnd }),
@@ -1099,7 +1111,8 @@ export function panelOpen(s: GameState): boolean {
     s.jukeboxOpen ||
     s.game !== null ||
     s.tableOpen !== null ||
-    s.selected !== null
+    s.selected !== null ||
+    s.reportFor !== null
   );
 }
 

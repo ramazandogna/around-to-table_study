@@ -12,7 +12,6 @@ const ICON: Record<InboxItem['kind'], string> = {
   buzz: '📳',
   event_approved: '🎉',
   event_rejected: '📅',
-  blocked_by: '🚫',
   kicked: '🚪',
   banned: '⛔',
   room_closed: '🗝️',
@@ -206,9 +205,13 @@ export function AdminPanel() {
   const open = useGameStore((s) => s.adminOpen);
   const admins = useGameStore((s) => s.admins);
   const social = useGameStore((s) => s.social);
+  const reports = useGameStore((s) => s.reports);
   const waiting = useGameStore((s) => s.proposed.filter((e) => e.status === 'pending').length);
   useEffect(() => {
-    if (open) social?.admins();
+    if (open) {
+      social?.admins();
+      social?.reports();
+    }
   }, [open, social]);
   if (!open) return null;
   const store = useGameStore.getState();
@@ -226,6 +229,36 @@ export function AdminPanel() {
             </li>
           ))}
         </ul>
+        <p className="field-label">🚩 {t('admin.reports')}</p>
+        {reports.length === 0 ? (
+          <p className="board-empty">{t('admin.reports.none')}</p>
+        ) : (
+          <ul className="report-list">
+            {reports.map((r) => (
+              <li key={r.id} className="report-item">
+                <b>{r.target.name}</b> · {t(`report.reason.${r.reason}`)}
+                {r.area ? ` · ${t(`area.${r.area}`)}` : ''}
+                <span className="creator-note">
+                  {t('admin.reports.reporter', { name: r.reporter.name })} ·{' '}
+                  {new Date(r.at).toLocaleString(dateLocale())}
+                </span>
+                {r.note && <span className="report-note">“{r.note}”</span>}
+                {r.lines.length > 0 && (
+                  <details>
+                    <summary>{t('admin.reports.lines')}</summary>
+                    <ul>
+                      {r.lines.map((line, i) => (
+                        <li key={i}>
+                          {line.kind}: {line.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         <button
           type="button"
           className="mini-button mini-button--ok"
