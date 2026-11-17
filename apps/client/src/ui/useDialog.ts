@@ -18,14 +18,9 @@ function focusables(root: HTMLElement): HTMLElement[] {
   );
 }
 
-const isField = (el: EventTarget | null) =>
-  el instanceof HTMLElement &&
-  (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
-
 /**
  * What every dialog and panel shares: the first control takes focus when it
- * opens, Tab stays inside it, Escape closes it (unless a text field is
- * typing: that Escape belongs to the field), and focus goes back to where it
+ * opens, Tab stays inside it, Escape closes it (except while an IME is composing), and focus goes back to where it
  * was when it closes. The element needs `tabIndex={-1}` to be a fallback.
  */
 export function useDialog(
@@ -48,7 +43,8 @@ export function useDialog(
     const onKey = (event: KeyboardEvent) => {
       if (open[open.length - 1] !== root || event.defaultPrevented) return;
       if (event.key === 'Escape') {
-        if (isField(event.target) || !close.current) return;
+        // Escape closes even from a text field, except while an IME is composing text.
+        if (event.isComposing || !close.current) return;
         event.preventDefault();
         close.current();
         return;

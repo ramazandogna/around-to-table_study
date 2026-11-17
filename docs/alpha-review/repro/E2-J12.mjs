@@ -45,7 +45,7 @@ for (const { name, root } of panels) {
     staysBack &&= (await insideAndCount(root)).inside;
   }
   check(`${root}: Shift+Tab stays inside`, staysBack);
-  // Escape from a button (a text field keeps its own Escape).
+  // Escape from a button.
   await page.evaluate((sel) => document.querySelector(sel)?.querySelector('button')?.focus(), root);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
@@ -55,5 +55,23 @@ for (const { name, root } of panels) {
   );
   check(`${root}: focus returns to the button that opened it`, name.test(back.trim()));
 }
+// Escape from inside a text field closes the dialog too (Goals: "your own goal" input).
+await page.locator('.hud-link', { hasText: /Goals/ }).first().click();
+await page.waitForTimeout(500);
+await page
+  .locator('[role=dialog] .tag', { hasText: /Own|own/ })
+  .first()
+  .click();
+const field = page
+  .locator('[role=dialog] input[type=text], [role=dialog] input:not([type])')
+  .first();
+await field.focus();
+check('Goals: a text field has focus', await field.evaluate((el) => el === document.activeElement));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
+check(
+  'Goals: Escape in a text field closes it',
+  (await page.locator('[role=dialog]').count()) === 0,
+);
 await browser.close();
 process.exit(results.every(Boolean) ? 0 : 1);
