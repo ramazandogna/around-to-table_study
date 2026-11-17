@@ -2,6 +2,7 @@ import { useGameStore } from '../state/store';
 import { dailyDone, foundCount } from '../state/daily';
 import { loadGoals } from '../state/stats';
 import {
+  deleteAccountOnServer,
   fetchMe,
   isError,
   loadProgress,
@@ -107,6 +108,21 @@ export async function signOut(): Promise<void> {
   await endSession();
   setPlayingId(null);
   location.reload();
+}
+
+/** Deletes the account for good, forgets everything kept in this browser (not the language) and starts at the sign-in screen. */
+export async function deleteAccount(): Promise<boolean> {
+  if (!(await deleteAccountOnServer())) return false;
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('att.') && key !== 'att.language') localStorage.removeItem(key);
+    }
+    sessionStorage.clear();
+  } catch {
+    // Nothing kept here to forget.
+  }
+  location.reload();
+  return true;
 }
 
 /**

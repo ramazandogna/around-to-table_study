@@ -1,6 +1,6 @@
 import { earnedBadges } from '@att/shared';
-import { useEffect, useState } from 'react';
-import { t, type MessageKey } from '../i18n/t';
+import { useEffect, useState, type FormEvent } from 'react';
+import { getLanguage, t, type MessageKey } from '../i18n/t';
 import {
   deleteCharacter,
   isError,
@@ -9,7 +9,7 @@ import {
   setPlayingId,
   type ServerCharacter,
 } from '../net/account';
-import { enterAs, refreshAccount, signOut } from '../net/enter';
+import { deleteAccount, enterAs, refreshAccount, signOut } from '../net/enter';
 import { readJson } from '../net/storage';
 import { useGameStore } from '../state/store';
 import {
@@ -36,6 +36,7 @@ export function CharacterSelect() {
   const characters = useGameStore((s) => s.characters);
   const account = useGameStore((s) => s.account);
   const [deleting, setDeleting] = useState<ServerCharacter | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const empty = Math.max(0, MAX_CHARACTERS - characters.length);
   const live = playingId();
@@ -97,8 +98,12 @@ export function CharacterSelect() {
           <button type="button" className="mini-button" onClick={() => void signOut()}>
             {t('account.signOut')}
           </button>
+          <button type="button" className="mini-button" onClick={() => setDeletingAccount(true)}>
+            {t('account.delete')}
+          </button>
         </div>
       </Panel>
+      {deletingAccount && <DeleteAccountDialog onClose={() => setDeletingAccount(false)} />}
       {deleting && (
         <Dialog onClose={() => setDeleting(null)}>
           <Panel title={t('lobby.delete.title', { name: deleting.name })} className="panel--dialog">
@@ -224,4 +229,54 @@ function CharacterCard({
 /** A goal's name: the ready-made one in the player's language, or their own words. */
 export function goalName(goal: { preset: string | null; text: string }): string {
   return goal.preset ? t(`goal.preset.${goal.preset}` as MessageKey) : goal.text;
+}
+
+/** Erases the whole account, after the player types the word. */
+function DeleteAccountDialog({ onClose }: { onClose: () => void }) {
+  const word = t('account.delete.word');
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const ready = typed.trim().toLocaleUpperCase(getLanguage()) === word;
+
+  async function erase(event: FormEvent) {
+    event.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    setFailed(false);
+    if (!(await deleteAccount())) {
+      setBusy(false);
+      setFailed(true);
+    }
+  }
+
+  return (
+    <Dialog onClose={onClose}>
+      <form onSubmit={(event) => void erase(event)}>
+        <Panel title={`⚠️ ${t('account.delete.title')}`} className="panel--dialog">
+          <p className="panel-text">{t('account.delete.text')}</p>
+          <label className="field-label" htmlFor="delete-word">
+            {t('account.delete.type', { word })}
+          </label>
+          <input
+            id="delete-word"
+            value={typed}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+          {failed && <p className="panel-error">{t('account.delete.error')}</p>}
+          <div className="panel-actions">
+            <button type="button" className="panel-button" onClick={onClose}>
+              {t('lobby.delete.cancel')}
+            </button>
+            <button type="submit" className="panel-ok" disabled={!ready || busy}>
+              {t('account.delete.confirm')}
+            </button>
+          </div>
+        </Panel>
+      </form>
+    </Dialog>
+  );
 }

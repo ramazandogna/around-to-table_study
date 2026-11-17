@@ -92,6 +92,16 @@ export async function signOut(): Promise<void> {
   await call('/api/logout', { method: 'POST' });
 }
 
+/** Erases the account on the server (the caller has asked for a typed confirmation); true when it is gone. */
+export async function deleteAccountOnServer(): Promise<boolean> {
+  const result = await call<{ ok?: boolean }>('/api/account/delete', {
+    method: 'POST',
+    headers: json,
+    body: JSON.stringify({ confirm: true }),
+  });
+  return !isError(result);
+}
+
 /* ---------- Progress kept per character, on the server ---------- */
 
 /**
