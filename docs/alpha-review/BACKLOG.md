@@ -48,6 +48,7 @@ Owners: E1 = server and shared, E2 = game client, E3 = website. "E1→E2" means 
 - Server clock for events, quests and timers (T1-09). Dead-connection banner (T1-11). Grace period on a table-game reconnect (T1-08). One character in several rooms (T1-07). Case-folded unique names (T1-05). Invisible and bidi text (T1-10). Darts aim on the server (T1-12). Overlapping conference events (T1, unconfirmed).
 - HUD "More" menu (A3-11). Touch targets and contrast (A3-8, A3-12, A3-13, A3-15, A3-16). Pomodoro double confirm (T2-4). Tappable door signs (T2-7).
 - Site: performance and TBT, vue-router removal (W2-8). hreflang routes (W2-10).
+- Server follow-ups from round J (E1): a reconnect (`hello` with a timer) restarts the measured block, so a flaky connection loses the earlier minutes; the hub could keep the block start per character. Reports keep area chat lines in room memory only (lost on hibernation). `smoked`, `status` and `joined` still reach someone who blocked the sender. Players' last known area in `places` can go stale if an area room dies without a close. The client still handles the retired `blockedBy` message. `docs/alpha-review/repro/*.mjs` fail `format:check` and `lint` on main.
 
 ## Rejected or deferred
 - **Renaming the "smoking room" (W1-6).** Settled in the decisions, so it is not reopened. Recorded as a Decision proposal for the owner.
