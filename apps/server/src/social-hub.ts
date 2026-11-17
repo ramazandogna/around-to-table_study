@@ -15,6 +15,7 @@ import {
   type FoundPerson,
   checkProposal,
   cleanDm,
+  cleanNote,
   cleanOffset,
   cleanRoomRules,
   DEFAULT_ROOM_RULES,
@@ -249,6 +250,11 @@ export class SocialHub extends DurableObject<Env> {
         user TEXT NOT NULL,
         PRIMARY KEY (code, user)
       );
+      CREATE TABLE IF NOT EXISTS places (
+        id TEXT PRIMARY KEY,
+        area TEXT NOT NULL,
+        at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS tries (
         key TEXT PRIMARY KEY,
         start INTEGER NOT NULL,
@@ -395,6 +401,7 @@ export class SocialHub extends DurableObject<Env> {
       'shouts',
       'room_bans',
       'tries',
+      'places',
     ]) {
       this.sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
@@ -803,7 +810,7 @@ export class SocialHub extends DurableObject<Env> {
         vibe: message.vibe ?? null,
         mood: message.mood ?? null,
         doing: message.doing ?? null,
-        note: message.note?.slice(0, 80) ?? '',
+        note: cleanNote(message.note ?? ''),
       };
       const next: Member = {
         ...me,
@@ -967,7 +974,8 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   private dm(ws: WebSocket, me: Member, to: string, raw: string): void {
-    if (me.area && !AREA_RULES[me.area].phone) {
+    const area = this.areaOf(me);
+    if (area && !AREA_RULES[area].phone) {
       return send(ws, { t: 'error', code: 'phone_silent' });
     }
     if (this.blockedBetween(me.id, to)) return send(ws, { t: 'error', code: 'blocked' });
@@ -1129,6 +1137,10 @@ export class SocialHub extends DurableObject<Env> {
     this.tellFriends(me.id);
     this.closing = null;
     this.tellWorld();
+    // Nobody left to speak for them: no room still has them.
+    if (!this.ctx.getWebSockets(me.id).some((socket) => socket !== ws)) {
+      this.sql.exec('DELETE FROM places WHERE id = ?', me.id);
+    }
   }
 
   /**
@@ -1329,6 +1341,35 @@ export class SocialHub extends DurableObject<Env> {
 
   /* ---------- Blocking ---------- */
 
+  /** An area room says someone came in: where they really are, whatever their phone claims. */
+  async placed(id: string, area: AreaId): Promise<void> {
+    this.sql.exec(
+      `INSERT INTO places (id, area, at) VALUES (?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET area = excluded.area, at = excluded.at`,
+      id,
+      area,
+      Date.now(),
+    );
+  }
+
+  /** And that they left; a newer area's entry is not undone by an older one closing late. */
+  async unplaced(id: string, area: AreaId): Promise<void> {
+    this.sql.exec('DELETE FROM places WHERE id = ? AND area = ?', id, area);
+  }
+
+  /** The area a person is in as the rooms know it; what their phone claims only when no room does. */
+  private areaOf(me: Member): AreaId | null {
+    const row = this.sql
+      .exec<{ area: AreaId }>('SELECT area FROM places WHERE id = ?', me.id)
+      .toArray()[0];
+    return row?.area ?? me.area;
+  }
+
+  /** Everyone a person blocked or was blocked by, for rooms to leave out of what they send. */
+  async blockedWith(id: string): Promise<string[]> {
+    return [...this.blockSet(id)];
+  }
+
   /** Whether either of the two blocked the other. Also asked by the rooms, for pokes and invites. */
   async isBlocked(a: string, b: string): Promise<boolean> {
     return this.blockedBetween(a, b);
@@ -1390,7 +1431,7 @@ export class SocialHub extends DurableObject<Env> {
 
   /** A line for the whole building; the library listens but does not talk. */
   private shout(ws: WebSocket, me: Member, raw: string): void {
-    if (me.area === 'library') return send(ws, { t: 'error', code: 'phone_silent' });
+    if (this.areaOf(me) === 'library') return send(ws, { t: 'error', code: 'phone_silent' });
     const messages = takeToken(me.messages, Date.now(), MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
     if (!messages) return send(ws, { t: 'error', code: 'rate_limited' });
     ws.serializeAttachment({ ...me, messages });

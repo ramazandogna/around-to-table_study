@@ -24,6 +24,8 @@ export function fakeHub(overrides: Partial<HubStub> = {}): HubStub & { recorded:
     },
     isBlocked: async () => false,
     blockedWith: async () => [],
+    placed: async () => {},
+    unplaced: async () => {},
     ...overrides,
   };
 }

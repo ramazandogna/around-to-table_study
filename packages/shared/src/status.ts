@@ -69,6 +69,15 @@ export function cleanStatusLines(lines: IncomingLines): StatusLines | null {
   return texts.some((text) => containsLink(text) || hasProfanity(text)) ? null : result;
 }
 
+/**
+ * A note shown on a friend's phone, held to the same rules as the status lines:
+ * 40 characters, and nothing with a link or a swear (such a note becomes none).
+ */
+export function cleanNote(raw: string): string {
+  const text = normalizeChat(raw, STATUS_LIMITS.announcement) ?? '';
+  return containsLink(text) || hasProfanity(text) ? '' : text;
+}
+
 export function hasStatusLines(lines: StatusLines): boolean {
   return (
     lines.announcement !== '' || lines.doing !== null || lines.mood !== null || lines.vibe !== null

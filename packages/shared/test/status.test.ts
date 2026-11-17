@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { cleanStatusLines, EMPTY_LINES, hasStatusLines, parseClientMessage } from '../src';
+import {
+  cleanNote,
+  cleanStatusLines,
+  EMPTY_LINES,
+  hasStatusLines,
+  parseClientMessage,
+  STATUS_LIMITS,
+} from '../src';
 
 describe('status lines', () => {
   it('keeps the vibe, and takes lines without one from older clients', () => {
@@ -44,5 +51,17 @@ describe('status lines', () => {
     expect(parseClientMessage(JSON.stringify({ t: 'lines', lines: EMPTY_LINES }))).not.toBeNull();
     expect(parseClientMessage(JSON.stringify({ t: 'emote', emote: 'wave' }))).not.toBeNull();
     expect(parseClientMessage(JSON.stringify({ t: 'emote', emote: 'dance' }))).toBeNull();
+  });
+});
+
+describe('cleanNote', () => {
+  it('keeps a plain note, cut to the status line length', () => {
+    expect(cleanNote('reading chapter 4')).toBe('reading chapter 4');
+    expect(cleanNote('a'.repeat(80))).toHaveLength(STATUS_LIMITS.announcement);
+  });
+  it('drops a note with a link or a swear', () => {
+    expect(cleanNote('visit evil.com now')).toBe('');
+    expect(cleanNote('visit evil．com now')).toBe('');
+    expect(cleanNote('you fucking idiot')).toBe('');
   });
 });

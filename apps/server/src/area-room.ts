@@ -239,7 +239,18 @@ export class AreaRoom extends DurableObject<Env> {
     }
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
     const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
-    this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
+    // What a person says, emotes and dances is not shown to anyone they blocked or who blocked them.
+    if (
+      (message.t === 'say' || message.t === 'emote' || message.t === 'dance') &&
+      this.ctx.getWebSockets().length > 1
+    ) {
+      this.hiddenFrom = new Set(await this.env.SOCIAL.getByName('hub').blockedWith(me.id));
+    }
+    try {
+      this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
+    } finally {
+      this.hiddenFrom = null;
+    }
   }
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
@@ -310,6 +321,13 @@ export class AreaRoom extends DurableObject<Env> {
     }
     this.broadcast({ t: 'table', kind, table: record?.table ?? null });
   }
+
+  /**
+   * While one message is handled: the people it must not reach (those the
+   * sender blocked or who blocked them). Handling is synchronous, so it is
+   * set and cleared around the one call.
+   */
+  private hiddenFrom: Set<string> | null = null;
 
   private doorTagValue: string | null = null;
 
@@ -482,6 +500,8 @@ export class AreaRoom extends DurableObject<Env> {
             : {}),
         });
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
+        // The hub trusts this, not the phone, about where the person is.
+        void this.env.SOCIAL.getByName('hub').placed(me.id, me.area);
         this.grow(me.area);
         if (isRoomArea(me.area) && this.rules) {
           this.send(ws, { t: 'roomRules', rules: this.rules });
@@ -917,6 +937,7 @@ export class AreaRoom extends DurableObject<Env> {
     if (me?.joined) {
       this.save(ws, { ...me, joined: false });
       this.broadcast({ t: 'left', id: me.id }, ws);
+      void this.env.SOCIAL.getByName('hub').unplaced(me.id, me.area);
       // Whoever leaves the room gets up from its tables too.
       for (const [kind, record] of this.tables ?? []) {
         if (record.table.players.some((p) => p.id === me.id)) {
@@ -967,7 +988,9 @@ export class AreaRoom extends DurableObject<Env> {
   private broadcast(message: ServerMessage, except?: WebSocket): void {
     const data = JSON.stringify(message);
     for (const ws of this.ctx.getWebSockets()) {
-      if (ws !== except && this.load(ws)?.joined) this.trySend(ws, data);
+      if (ws === except) continue;
+      const them = this.load(ws);
+      if (them?.joined && !this.hiddenFrom?.has(them.id)) this.trySend(ws, data);
     }
   }
 
