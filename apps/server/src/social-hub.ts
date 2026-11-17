@@ -101,6 +101,8 @@ const MESSAGE_WINDOW_MS = 10_000;
 const WORLD_EVERY_MS = 1_500;
 /** How often sockets that went quiet are looked for while anyone is connected. */
 const SWEEP_MS = 30_000;
+/** How long wrong passwords are counted for (see `PASSWORD_TRIES`). */
+const PASSWORD_WINDOW_MS = 10 * 60_000;
 /** Rooms one person may open per hour, so nobody fills the reception. */
 const ROOMS_PER_HOUR = 5;
 
@@ -167,8 +169,6 @@ export class SocialHub extends DurableObject<Env> {
   /** A socket being closed may still be listed for a moment; it no longer counts as online. */
   private closing: WebSocket | null = null;
   private worldTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Access password tries per address (kept while the hub is awake). */
-  private readonly passwordTries = new Map<string, RateWindow>();
   /** Friend requests per person (kept while the hub is awake). */
   private readonly requestTries = new Map<string, RateWindow>();
 
@@ -248,6 +248,11 @@ export class SocialHub extends DurableObject<Env> {
         code TEXT NOT NULL,
         user TEXT NOT NULL,
         PRIMARY KEY (code, user)
+      );
+      CREATE TABLE IF NOT EXISTS tries (
+        key TEXT PRIMARY KEY,
+        start INTEGER NOT NULL,
+        count INTEGER NOT NULL
       );
     `);
     // Accounts outlive data epochs: they are who people are, not what the building holds.
@@ -389,6 +394,7 @@ export class SocialHub extends DurableObject<Env> {
       'events',
       'shouts',
       'room_bans',
+      'tries',
     ]) {
       this.sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
@@ -626,16 +632,33 @@ export class SocialHub extends DurableObject<Env> {
     );
   }
 
+  /**
+   * One more try at the access code, for an account or an address; false once
+   * it tried too often. Kept in storage, so waking up fresh does not reset it.
+   */
   async passwordTry(address: string): Promise<boolean> {
-    const window = takeToken(
-      this.passwordTries.get(address) ?? { start: 0, count: 0 },
-      Date.now(),
-      PASSWORD_TRIES,
-      10 * 60_000,
-    );
-    if (!window) return false;
-    this.passwordTries.set(address, window);
+    if (this.triesSpent(address, PASSWORD_WINDOW_MS) >= PASSWORD_TRIES) return false;
+    this.spendTry(address);
     return true;
+  }
+
+  /** Tries counted under a key inside the window; old keys are dropped as they are met. */
+  private triesSpent(key: string, windowMs: number): number {
+    const now = Date.now();
+    this.sql.exec('DELETE FROM tries WHERE start <= ?', now - windowMs);
+    return (
+      this.sql.exec<{ count: number }>('SELECT count FROM tries WHERE key = ?', key).toArray()[0]
+        ?.count ?? 0
+    );
+  }
+
+  private spendTry(key: string): void {
+    this.sql.exec(
+      `INSERT INTO tries (key, start, count) VALUES (?, ?, 1)
+       ON CONFLICT (key) DO UPDATE SET count = count + 1`,
+      key,
+      Date.now(),
+    );
   }
 
   /**
@@ -705,12 +728,19 @@ export class SocialHub extends DurableObject<Env> {
     code: string,
     password: string | null,
     user: string,
-  ): Promise<'ok' | 'unknown' | 'password' | 'banned' | 'full'> {
+  ): Promise<'ok' | 'unknown' | 'password' | 'banned' | 'full' | 'too_many'> {
     const row = this.roomRow(code);
     if (!row) return 'unknown';
     if (this.isBanned(code, user)) return 'banned';
-    if (row.password && (!password || (await hashPassword(code, password)) !== row.password)) {
-      return 'password';
+    if (row.password) {
+      // Wrong passwords are counted per account and room, in storage; the right one is refused too
+      // once the budget is spent, or guessing would still work.
+      const key = `room:${code}:${user}`;
+      if (this.triesSpent(key, PASSWORD_WINDOW_MS) >= PASSWORD_TRIES) return 'too_many';
+      if (!password || (await hashPassword(code, password)) !== row.password) {
+        this.spendTry(key);
+        return 'password';
+      }
     }
     // A room holds as many people as it was opened for; someone already inside may come back.
     const inside = await this.env.AREAS.getByName(`room:${code}`).occupants();

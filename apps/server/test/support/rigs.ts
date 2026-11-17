@@ -102,5 +102,5 @@ export function hubRig(env: Partial<Env> = {}) {
     await hub.webSocketMessage(client.ws as unknown as WebSocket, JSON.stringify(message));
   }
 
-  return { hub, state, sql: state.storage.sql, areas, connect, send };
+  return { hub, state, sql: state.storage.sql, areas, env: fullEnv, connect, send };
 }
