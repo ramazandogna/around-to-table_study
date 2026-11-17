@@ -27,6 +27,17 @@ describe('the social socket trusts the server about where people are', () => {
     expect(a.ws.of('shouted')).toHaveLength(1);
   });
 
+  it('closing and reopening the phone socket keeps the server-known area', async () => {
+    const rig = hubRig();
+    const a = await rig.connect('a');
+    await rig.hub.placed('a', 'library');
+    await rig.hub.webSocketClose(a.ws as unknown as WebSocket);
+    const again = await rig.connect('a');
+    await rig.send(again, { t: 'where', area: 'hall' });
+    await rig.send(again, { t: 'shout', text: 'sneaky' });
+    expect(again.ws.of('error')).toEqual([{ t: 'error', code: 'phone_silent' }]);
+  });
+
   it('leaving the library lifts the rule, but only for that area', async () => {
     const rig = hubRig();
     const a = await rig.connect('a');
@@ -109,6 +120,24 @@ describe('area chat is not delivered to people who blocked the sender', () => {
     await rig.send(a, { t: 'dance', on: true, move: 1 });
     expect(b.ws.of('danced')).toEqual([]);
     expect(c.ws.of('danced')).toHaveLength(1);
+  });
+
+  it('a burst of says cannot slip past the cooldown while the block list is fetched', async () => {
+    const hub = fakeHub({
+      blockedWith: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return [];
+      },
+    });
+    const rig = areaRig('smoking', hub);
+    const a = await rig.join('a');
+    const b = await rig.join('b');
+    b.ws.sent.length = 0;
+    const burst = [1, 2, 3].map((n) => rig.send(a, { t: 'say', text: `line ${n}` }));
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(burst);
+    expect(b.ws.of('said')).toHaveLength(1);
+    expect(a.ws.of('error').filter((e) => e['code'] === 'rate_limited')).toHaveLength(2);
   });
 
   it('everything still reaches everyone when nobody blocked anyone', async () => {

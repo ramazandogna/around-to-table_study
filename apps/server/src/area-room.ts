@@ -249,8 +249,15 @@ export class AreaRoom extends DurableObject<Env> {
     ) {
       this.hiddenFrom = new Set(await this.env.SOCIAL.getByName('hub').blockedWith(me.id));
     }
+    // Other messages of this socket ran while those awaits waited: act on its state as it is now.
+    const current = this.load(ws) ?? me;
     try {
-      this.handle(ws, { ...me, lastSayAt: Math.max(me.lastSayAt, said ?? 0) }, message, Date.now());
+      this.handle(
+        ws,
+        { ...current, lastSayAt: Math.max(current.lastSayAt, said ?? 0) },
+        message,
+        Date.now(),
+      );
     } finally {
       this.hiddenFrom = null;
     }

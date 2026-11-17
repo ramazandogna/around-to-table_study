@@ -33,6 +33,13 @@ describe('room password try limit', () => {
     expect(await rig.hub.checkRoom(other?.code ?? '', 'secret', 'u1')).toBe('ok');
   });
 
+  it('counts per account, not per character: a second character shares the tries', async () => {
+    const { rig, code } = await lockedRoom();
+    for (let i = 0; i < PASSWORD_TRIES; i++) await rig.hub.checkRoom(code, 'x', 'char1', 'acct1');
+    expect(await rig.hub.checkRoom(code, 'secret', 'char2', 'acct1')).toBe('too_many');
+    expect(await rig.hub.checkRoom(code, 'secret', 'char3', 'acct2')).toBe('ok');
+  });
+
   it('a right password does not use up tries', async () => {
     const { rig, code } = await lockedRoom();
     for (let i = 0; i < PASSWORD_TRIES * 2; i++) {

@@ -25,7 +25,7 @@ describe('focus time is measured by the server', () => {
     expect(hub.recorded.filter((m) => m > 0)).toEqual([]);
   });
 
-  it('credits nothing when the forged claim comes after some waiting', async () => {
+  it('credits only the time seen when the forged claim comes after some waiting', async () => {
     const hub = fakeHub();
     const rig = areaRig('library', hub);
     const a = await rig.join('a');
@@ -33,7 +33,21 @@ describe('focus time is measured by the server', () => {
     vi.advanceTimersByTime(2 * MIN);
     await rig.send(a, { t: 'status', status: timer(0, 180 * MIN) });
     await rig.send(a, { t: 'finished' });
-    expect(hub.recorded.filter((m) => m > 0)).toEqual([]);
+    expect(hub.recorded).toEqual([2]);
+  });
+
+  it('credits a block with an honest pause and resume in full', async () => {
+    const hub = fakeHub();
+    const rig = areaRig('library', hub);
+    const a = await rig.join('a');
+    await rig.send(a, { t: 'status', status: timer(25 * MIN, 25 * MIN) });
+    vi.advanceTimersByTime(5 * MIN);
+    // Paused for ten minutes: when it resumes, the end has moved later.
+    vi.advanceTimersByTime(10 * MIN);
+    await rig.send(a, { t: 'status', status: timer(20 * MIN, 25 * MIN) });
+    vi.advanceTimersByTime(20 * MIN);
+    await rig.send(a, { t: 'finished' });
+    expect(hub.recorded).toEqual([25]);
   });
 
   it('credits a block that really ran', async () => {

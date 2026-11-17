@@ -321,6 +321,7 @@ export class SocialHub extends DurableObject<Env> {
       'ALTER TABLE users ADD COLUMN messages_sent INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE users ADD COLUMN tz INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE rooms ADD COLUMN rules TEXT',
+      'ALTER TABLE reports ADD COLUMN target_name TEXT',
       'ALTER TABLE events ADD COLUMN theme TEXT',
     ]) {
       try {
@@ -629,12 +630,10 @@ export class SocialHub extends DurableObject<Env> {
       this.sql.exec('DELETE FROM shouts WHERE sender = ?', id);
       this.sql.exec('DELETE FROM room_bans WHERE user = ?', id);
       this.sql.exec('DELETE FROM places WHERE id = ?', id);
-      this.sql.exec('DELETE FROM reports WHERE reporter = ? OR target = ?', id, id);
-      this.sql.exec(
-        "DELETE FROM tries WHERE key = ? OR key LIKE 'room:%:' || ?",
-        `report:${id}`,
-        id,
-      );
+      // Reports are evidence for moderation: those about this character stay (with the name and
+      // lines as they were), and those it filed lose only the link to it.
+      this.sql.exec("UPDATE reports SET reporter = '' WHERE reporter = ?", id);
+      this.sql.exec('DELETE FROM tries WHERE key = ?', `report:${id}`);
       this.sql.exec('DELETE FROM presence WHERE character_id = ?', id);
     }
     for (const code of rooms) {
@@ -646,7 +645,11 @@ export class SocialHub extends DurableObject<Env> {
         // The room is already gone.
       }
     }
-    this.sql.exec('DELETE FROM tries WHERE key = ?', `acct:${accountId}`);
+    this.sql.exec(
+      "DELETE FROM tries WHERE key = ? OR key LIKE 'room:%:' || ?",
+      `acct:${accountId}`,
+      accountId,
+    );
     this.sql.exec('DELETE FROM presence WHERE account_id = ?', accountId);
     this.sql.exec('DELETE FROM sessions WHERE account_id = ?', accountId);
     this.sql.exec('DELETE FROM characters WHERE account_id = ?', accountId);
@@ -836,6 +839,7 @@ export class SocialHub extends DurableObject<Env> {
     code: string,
     password: string | null,
     user: string,
+    account: string = user,
   ): Promise<'ok' | 'unknown' | 'password' | 'banned' | 'full' | 'too_many'> {
     const row = this.roomRow(code);
     if (!row) return 'unknown';
@@ -843,7 +847,7 @@ export class SocialHub extends DurableObject<Env> {
     if (row.password) {
       // Wrong passwords are counted per account and room, in storage; the right one is refused too
       // once the budget is spent, or guessing would still work.
-      const key = `room:${code}:${user}`;
+      const key = `room:${code}:${account}`;
       if (this.triesSpent(key) >= PASSWORD_TRIES) return 'too_many';
       if (!password || (await hashPassword(code, password)) !== row.password) {
         this.spendTry(key, PASSWORD_WINDOW_MS);
@@ -1243,10 +1247,6 @@ export class SocialHub extends DurableObject<Env> {
     this.tellFriends(me.id);
     this.closing = null;
     this.tellWorld();
-    // Nobody left to speak for them: no room still has them.
-    if (!this.ctx.getWebSockets(me.id).some((socket) => socket !== ws)) {
-      this.sql.exec('DELETE FROM places WHERE id = ?', me.id);
-    }
   }
 
   /**
@@ -1506,7 +1506,7 @@ export class SocialHub extends DurableObject<Env> {
     }
     lines.sort((x, y) => x.at - y.at);
     this.sql.exec(
-      'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO reports (reporter, target, reason, note, area, lines, at, target_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       me.id,
       target,
       message.reason,
@@ -1514,6 +1514,7 @@ export class SocialHub extends DurableObject<Env> {
       area ?? null,
       JSON.stringify(lines.slice(-REPORT_LINES * 3)),
       Date.now(),
+      this.nameOf(target),
     );
     send(ws, { t: 'reported', id: target });
   }
@@ -1529,13 +1530,14 @@ export class SocialHub extends DurableObject<Env> {
         area: AreaId | null;
         lines: string;
         at: number;
+        target_name: string | null;
       }>('SELECT * FROM reports ORDER BY id DESC LIMIT 100')
       .toArray()
       .map((row) => ({
         id: row.id,
         at: row.at,
         reporter: { id: row.reporter, name: this.nameOf(row.reporter) ?? '' },
-        target: { id: row.target, name: this.nameOf(row.target) ?? '' },
+        target: { id: row.target, name: this.nameOf(row.target) ?? row.target_name ?? '' },
         reason: row.reason,
         note: row.note,
         area: row.area,
@@ -1561,7 +1563,7 @@ export class SocialHub extends DurableObject<Env> {
     this.sql.exec('DELETE FROM places WHERE id = ? AND area = ?', id, area);
   }
 
-  /** The area a person is in as the rooms know it; what their phone claims only when no room does. */
+  /** The area a person is in as the rooms know it; what their phone claims only when no room has them (only the rooms' `unplaced` clears it). */
   private areaOf(me: Member): AreaId | null {
     const row = this.sql
       .exec<{ area: AreaId }>('SELECT area FROM places WHERE id = ?', me.id)
