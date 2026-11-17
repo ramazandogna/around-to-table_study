@@ -1,3 +1,4 @@
+import { isRoomArea } from './world/areas';
 /**
  * What a seated person is doing, shown to others as props on the table, plus
  * their optional study timer and "do not disturb" flag.
@@ -76,4 +77,46 @@ export function clampRhythm(rhythm: StudyRhythm): StudyRhythm {
     breakMinutes: fit(rhythm.breakMinutes, CUSTOM_LIMITS.breakMinutes),
     rounds: fit(rhythm.rounds, CUSTOM_LIMITS.rounds),
   };
+}
+
+/** A timer sent again with its end this close to the one kept is the same block, not a new one. */
+const SAME_BLOCK_SLACK_MS = FINISH_GRACE_MS;
+
+/**
+ * When a block started, on the server's clock. A timer that arrives again with
+ * the same length and end is the same block and keeps its start; anything else
+ * (a first timer, a new length, an end moved around) starts now, so a client
+ * cannot claim time it did not spend.
+ */
+export function blockStart(
+  kept: { endsAt: number; totalMs: number; startedAt?: number | undefined } | null,
+  next: { endsAt: number; totalMs: number },
+  now: number,
+): number {
+  if (
+    kept &&
+    kept.totalMs === next.totalMs &&
+    Math.abs(kept.endsAt - next.endsAt) <= SAME_BLOCK_SLACK_MS
+  ) {
+    return kept.startedAt ?? now;
+  }
+  return now;
+}
+
+/**
+ * Minutes a finished block earns: the time the server saw it run, never more
+ * than its planned length. A block the server did not see start earns nothing.
+ */
+export function focusMinutes(
+  block: { totalMs: number; startedAt?: number | undefined },
+  now: number,
+): number {
+  if (block.startedAt === undefined) return 0;
+  const measured = Math.max(0, now - block.startedAt);
+  return Math.round(Math.min(measured, block.totalMs) / 60_000);
+}
+
+/** Focus time only counts where people study: the library and private rooms. */
+export function countsForFocus(area: string): boolean {
+  return area === 'library' || isRoomArea(area);
 }

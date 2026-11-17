@@ -20,6 +20,9 @@ import {
   cleanStatusLines,
   EMPTY_LINES,
   FINISH_GRACE_MS,
+  blockStart,
+  countsForFocus,
+  focusMinutes,
   HEARTBEAT,
   createAreaGrid,
   isStale,
@@ -80,7 +83,7 @@ type Connection = {
 
 /** Timers are kept as an end time on the server's clock and sent out as time left. */
 type StoredStudy = Omit<StudyStatus, 'timer'> & {
-  timer: { endsAt: number; totalMs: number } | null;
+  timer: { endsAt: number; totalMs: number; startedAt?: number } | null;
 };
 
 const NO_STUDY: StoredStudy = { activity: null, timer: null, dnd: false };
@@ -424,7 +427,9 @@ export class AreaRoom extends DurableObject<Env> {
         this.replaceOlderConnections(ws, me.id);
         const grid = this.grid(me.area);
         const tile = message.from ? grid.arrivalPoint(message.from) : { ...grid.area.spawn };
-        const study = message.status ? this.storeStudy(grid, tile, message.status, now) : NO_STUDY;
+        const study = message.status
+          ? this.storeStudy(grid, tile, message.status, now, null)
+          : NO_STUDY;
         // Lines with a link are dropped rather than refusing the whole hello.
         const lines = (message.lines && cleanStatusLines(message.lines)) ?? EMPTY_LINES;
         const joined: Connection = {
@@ -501,7 +506,13 @@ export class AreaRoom extends DurableObject<Env> {
         if (!me.joined || !me.tile) return;
         const statuses = takeToken(me.statuses, now, STATUSES_PER_SECOND, 1000);
         if (!statuses) return this.send(ws, { t: 'error', code: 'rate_limited' });
-        const study = this.storeStudy(this.grid(me.area), me.tile, message.status, now);
+        const study = this.storeStudy(
+          this.grid(me.area),
+          me.tile,
+          message.status,
+          now,
+          me.study.timer,
+        );
         this.save(ws, { ...me, statuses, study });
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
         return;
@@ -649,8 +660,9 @@ export class AreaRoom extends DurableObject<Env> {
         const study = { ...me.study, timer: null };
         this.save(ws, { ...me, study });
         this.broadcast({ t: 'finished', id: me.id });
-        // It counts on the person's profile: the room saw the timer run out.
-        void this.env.SOCIAL.getByName('hub').recordBlock(me.id, timer.totalMs / 60_000);
+        // It counts on the person's profile: the time the room saw it run, in places for studying.
+        const minutes = countsForFocus(me.area) ? focusMinutes(timer, now) : 0;
+        if (minutes > 0) void this.env.SOCIAL.getByName('hub').recordBlock(me.id, minutes);
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
         return;
       }
@@ -894,13 +906,25 @@ export class AreaRoom extends DurableObject<Env> {
   }
 
   /** An activity only counts while sitting at a table. */
-  private storeStudy(grid: AreaGrid, tile: Point, status: StudyStatus, now: number): StoredStudy {
+  private storeStudy(
+    grid: AreaGrid,
+    tile: Point,
+    status: StudyStatus,
+    now: number,
+    kept: StoredStudy['timer'],
+  ): StoredStudy {
+    const endsAt = status.timer ? now + status.timer.remainingMs : 0;
     return {
       activity: grid.seatFacing(tile) ? status.activity : null,
       // Which block of a session it is travels too, for "2 of 4" by the name.
       round: status.timer ? (status.round ?? null) : null,
       timer: status.timer
-        ? { endsAt: now + status.timer.remainingMs, totalMs: status.timer.totalMs }
+        ? {
+            endsAt,
+            totalMs: status.timer.totalMs,
+            // When the server first saw this block: the client's claims never move it.
+            startedAt: blockStart(kept, { endsAt, totalMs: status.timer.totalMs }, now),
+          }
         : null,
       dnd: status.dnd,
     };
