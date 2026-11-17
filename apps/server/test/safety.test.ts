@@ -122,6 +122,24 @@ describe('area chat is not delivered to people who blocked the sender', () => {
     expect(c.ws.of('danced')).toHaveLength(1);
   });
 
+  it('a burst of says cannot slip past the cooldown while the block list is fetched', async () => {
+    const hub = fakeHub({
+      blockedWith: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return [];
+      },
+    });
+    const rig = areaRig('smoking', hub);
+    const a = await rig.join('a');
+    const b = await rig.join('b');
+    b.ws.sent.length = 0;
+    const burst = [1, 2, 3].map((n) => rig.send(a, { t: 'say', text: `line ${n}` }));
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(burst);
+    expect(b.ws.of('said')).toHaveLength(1);
+    expect(a.ws.of('error').filter((e) => e['code'] === 'rate_limited')).toHaveLength(2);
+  });
+
   it('everything still reaches everyone when nobody blocked anyone', async () => {
     const { rig, a, b, c } = await room([]);
     await rig.send(a, { t: 'say', text: 'hello there' });
