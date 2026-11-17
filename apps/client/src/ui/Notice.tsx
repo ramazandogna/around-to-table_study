@@ -4,7 +4,11 @@ import { useGameStore } from '../state/store';
 
 const NOTICE_MS = 3000;
 /** A few take longer to read. */
-const LONGER_MS: Partial<Record<string, number>> = { welcome_back: 6000, block_resume: 7000 };
+const LONGER_MS: Partial<Record<string, number>> = {
+  welcome_back: 6000,
+  block_resume: 7000,
+  seat_gone: 6000,
+};
 
 /** A short message above the chat bar, e.g. when sending too fast. */
 export function Notice() {

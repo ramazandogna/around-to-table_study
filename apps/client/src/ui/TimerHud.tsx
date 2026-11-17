@@ -22,6 +22,7 @@ export function TimerHud() {
   const session = useGameStore((s) => s.study);
   const dnd = useGameStore((s) => s.dnd);
   const seated = useGameStore((s) => s.seated);
+  const walkBack = useGameStore((s) => s.walkBack);
   const [now, setNow] = useState(() => Date.now());
 
   const running = timer !== null || session !== null;
@@ -107,6 +108,17 @@ export function TimerHud() {
         <p className="timer-tip">{t(inBreakRoom ? 'timer.break.here' : 'timer.break.tip')}</p>
       </>
     );
+  } else if (session?.phase === 'between' && walkBack) {
+    body = (
+      <>
+        <p className="timer-done">{t('timer.walking', { n: session.round + 1 })}</p>
+        <div className="panel-actions">
+          <button type="button" className="panel-button" onClick={stop}>
+            {t('timer.finish')}
+          </button>
+        </div>
+      </>
+    );
   } else if (session?.phase === 'between') {
     body = (
       <>
@@ -115,7 +127,11 @@ export function TimerHud() {
           <button type="button" className="panel-button" onClick={stop}>
             {t('timer.finish')}
           </button>
-          <button type="button" className="panel-ok" onClick={store.nextRound}>
+          <button
+            type="button"
+            className="panel-ok"
+            onClick={() => (store.seated ? store.nextRound() : store.returnToSeat())}
+          >
             {t('timer.go')}
           </button>
         </div>
