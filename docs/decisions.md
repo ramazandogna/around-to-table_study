@@ -360,3 +360,10 @@ Hovering something that moves gives the game's soft footstep and a click gives a
 - **The old guest system is gone in one step** (data epoch 3): the beta has few players, and keeping two ways in would be worse than one fresh start. "Start over" is replaced by deleting a character and by signing out.
 - **Admins are decided by email** (`ADMIN_EMAILS`); the old id list is gone. Admin powers stay in the game (approving events, sending someone out, the stage).
 - **Local tests sign in without Google** through `/api/auth/dev`, which exists only on a localhost server with no `GOOGLE_CLIENT_ID` (a 404 anywhere else).
+
+## Round J: an alpha review by a small team, fixes before features
+- **Decision:** A two-product review (game and site) by audit and test agents produced `docs/alpha-review/BACKLOG.md`; this round ships 5 P0, 6 P1 and 5 P2 items (J01–J16) and leaves cold start and familiar faces for the next round.
+- **Why:** the forged focus credit, rooms that overfill and a block lost on a language switch break trust in what the building shows; a returning player and a Turkish phone visitor scored lowest, so welcome-back, language and phone layout come next.
+- Room passwords get a try limit now; their PBKDF2 hash waits, because changing the hash would lock existing rooms.
+- The site's code request stays a mailto plus a copy button: the site is static and a waitlist needs a store.
+- Decision proposal (not acted on): W1 suggests the site call the smoking room a "break room"; the room name is settled, so it is left to the owner.
