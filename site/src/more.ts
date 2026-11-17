@@ -15,6 +15,9 @@ export type More = {
     play: string;
     explore: string;
     close: string;
+    codeTitle: string;
+    copy: string;
+    copied: string;
   };
   chatter: [string[], string[], string[], string[]];
 };
@@ -22,12 +25,15 @@ export type More = {
 const en: More = {
   gate: {
     badge: 'Early beta',
-    title: 'We are still building it',
-    text: 'Around the Table is in a closed beta. You sign in with Google, and you also need this week’s access code to walk in. You can look at the game’s door anyway, or explore the site first.',
-    ask: 'No code yet? Write to us and we’ll send one.',
-    play: 'See the game',
+    title: 'Join the closed beta',
+    text: 'Around the Table is in a closed beta. You sign in with Google and enter this week’s access code to walk in. Email us for the code, or explore the site first.',
+    ask: 'Ask for this week’s code',
+    play: 'I have a code: open the game',
     explore: 'Explore the site',
     close: 'Close',
+    codeTitle: 'Our address',
+    copy: 'Copy address',
+    copied: 'Copied',
   },
   chatter: [
     ['anyone up for a pomodoro?', 'library in 5?', 'hi! first time here 👋'],
@@ -40,12 +46,15 @@ const en: More = {
 const tr: More = {
   gate: {
     badge: 'Erken beta',
-    title: 'Henüz yapım aşamasında',
-    text: 'Around the Table kapalı betada. Google ile giriş yaparsın; içeri girmek için ayrıca bu haftanın erişim kodu gerekir. Yine de oyunun kapısına göz atabilir ya da önce siteyi inceleyebilirsin.',
-    ask: 'Kodun yok mu? Bize yaz, gönderelim.',
-    play: 'Oyunu gör',
+    title: 'Kapalı betaya katıl',
+    text: 'Around the Table kapalı betada. Google ile giriş yapıp bu haftanın erişim kodunu girerek içeri girersin. Kod için bize yaz ya da önce siteyi incele.',
+    ask: 'Bu haftanın kodunu iste',
+    play: 'Kodum var: oyunu aç',
     explore: 'Siteyi incele',
     close: 'Kapat',
+    codeTitle: 'Adresimiz',
+    copy: 'Adresi kopyala',
+    copied: 'Kopyalandı',
   },
   chatter: [
     ['pomodoro yapan var mı?', '5 dk sonra kütüphane?', 'selam! ilk kez buradayım 👋'],
@@ -58,12 +67,15 @@ const tr: More = {
 const zh: More = {
   gate: {
     badge: '早期测试',
-    title: '我们还在建造中',
-    text: 'Around the Table 正处于封闭测试阶段。用 Google 账号登录，并且还需要本周的访问码才能进入。你也可以先看看游戏的大门，或者先浏览网站。',
-    ask: '还没有访问码？写信给我们，我们会发给你。',
-    play: '看看游戏',
+    title: '加入封闭测试',
+    text: 'Around the Table 正处于封闭测试阶段。用 Google 账号登录并输入本周的访问码才能进入。给我们写信索取访问码，或者先浏览网站。',
+    ask: '索取本周访问码',
+    play: '我有访问码：打开游戏',
     explore: '浏览网站',
     close: '关闭',
+    codeTitle: '我们的邮箱',
+    copy: '复制邮箱',
+    copied: '已复制',
   },
   chatter: [
     ['有人一起番茄钟吗？', '5 分钟后图书馆见？', '嗨！第一次来 👋'],
@@ -76,12 +88,15 @@ const zh: More = {
 const ja: More = {
   gate: {
     badge: 'アーリーベータ',
-    title: 'まだ建設中です',
-    text: 'Around the Table はクローズドベータです。Google でサインインし、さらに今週のアクセスコードがあれば入れます。ゲームの入口をのぞいたり、先にサイトを見たりもできます。',
-    ask: 'コードがない？メールをくれれば送ります。',
-    play: 'ゲームを見る',
+    title: 'クローズドベータに参加',
+    text: 'Around the Table はクローズドベータです。Google でサインインし、今週のアクセスコードを入力すると入れます。コードはメールで請求するか、先にサイトを見てください。',
+    ask: '今週のコードを請求する',
+    play: 'コードあり：ゲームを開く',
     explore: 'サイトを見る',
     close: '閉じる',
+    codeTitle: 'メールアドレス',
+    copy: 'アドレスをコピー',
+    copied: 'コピーしました',
   },
   chatter: [
     ['ポモドーロする人いる？', '5分後に図書館？', 'こんにちは！初めてです 👋'],

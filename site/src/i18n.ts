@@ -22,6 +22,7 @@ export type Copy = {
     googlePlay: string;
     soon: string;
     invite: string;
+    trust: string;
   };
   pillarsTitle: string;
   pillarsLead: string;
@@ -38,6 +39,7 @@ export type Copy = {
     bug: string;
     mailSubject: string;
     bugSubject: string;
+    codeSubject: string;
   };
   footer: { made: string; credits: string; kit: string };
 };
@@ -48,18 +50,20 @@ const en: Copy = {
     rooms: 'Rooms',
     beta: 'Early beta',
     feedback: 'Suggest something',
-    play: 'Play',
+    play: 'Join the beta',
   },
   hero: {
     badge: 'Early beta · test it now',
     title: "Don't study alone.",
     subtitle:
       'A cozy little building where you study next to real people, take your breaks in the smoking room and make friends along the way.',
-    web: 'Play on the web',
+    web: 'Join the closed beta',
     appStore: 'App Store',
     googlePlay: 'Google Play',
     soon: 'Coming soon',
-    invite: 'The beta is invite-only: ask for this week’s access code.',
+    invite: 'The beta is invite-only: you sign in with Google and need this week’s access code.',
+    trust:
+      'Free. No ads. We keep your Google name and email, your characters and progress, and recent chat lines.',
   },
   pillarsTitle: 'A day inside the building',
   pillarsLead:
@@ -124,12 +128,12 @@ const en: Copy = {
     lead: 'Around the Table is young and changing every week. Play it, break it, and tell us what you think.',
     steps: [
       {
-        title: 'Get the access code',
-        text: 'Ask for it: it changes with every update, so the beta stays small.',
+        title: 'Get this week’s code',
+        text: 'Email us for it: it changes with every update, so the beta stays small.',
       },
       {
-        title: 'Make your character',
-        text: 'Pick a name, a look and a pet. No sign-up for now.',
+        title: 'Sign in and make your character',
+        text: 'Sign in with Google, enter the code, then pick a name, a look and a pet.',
       },
       {
         title: 'Tell us what you think',
@@ -140,6 +144,7 @@ const en: Copy = {
     bug: 'Report a bug',
     mailSubject: 'Around the Table: a suggestion',
     bugSubject: 'Around the Table: a bug',
+    codeSubject: 'Around the Table: this week’s access code',
   },
   footer: {
     made: 'Made by Ramazan Doğan',
@@ -154,18 +159,20 @@ const tr: Copy = {
     rooms: 'Odalar',
     beta: 'Erken beta',
     feedback: 'Öneride bulun',
-    play: 'Oyna',
+    play: 'Betaya katıl',
   },
   hero: {
     badge: 'Erken beta · şimdi dene',
     title: 'Yalnız çalışma.',
     subtitle:
       'Gerçek insanların yanında ders çalıştığın, molalarını sigara odasında verdiğin ve yol boyunca arkadaş edindiğin sıcacık küçük bir bina.',
-    web: 'Web’de oyna',
+    web: 'Kapalı betaya katıl',
     appStore: 'App Store',
     googlePlay: 'Google Play',
     soon: 'Yakında',
-    invite: 'Beta davetle: bu haftanın giriş kodunu iste.',
+    invite: 'Beta davetle: Google ile giriş yaparsın ve bu haftanın giriş kodu gerekir.',
+    trust:
+      'Ücretsiz. Reklam yok. Google adını ve e-postanı, karakterlerini ve ilerlemeni, son sohbet satırlarını saklarız.',
   },
   pillarsTitle: 'Binada bir gün',
   pillarsLead:
@@ -230,12 +237,12 @@ const tr: Copy = {
     lead: 'Around the Table genç ve her hafta değişiyor. Oyna, boz, ne düşündüğünü bize yaz.',
     steps: [
       {
-        title: 'Giriş kodunu al',
-        text: 'İste: her güncellemede değişir, böylece beta küçük kalır.',
+        title: 'Bu haftanın kodunu al',
+        text: 'Bize yaz: her güncellemede değişir, böylece beta küçük kalır.',
       },
       {
-        title: 'Karakterini yap',
-        text: 'Bir isim, bir görünüm ve bir evcil hayvan seç. Şimdilik kayıt yok.',
+        title: 'Giriş yap, karakterini yap',
+        text: 'Google ile giriş yap, kodu gir; sonra bir isim, bir görünüm ve bir evcil hayvan seç.',
       },
       {
         title: 'Ne düşündüğünü söyle',
@@ -246,6 +253,7 @@ const tr: Copy = {
     bug: 'Hata bildir',
     mailSubject: 'Around the Table: bir öneri',
     bugSubject: 'Around the Table: bir hata',
+    codeSubject: 'Around the Table: bu haftanın erişim kodu',
   },
   footer: {
     made: 'Ramazan Doğan tarafından yapıldı',
@@ -255,16 +263,17 @@ const tr: Copy = {
 };
 
 const zh: Copy = {
-  nav: { features: '特色', rooms: '房间', beta: '抢先测试', feedback: '提建议', play: '开始' },
+  nav: { features: '特色', rooms: '房间', beta: '抢先测试', feedback: '提建议', play: '加入测试' },
   hero: {
     badge: '抢先测试 · 现在就试',
     title: '别一个人学习。',
     subtitle: '一栋温馨的小楼：在真人身边学习，到吸烟室休息，顺便交到朋友。',
-    web: '在网页上玩',
+    web: '加入封闭测试',
     appStore: 'App Store',
     googlePlay: 'Google Play',
     soon: '即将推出',
-    invite: '测试仅限受邀：请索取本周的访问码。',
+    invite: '测试仅限受邀：用 Google 账号登录，并需要本周的访问码。',
+    trust: '免费，无广告。我们保存你的 Google 名称和邮箱、角色和进度，以及最近的聊天记录。',
   },
   pillarsTitle: '楼里的一天',
   pillarsLead: '来自游戏的真实瞬间：在大厅相识、在吸烟室玩游戏、并肩学习、坐满会议厅。',
@@ -327,14 +336,18 @@ const zh: Copy = {
     title: '参加抢先测试',
     lead: 'Around the Table 还很年轻，每周都在变化。来玩、来找问题，告诉我们你的想法。',
     steps: [
-      { title: '获取访问码', text: '向我们索取：每次更新都会更换，测试因此保持小规模。' },
-      { title: '创建你的角色', text: '选一个名字、一个造型和一只宠物。暂时不需要注册。' },
+      { title: '获取本周访问码', text: '给我们写信：每次更新都会更换，测试因此保持小规模。' },
+      {
+        title: '登录并创建角色',
+        text: '用 Google 账号登录，输入访问码，再选一个名字、一个造型和一只宠物。',
+      },
       { title: '告诉我们你的想法', text: '想法、问题、愿望：每条消息都会被认真阅读。' },
     ],
     suggest: '提建议',
     bug: '报告问题',
     mailSubject: 'Around the Table：建议',
     bugSubject: 'Around the Table：问题',
+    codeSubject: 'Around the Table：本周访问码',
   },
   footer: {
     made: '由 Ramazan Doğan 制作',
@@ -349,18 +362,20 @@ const ja: Copy = {
     rooms: '部屋',
     beta: 'アーリーベータ',
     feedback: '提案する',
-    play: 'あそぶ',
+    play: 'ベータに参加',
   },
   hero: {
     badge: 'アーリーベータ・いますぐ試せます',
     title: 'ひとりで勉強しないで。',
     subtitle:
       '本物の人たちのとなりで勉強して、休憩は喫煙室で。気がつけば友だちができている、あたたかな小さな建物です。',
-    web: 'ブラウザであそぶ',
+    web: 'クローズドベータに参加',
     appStore: 'App Store',
     googlePlay: 'Google Play',
     soon: '近日公開',
-    invite: 'ベータは招待制です。今週のアクセスコードをお問い合わせください。',
+    invite: 'ベータは招待制です。Google でサインインし、今週のアクセスコードが必要です。',
+    trust:
+      '無料・広告なし。Google の名前とメール、キャラクターと進行状況、最近のチャットを保存します。',
   },
   pillarsTitle: '建物の一日',
   pillarsLead:
@@ -425,12 +440,12 @@ const ja: Copy = {
     lead: 'Around the Table はまだ生まれたばかりで、毎週変わっています。遊んで、壊して、感想を聞かせてください。',
     steps: [
       {
-        title: 'アクセスコードをもらう',
-        text: 'お問い合わせください。更新のたびに変わるので、ベータは小さく保たれます。',
+        title: '今週のコードをもらう',
+        text: 'メールをください。更新のたびに変わるので、ベータは小さく保たれます。',
       },
       {
-        title: 'キャラクターを作る',
-        text: '名前、見た目、ペットを選ぶだけ。いまは登録不要です。',
+        title: 'サインインしてキャラクターを作る',
+        text: 'Google でサインインし、コードを入力して、名前、見た目、ペットを選びます。',
       },
       {
         title: '感想を送る',
@@ -441,6 +456,7 @@ const ja: Copy = {
     bug: 'バグを報告',
     mailSubject: 'Around the Table：提案',
     bugSubject: 'Around the Table：バグ',
+    codeSubject: 'Around the Table：今週のアクセスコード',
   },
   footer: {
     made: '制作：Ramazan Doğan',

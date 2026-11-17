@@ -28,6 +28,7 @@ import {
 import { BaseBadge, BaseButton } from 'rei-kit';
 import { BaseTooltip } from 'rei-kit/web';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import CodeAsk from './CodeAsk.vue';
 import Cursor from './Cursor.vue';
 import HeroBubble from './HeroBubble.vue';
 import PlayGate from './PlayGate.vue';
@@ -68,6 +69,8 @@ const heroBubbles = [
 const mail = (subject: string) => `mailto:${MAIL}?subject=${encodeURIComponent(subject)}`;
 const suggestLink = computed(() => mail(copy.value.beta.mailSubject));
 const bugLink = computed(() => mail(copy.value.beta.bugSubject));
+const codeLink = computed(() => mail(copy.value.beta.codeSubject));
+const privacyUrl = computed(() => `${GAME_URL}privacy.html${language.value === 'tr' ? '#tr' : ''}`);
 
 /* ---------- The bar: a menu on phones, and the language list ---------- */
 
@@ -247,7 +250,7 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
           <BaseButton
             v-magnetic
             as="a"
-            :href="GAME_URL"
+            href="#beta"
             size="sm"
             class="play-cta shrink-0"
             @click="openGate"
@@ -321,7 +324,7 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
               <BaseButton
                 v-magnetic
                 as="a"
-                :href="GAME_URL"
+                href="#beta"
                 size="lg"
                 class="play-cta play-cta--big"
                 @click="openGate"
@@ -353,6 +356,13 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
             <p class="hero-in invite text-ink-soft text-sm" style="--i: 7">
               <KeyRound class="size-4 shrink-0" aria-hidden="true" />
               <span>{{ copy.hero.invite }}</span>
+            </p>
+            <p class="hero-in invite text-ink-soft text-sm" style="--i: 7">
+              <ShieldCheck class="size-4 shrink-0" aria-hidden="true" />
+              <span
+                >{{ copy.hero.trust }}
+                <a :href="privacyUrl" class="nav-link">{{ extra.nav.privacy }}</a></span
+              >
             </p>
           </div>
 
@@ -547,8 +557,9 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
               <BaseBadge tone="warning">{{ copy.hero.badge }}</BaseBadge>
               <h2 class="pixel text-3xl sm:text-4xl">{{ copy.beta.title }}</h2>
               <p class="text-ink-soft">{{ copy.beta.lead }}</p>
+              <CodeAsk :address="MAIL" :link="codeLink" />
               <div class="flex flex-wrap gap-3">
-                <BaseButton v-magnetic as="a" :href="suggestLink">
+                <BaseButton v-magnetic as="a" :href="suggestLink" variant="secondary">
                   <Mail class="size-4" aria-hidden="true" /> {{ copy.beta.suggest }}
                 </BaseButton>
                 <BaseButton v-magnetic as="a" :href="bugLink" variant="secondary">
@@ -616,6 +627,6 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
         <span>{{ copy.footer.credits }}</span>
       </div>
     </footer>
-    <PlayGate :game-url="GAME_URL" :ask-link="suggestLink" />
+    <PlayGate :game-url="GAME_URL" :address="MAIL" :ask-link="codeLink" :privacy-url="privacyUrl" />
   </div>
 </template>
