@@ -35,7 +35,7 @@ import PlayGate from './PlayGate.vue';
 import { openGate } from './gate';
 import { more } from './more';
 import { extra, PET_ICON, PETS } from './extra';
-import { copy, language, LANGUAGES, type Language } from './i18n';
+import { chooseLanguage, copy, language, LANGUAGES, type Language } from './i18n';
 import { fine, still, vMagnetic, vReveal, vTilt } from './motion';
 import { listenForSteps, soundOn } from './sound';
 
@@ -69,6 +69,8 @@ const heroBubbles = [
 const mail = (subject: string) => `mailto:${MAIL}?subject=${encodeURIComponent(subject)}`;
 const suggestLink = computed(() => mail(copy.value.beta.mailSubject));
 const bugLink = computed(() => mail(copy.value.beta.bugSubject));
+/** The links that go into the game carry the page's language. */
+const gameLink = computed(() => `${GAME_URL}?lang=${language.value}`);
 const codeLink = computed(() => mail(copy.value.beta.codeSubject));
 const privacyUrl = computed(() => `${GAME_URL}privacy.html${language.value === 'tr' ? '#tr' : ''}`);
 
@@ -78,7 +80,7 @@ const menuOpen = ref(false);
 const langOpen = ref(false);
 const langLabel = computed(() => LANGUAGES.find((l) => l.value === language.value)?.label ?? 'EN');
 function pick(value: Language) {
-  language.value = value;
+  chooseLanguage(value);
   langOpen.value = false;
 }
 const closeAll = (event: Event) => {
@@ -627,6 +629,6 @@ const titleWords = computed(() => copy.value.hero.title.split(' '));
         <span>{{ copy.footer.credits }}</span>
       </div>
     </footer>
-    <PlayGate :game-url="GAME_URL" :address="MAIL" :ask-link="codeLink" :privacy-url="privacyUrl" />
+    <PlayGate :game-url="gameLink" :address="MAIL" :ask-link="codeLink" :privacy-url="privacyUrl" />
   </div>
 </template>

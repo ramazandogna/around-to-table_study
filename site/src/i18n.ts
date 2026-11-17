@@ -469,28 +469,44 @@ const ja: Copy = {
 const COPY: Record<Language, Copy> = { en, tr, zh, ja };
 const KEY = 'att-site.language';
 
-function stored(): Language {
+function saved(): Language | null {
   try {
     const value = localStorage.getItem(KEY);
-    return LANGUAGES.some((l) => l.value === value) ? (value as Language) : 'en';
+    return LANGUAGES.find((l) => l.value === value)?.value ?? null;
   } catch {
-    return 'en';
+    return null;
   }
 }
 
-/** The page's language: English unless the visitor picked another, kept on their device. */
-export const language = ref<Language>(stored());
+/** The browser's first language that the site has, or English. */
+function detected(): Language {
+  const tags = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const tag of tags) {
+    const code = tag?.toLowerCase().split('-')[0];
+    const hit = LANGUAGES.find((l) => l.value === code);
+    if (hit) return hit.value;
+  }
+  return 'en';
+}
+
+/** The page's language: the visitor's saved choice, else the browser's, else English. */
+export const language = ref<Language>(saved() ?? detected());
 export const copy = computed(() => COPY[language.value]);
 
 watch(
   language,
   (value) => {
     document.documentElement.lang = value === 'zh' ? 'zh-Hans' : value;
-    try {
-      localStorage.setItem(KEY, value);
-    } catch {
-      // Not kept; English next time.
-    }
   },
   { immediate: true },
 );
+
+/** A choice made in the language list is kept on the device and wins from then on. */
+export function chooseLanguage(value: Language): void {
+  language.value = value;
+  try {
+    localStorage.setItem(KEY, value);
+  } catch {
+    // Not kept; the browser's language next time.
+  }
+}
