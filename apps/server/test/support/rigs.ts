@@ -70,7 +70,12 @@ export function hubRig(env: Partial<Env> = {}) {
       getByName: (name: string) => {
         let stub = areas.get(name);
         if (!stub) {
-          stub = { sendOff: async () => {}, kick: async () => {}, setRules: async () => {} };
+          stub = {
+            sendOff: async () => {},
+            kick: async () => {},
+            setRules: async () => {},
+            occupants: async () => [],
+          };
           areas.set(name, stub);
         }
         return stub;

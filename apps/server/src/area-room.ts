@@ -6,6 +6,8 @@ import {
   DATA_EPOCH,
   EMPTY_JUKEBOX,
   isRoomArea,
+  ROOM_SIZES,
+  roomArea,
   type RoomRules,
   JUKEBOX,
   parseYouTubeId,
@@ -164,6 +166,14 @@ export class AreaRoom extends DurableObject<Env> {
     if (rules && isRoomArea(area)) {
       this.rules = cleanRoomRules(JSON.parse(rules));
       await this.ctx.storage.put(RULES_KEY, this.rules);
+    }
+
+    // A private room holds as many people as it was opened for, however many passes went out.
+    const size = ROOM_SIZES.find((s) => roomArea(s) === area);
+    if (size !== undefined) {
+      const here = new Set(this.occupantIds());
+      if (!here.has(id) && here.size >= size)
+        return Response.json({ error: 'full' }, { status: 409 });
     }
 
     const { 0: client, 1: server } = new WebSocketPair();
@@ -389,6 +399,22 @@ export class AreaRoom extends DurableObject<Env> {
       this.send(ws, { t: 'error', code: why });
       this.leave(ws);
     }
+  }
+
+  /** Who has a socket in the room (joined or about to), once each: how a private room counts its people. */
+  async occupants(): Promise<string[]> {
+    return this.occupantIds();
+  }
+
+  private occupantIds(): string[] {
+    return [
+      ...new Set(
+        this.ctx
+          .getWebSockets()
+          .map((ws) => this.load(ws)?.id)
+          .filter((id): id is string => !!id),
+      ),
+    ];
   }
 
   /** Whether table games are played here: the smoking room, and private rooms that allow them. */

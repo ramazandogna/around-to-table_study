@@ -699,19 +699,22 @@ export class SocialHub extends DurableObject<Env> {
 
   /**
    * Whether someone may come into a room: 'ok', 'unknown' (no such room or
-   * forgotten) or 'password' (missing or wrong). Coming in keeps it alive.
+   * forgotten), 'full' (no place left) or 'password' (missing or wrong). Coming in keeps it alive.
    */
   async checkRoom(
     code: string,
     password: string | null,
     user: string,
-  ): Promise<'ok' | 'unknown' | 'password' | 'banned'> {
+  ): Promise<'ok' | 'unknown' | 'password' | 'banned' | 'full'> {
     const row = this.roomRow(code);
     if (!row) return 'unknown';
     if (this.isBanned(code, user)) return 'banned';
     if (row.password && (!password || (await hashPassword(code, password)) !== row.password)) {
       return 'password';
     }
+    // A room holds as many people as it was opened for; someone already inside may come back.
+    const inside = await this.env.AREAS.getByName(`room:${code}`).occupants();
+    if (!inside.includes(user) && inside.length >= row.size) return 'full';
     this.sql.exec('UPDATE rooms SET used_at = ? WHERE code = ?', Date.now(), code);
     return 'ok';
   }

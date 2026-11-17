@@ -395,6 +395,7 @@ async function rooms(request: Request, env: Env, pathname: string): Promise<Resp
   const check = await hub.checkRoom(code, password, session.id);
   if (check === 'unknown') return error('unknown_room', 404);
   if (check === 'banned') return error('banned', 403);
+  if (check === 'full') return error('full', 409);
   if (check === 'password') return error('wrong_password', 403);
   const room = await hub.roomInfo(code);
   const secret = secretOf(env);
