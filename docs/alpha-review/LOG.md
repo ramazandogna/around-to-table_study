@@ -12,3 +12,5 @@ One line per phase: phase · agents · expected outputs.
 - Phase 4 wave 1 merged (E1, E2, E3); all checks green (shared 216, server 55, client 29)
 - Phase 4 wave 2 · E2: J02 client 'full', J07 report UI, J08 delete account UI, drop blockedBy
 - Phase 4 wave 2 merged; checks green. R1 (sonnet) batched review of 5fe6a24..HEAD
+- Phase 4 done: review fixes merged; shared 217, server 59, client 29, build green
+- Phase 5 · T1, T2, W2 resumed via SendMessage on the new build
