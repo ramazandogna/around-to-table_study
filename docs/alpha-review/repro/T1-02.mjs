@@ -6,7 +6,10 @@
 import { chromium, newPlayer, shot, uniq } from './helpers.mjs';
 
 const browser = await chromium.launch();
-const { page } = await newPlayer(browser, { email: `t1tim${uniq()}@example.com`, name: 'Tim' + uniq() });
+const { page } = await newPlayer(browser, {
+  email: `t1tim${uniq()}@example.com`,
+  name: 'Tim' + uniq(),
+});
 const gotIt = async () => {
   const g = page.getByText('Got it');
   if (await g.isVisible().catch(() => false)) await g.click();
@@ -35,7 +38,8 @@ try {
   if (await confirm.isVisible().catch(() => false)) await confirm.click();
   await page.waitForTimeout(1500);
   const before = await hud();
-  if (!timerShown(before)) throw new Error('could not start the Pomodoro (navigation by position failed)');
+  if (!timerShown(before))
+    throw new Error('could not start the Pomodoro (navigation by position failed)');
   console.log('before:', before.match(/Round[^\n]*\n[^\n]*/)?.[0].replace('\n', ' '));
   // Switch the language from the menu.
   await page.getByRole('button', { name: /Türkçe/ }).click();
@@ -44,7 +48,8 @@ try {
   const after = await hud();
   await shot(page, 'T1-02-after-language');
   const kept = timerShown(after);
-  const area = after.includes('Giriş Holü') || after.includes('Entrance Hall') ? 'Entrance Hall' : 'other';
+  const area =
+    after.includes('Giriş Holü') || after.includes('Entrance Hall') ? 'Entrance Hall' : 'other';
   console.log(`after language switch: timer ${kept ? 'kept' : 'GONE'}, area ${area}`);
   code = kept ? 0 : 1;
 } catch (e) {
