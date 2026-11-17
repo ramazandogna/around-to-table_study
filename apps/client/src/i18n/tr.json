@@ -8,7 +8,7 @@
   "blocked.renovation": "kütüphanenin bu kısmı tadilatta.",
   "blocked.elevator": "asansör yakında açılıyor.",
   "sign.renovation": "TADİLATTA",
-  "gate.subtitle": "Yalnız çalışma. Bir isim seç ve otur.",
+  "gate.subtitle": "Tek başına çalışma. Bir isim seç ve otur.",
   "gate.placeholder": "adın",
   "gate.enter": "Gir",
   "gate.error.invalid_name": "2–20 harf, rakam, boşluk, nokta ya da tire; kaba bir şey olmasın.",
