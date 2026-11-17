@@ -27,6 +27,17 @@ describe('the social socket trusts the server about where people are', () => {
     expect(a.ws.of('shouted')).toHaveLength(1);
   });
 
+  it('closing and reopening the phone socket keeps the server-known area', async () => {
+    const rig = hubRig();
+    const a = await rig.connect('a');
+    await rig.hub.placed('a', 'library');
+    await rig.hub.webSocketClose(a.ws as unknown as WebSocket);
+    const again = await rig.connect('a');
+    await rig.send(again, { t: 'where', area: 'hall' });
+    await rig.send(again, { t: 'shout', text: 'sneaky' });
+    expect(again.ws.of('error')).toEqual([{ t: 'error', code: 'phone_silent' }]);
+  });
+
   it('leaving the library lifts the rule, but only for that area', async () => {
     const rig = hubRig();
     const a = await rig.connect('a');

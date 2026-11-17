@@ -1244,10 +1244,6 @@ export class SocialHub extends DurableObject<Env> {
     this.tellFriends(me.id);
     this.closing = null;
     this.tellWorld();
-    // Nobody left to speak for them: no room still has them.
-    if (!this.ctx.getWebSockets(me.id).some((socket) => socket !== ws)) {
-      this.sql.exec('DELETE FROM places WHERE id = ?', me.id);
-    }
   }
 
   /**
@@ -1562,7 +1558,7 @@ export class SocialHub extends DurableObject<Env> {
     this.sql.exec('DELETE FROM places WHERE id = ? AND area = ?', id, area);
   }
 
-  /** The area a person is in as the rooms know it; what their phone claims only when no room does. */
+  /** The area a person is in as the rooms know it; what their phone claims only when no room has them (only the rooms' `unplaced` clears it). */
   private areaOf(me: Member): AreaId | null {
     const row = this.sql
       .exec<{ area: AreaId }>('SELECT area FROM places WHERE id = ?', me.id)
