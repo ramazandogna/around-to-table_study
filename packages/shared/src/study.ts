@@ -79,28 +79,27 @@ export function clampRhythm(rhythm: StudyRhythm): StudyRhythm {
   };
 }
 
-/** A timer sent again with its end this close to the one kept is the same block, not a new one. */
-const SAME_BLOCK_SLACK_MS = FINISH_GRACE_MS;
+/** A timer reset to full this close to its length, after running, counts as started over. */
+const RESET_SLACK_MS = FINISH_GRACE_MS;
 
 /**
- * When a block started, on the server's clock. A timer that arrives again with
- * the same length and end is the same block and keeps its start; anything else
- * (a first timer, a new length, an end moved around) starts now, so a client
- * cannot claim time it did not spend.
+ * When a block started, on the server's clock. The same length sent again
+ * keeps its start even when the end moves (a pause and resume): the credit is
+ * capped by the time since that start, so moving the end gains nothing. A
+ * first timer, a new length, one set back to full after running, or one that
+ * had already ended starts now.
  */
 export function blockStart(
   kept: { endsAt: number; totalMs: number; startedAt?: number | undefined } | null,
   next: { endsAt: number; totalMs: number },
   now: number,
 ): number {
-  if (
-    kept &&
-    kept.totalMs === next.totalMs &&
-    Math.abs(kept.endsAt - next.endsAt) <= SAME_BLOCK_SLACK_MS
-  ) {
-    return kept.startedAt ?? now;
-  }
-  return now;
+  if (!kept || kept.totalMs !== next.totalMs) return now;
+  if (kept.endsAt + FINISH_GRACE_MS < now) return now;
+  const startedAt = kept.startedAt ?? now;
+  const startedOver =
+    next.endsAt - now >= next.totalMs - RESET_SLACK_MS && now - startedAt > RESET_SLACK_MS;
+  return startedOver ? now : startedAt;
 }
 
 /**

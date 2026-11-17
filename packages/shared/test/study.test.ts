@@ -11,10 +11,20 @@ describe('block start', () => {
     const kept = { endsAt: 25 * MIN, totalMs: 25 * MIN, startedAt: 0 };
     expect(blockStart(kept, { endsAt: 25 * MIN + 2000, totalMs: 25 * MIN }, 10 * MIN)).toBe(0);
   });
-  it('restarts when the end is moved or the length changes', () => {
+  it('keeps the start when the end moves (a pause and resume), but not when the length changes', () => {
     const kept = { endsAt: 180 * MIN, totalMs: 180 * MIN, startedAt: 0 };
-    expect(blockStart(kept, { endsAt: 2 * MIN, totalMs: 180 * MIN }, 2 * MIN)).toBe(2 * MIN);
+    expect(blockStart(kept, { endsAt: 190 * MIN, totalMs: 180 * MIN }, 20 * MIN)).toBe(0);
+    expect(blockStart(kept, { endsAt: 2 * MIN, totalMs: 180 * MIN }, 2 * MIN)).toBe(0);
     expect(blockStart(kept, { endsAt: 180 * MIN, totalMs: 60 * MIN }, 2 * MIN)).toBe(2 * MIN);
+  });
+  it('restarts when the timer is set back to full after running, or the old one had ended', () => {
+    const kept = { endsAt: 25 * MIN, totalMs: 25 * MIN, startedAt: 0 };
+    expect(blockStart(kept, { endsAt: 10 * MIN + 25 * MIN, totalMs: 25 * MIN }, 10 * MIN)).toBe(
+      10 * MIN,
+    );
+    expect(blockStart(kept, { endsAt: 40 * MIN + 25 * MIN, totalMs: 25 * MIN }, 40 * MIN)).toBe(
+      40 * MIN,
+    );
   });
 });
 
