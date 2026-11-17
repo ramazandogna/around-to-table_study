@@ -77,6 +77,7 @@ export function ChatBar() {
     input.current?.blur();
   }
 
+  const compact = useCompact();
   const waiting = waitMs > 0;
   const quiet = !rules.allowCaps;
   // The clock empties as the wait runs out; short waits elsewhere are not worth drawing.
@@ -91,7 +92,15 @@ export function ChatBar() {
           className={quiet ? 'chat-input--quiet' : undefined}
           lang={quiet && looksTurkish(text) ? 'tr' : undefined}
           maxLength={rules.maxChars}
-          placeholder={t(quiet ? 'chat.placeholder.quiet' : 'chat.placeholder')}
+          placeholder={t(
+            quiet
+              ? compact
+                ? 'chat.placeholder.quiet.short'
+                : 'chat.placeholder.quiet'
+              : compact
+                ? 'chat.placeholder.short'
+                : 'chat.placeholder',
+          )}
           aria-label={t('chat.placeholder')}
           enterKeyHint="send"
           onChange={(e) => change(e.target.value)}
@@ -112,8 +121,22 @@ export function ChatBar() {
         style={ring ? ({ '--wait': ring } as CSSProperties) : undefined}
         aria-label={waiting ? t('chat.wait') : t('chat.send')}
       >
-        {waiting ? Math.ceil(waitMs / 1000) : t('chat.send')}
+        {waiting ? Math.ceil(waitMs / 1000) : t(compact ? 'chat.send.short' : 'chat.send')}
       </button>
     </form>
   );
+}
+
+/** True on touch screens, where the chat line sits beside the joystick and has to be short. */
+function useCompact(): boolean {
+  const [compact, setCompact] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia('(pointer: coarse)');
+    const change = () => setCompact(query.matches);
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, []);
+  return compact;
 }

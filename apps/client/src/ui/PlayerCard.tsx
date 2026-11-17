@@ -60,7 +60,7 @@ function Card({ id, name, lines, view }: Selected) {
   }
 
   return (
-    <Panel title={name} className="panel--compact player-card">
+    <Panel title={name} className="panel--compact player-card" onClose={close}>
       <button
         type="button"
         className="icon-button player-card-close"

@@ -58,7 +58,11 @@ export function InboxPanel() {
   if (!open) return null;
   const store = useGameStore.getState();
   return (
-    <Panel title={`🔔 ${t('inbox.title')}`} className="panel--compact inbox-panel">
+    <Panel
+      title={`🔔 ${t('inbox.title')}`}
+      className="panel--compact inbox-panel"
+      onClose={() => store.setInboxOpen(false)}
+    >
       <button
         type="button"
         className="icon-button player-card-close"
@@ -146,7 +150,7 @@ export function PeoplePanel() {
   const store = useGameStore.getState();
   const close = () => store.setPeopleOpen(false);
   return (
-    <Dialog>
+    <Dialog onClose={close}>
       <Panel title={`🔇 ${t('people.title')}`} className="panel--dialog people-panel">
         <p className="creator-note">{t('people.about')}</p>
         <p className="field-label">🔇 {t('people.muted')}</p>
@@ -209,7 +213,7 @@ export function AdminPanel() {
   if (!open) return null;
   const store = useGameStore.getState();
   return (
-    <Dialog>
+    <Dialog onClose={() => store.setAdminOpen(false)}>
       <Panel title={`🛡️ ${t('admin.title')}`} className="panel--dialog people-panel">
         <p className="creator-note">{t('admin.about')}</p>
         <ul className="room-list">

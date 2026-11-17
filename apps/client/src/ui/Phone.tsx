@@ -15,6 +15,7 @@ import { unreadMessages } from '../net/social';
 import { useGameStore } from '../state/store';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { Panel } from './Panel';
+import { useDialog } from './useDialog';
 import { portrait } from '../world/portrait';
 
 /**
@@ -76,7 +77,11 @@ function Contacts() {
   const requests = friends.filter((f) => f.state === 'incoming').length;
   const online = contacts.filter((f) => f.area).length;
   return (
-    <Panel title={`📱 ${t('phone.title')}`} className="panel--compact phone-panel">
+    <Panel
+      title={`📱 ${t('phone.title')}`}
+      className="panel--compact phone-panel"
+      onClose={closePhone}
+    >
       <CloseButton />
       {contacts.length > 0 && (
         <p className="phone-summary">{t('phone.online', { n: online, of: contacts.length })}</p>
@@ -247,6 +252,8 @@ const QUICK = [
 ] as const;
 
 function Conversation({ friend }: { friend: Friend }) {
+  const panel = useRef<HTMLElement>(null);
+  useDialog(panel, closePhone);
   const social = useGameStore((s) => s.social);
   const myId = useGameStore((s) => s.session?.id);
   const messages = useGameStore((s) => s.conversations[friend.id]);
@@ -284,7 +291,12 @@ function Conversation({ friend }: { friend: Friend }) {
   const canGo = friend.area !== null && friend.area !== area && !isRoomArea(friend.area);
 
   return (
-    <section className="panel panel--compact phone-panel" aria-label={friend.name}>
+    <section
+      ref={panel}
+      tabIndex={-1}
+      className="panel panel--compact phone-panel"
+      aria-label={friend.name}
+    >
       <header className="phone-head">
         <button
           type="button"
@@ -457,17 +469,19 @@ function Bubble({ message, mine, seen }: { message: DirectMessage; mine: boolean
   );
 }
 
+function closePhone() {
+  const store = useGameStore.getState();
+  store.closePhone();
+  store.setTyping(false);
+}
+
 function CloseButton({ inline = false }: { inline?: boolean }) {
   return (
     <button
       type="button"
       className={inline ? 'icon-button' : 'icon-button player-card-close'}
       aria-label={t('card.close')}
-      onClick={() => {
-        const store = useGameStore.getState();
-        store.closePhone();
-        store.setTyping(false);
-      }}
+      onClick={closePhone}
     >
       ✕
     </button>

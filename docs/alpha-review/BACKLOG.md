@@ -51,6 +51,9 @@ Owners: E1 = server and shared, E2 = game client, E3 = website. "E1→E2" means 
 - Site (E3): the Tiny5 pixel font draws Turkish ş, ç and ı poorly in the TR hero title. The sound toggle labels are English only. site/public terms.html and privacy.html are copies of the game's, so they can drift apart (one source needed). The footer still links a raw github.com profile (W2-11).
 - Server follow-ups from round J (E1): a reconnect (`hello` with a timer) restarts the measured block, so a flaky connection loses the earlier minutes; the hub could keep the block start per character. Reports keep area chat lines in room memory only (lost on hibernation). `smoked`, `status` and `joined` still reach someone who blocked the sender. Players' last known area in `places` can go stale if an area room dies without a close. The client still handles the retired `blockedBy` message.
 
+- E2 leftovers: the Library door sign is still half cut off on phones (A3-9, second half). The chat line buttons are 40px wide on phones because 160px of input beside the joystick leaves no room for 44px (A3-8). The welcome and room-tip flags are kept per character in the server save, not per account (needs a server-side account field).
+- Repro scripts that walk by screen position (T1-02, E2-*) are slow and camera-dependent in a software-rendered browser; a test-only teleport hook would make them steady.
+
 ## Rejected or deferred
 - **Renaming the "smoking room" (W1-6).** Settled in the decisions, so it is not reopened. Recorded as a Decision proposal for the owner.
 - **A waitlist form with a backend (W2-2 variant).** The site is static Pages, and a form needs a store. The copy button is the static fix for now.

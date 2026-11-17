@@ -22,12 +22,14 @@ import {
   type AreaId,
   type BlockReason,
   type PlayerSnapshot,
+  type Activity,
   type Appearance,
   type Point,
   type ServerMessage,
   type WaitingPet,
 } from '@att/shared';
 import { playMusic, stopMusic } from '../audio/music';
+import { readJson } from '../net/storage';
 import { play, unlockAudio } from '../audio/sound';
 import { RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
 import { eventTitle } from '../content/events';
@@ -320,6 +322,7 @@ export class AreaWorld {
       if (state.buzzAt !== before.buzzAt) this.player?.buzz();
       if (state.travel && state.travel !== before.travel) this.travel(state.travel);
       if (state.deskWalk !== before.deskWalk) this.walkToDesk();
+      if (state.walkBack && !before.walkBack) this.walkBack();
       // The owner changed the private room's rules (here, or told by the room).
       if (state.roomRules && before.roomRules && state.roomRules !== before.roomRules) {
         this.applyRoomRules(state.roomRules, before.roomRules);
@@ -582,7 +585,10 @@ export class AreaWorld {
     const store = useGameStore.getState();
     // Only a chair at a table counts as studying; a sofa is for resting.
     const studying = player.seatKind === 'chair';
-    if (studying !== store.seated) store.setSeated(studying);
+    if (studying !== store.seated) {
+      store.setSeated(studying);
+      if (studying && this.areaId === 'library') store.setLastSeat(player.tile);
+    }
     if (store.dancing && !player.isDancing) store.setDancing(false);
     if (store.smoking && !player.isSmoking) store.setSmoking(false);
     if (store.radial && player.isMoving) store.setRadial(null);
@@ -652,6 +658,9 @@ export class AreaWorld {
           this.connection?.move(this.player.tile);
           this.connection?.status(studyStatus());
         }
+        // "Let's go" was said in another room: now in the library, on to the chair.
+        if (store.walkBack && this.areaId === 'library')
+          window.setTimeout(() => this.walkBack(), 400);
         break;
       case 'joined':
         if (message.player.id === selfId) break;
@@ -2451,6 +2460,31 @@ export class AreaWorld {
       return;
     }
     this.leaveSeat(player, () => this.goTo(front, { kind: 'ride', to }));
+  }
+
+  /**
+   * "Let's go" after a break: back to the library, then to the chair the
+   * player sat at last. The next block starts when they sit. If someone has
+   * that chair, they wait at the library door and are told.
+   */
+  private walkBack(): void {
+    const store = useGameStore.getState();
+    const player = this.player;
+    if (!player || this.leaving || !store.walkBack) return;
+    if (this.areaId !== 'library') {
+      store.setTravel('library');
+      return;
+    }
+    const seat = store.lastSeat;
+    if (seat && this.grid.isSeat(seat) && !this.seatTaken(seat)) {
+      // The same kind of work as before: no question at the chair.
+      const last = readJson<{ activity?: Activity }>('att.lastSit')?.activity;
+      if (!store.activity && last) store.setActivity(last);
+      this.walkTo(seat);
+      return;
+    }
+    if (seat) store.setNotice('seat_gone');
+    this.walkTo(this.grid.arrivalPoint('hall'));
   }
 
   private travel(to: AreaId): void {

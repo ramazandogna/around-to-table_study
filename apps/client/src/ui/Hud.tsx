@@ -1,7 +1,7 @@
 import { APP_NAME, isRoomArea, type AreaId } from '@att/shared';
 import { useEffect, useRef } from 'react';
 import { getLanguage, setLanguage, t } from '../i18n/t';
-import { layerIndex, useGameStore } from '../state/store';
+import { layerIndex, panelOpen, useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
 import { WorldClock } from './Calendar';
 import { FriendsLink } from './Friends';
@@ -31,6 +31,13 @@ export function HudPlate() {
   const studying = useGameStore((s) => s.studying);
   const open = useGameStore((s) => s.plateOpen);
   const layers = useGameStore((s) => s.layers);
+  const panel = useGameStore(panelOpen);
+  // On a phone the open plate would cover the panel that just opened (the calendar's title, a card): it folds.
+  useEffect(() => {
+    if (panel && window.matchMedia('(max-width: 700px)').matches) {
+      useGameStore.getState().setPlateOpen(false);
+    }
+  }, [panel]);
   // In a private room the plate shows its name.
   const roomName = useGameStore((s) => (isRoomArea(s.area) ? s.room?.room.name : undefined));
   const areaName = roomName ?? t(`area.${area}`);

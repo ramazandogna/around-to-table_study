@@ -6,19 +6,23 @@ import { readJson, writeJson } from '../net/storage';
  * blocks finished today and how many days in a row they studied. Nobody else
  * sees it and there are no rankings; it is there to feel good about the day.
  */
-type Stats = {
+export type Stats = {
   /** The local day these numbers are for, as YYYY-MM-DD. */
   day: string;
   focusMs: number;
   blocks: number;
-  /** Days in a row with any focus time, today included once it has some. */
+  /** Days studied in a streak, today included once it has some. Up to two rest days in any week do not break it. */
   streak: number;
   /** The last day with focus time. */
   lastDay: string | null;
+  /** The rest days the streak has absorbed in the last week (YYYY-MM-DD). */
+  rest?: string[];
   /** The day the daily goal was last reached, so it is cheered once. */
   goalDay?: string | null;
   /** All the focus time ever kept on this device, for the character select screen. */
   totalMs?: number;
+  /** The last earlier day with focus time, for the welcome-back line. */
+  prev?: { day: string; focusMs: number };
 };
 
 const STATS_KEY = 'att.stats';
@@ -34,13 +38,62 @@ const dayOf = (time: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const yesterdayOf = (time: number) => dayOf(time - 24 * 60 * 60_000);
+/* ---------- Gentle streaks: two rest days a week are allowed ---------- */
 
-/** Today's numbers; a new day starts at zero, and a missed day ends the streak. */
+/** The most rest days a streak forgives in any 7 days. */
+export const REST_DAYS_PER_WEEK = 2;
+const WEEK_DAYS = 7;
+
+/** A day as a whole number, so days can be counted (UTC avoids daylight-saving surprises). */
+const dayNumber = (day: string) => {
+  const [y = 0, m = 1, d = 1] = day.split('-').map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86_400_000);
+};
+
+const dayFromNumber = (n: number) => new Date(n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Where the streak stands if the player studies on `today`: the rest days it
+ * has to forgive (the unstudied days since the last one, and those already
+ * forgiven within the last week), or null when that is more than two and the
+ * streak is over.
+ */
+function restedDays(
+  lastDay: string | null,
+  rest: readonly string[] | undefined,
+  today: string,
+): string[] | null {
+  if (!lastDay) return null;
+  const last = dayNumber(lastDay);
+  const now = dayNumber(today);
+  if (now <= last) return [...(rest ?? [])];
+  const gap = Array.from({ length: now - last - 1 }, (_, i) => dayFromNumber(last + 1 + i));
+  const recent = [...(rest ?? []), ...gap].filter((day) => dayNumber(day) > now - WEEK_DAYS);
+  return recent.length <= REST_DAYS_PER_WEEK ? recent : null;
+}
+
+/** The streak as shown today, before any studying: kept while the rest days still fit the week. */
+export function liveStreak(
+  saved: Pick<Stats, 'streak' | 'lastDay' | 'rest'> | null | undefined,
+  today: string,
+): number {
+  if (!saved?.lastDay) return 0;
+  return restedDays(saved.lastDay, saved.rest, today) ? saved.streak : 0;
+}
+
+/** The streak and rest days after studying on `today` (a day not yet counted). */
+export function streakAfterStudying(
+  saved: Pick<Stats, 'streak' | 'lastDay' | 'rest'>,
+  today: string,
+): { streak: number; rest: string[] } {
+  const rest = restedDays(saved.lastDay, saved.rest, today);
+  return rest ? { streak: saved.streak + 1, rest } : { streak: 1, rest: [] };
+}
+
+/** Today's numbers; a new day starts at zero, and more than two rest days in a week end the streak. */
 export function todayStats(now = Date.now(), saved = readJson<Stats>(STATS_KEY)): Stats {
   const today = dayOf(now);
-  const streak =
-    saved?.lastDay === today || saved?.lastDay === yesterdayOf(now) ? (saved?.streak ?? 0) : 0;
+  const streak = liveStreak(saved, today);
   if (!saved || saved.day !== today) {
     return {
       day: today,
@@ -48,7 +101,13 @@ export function todayStats(now = Date.now(), saved = readJson<Stats>(STATS_KEY))
       blocks: 0,
       streak,
       lastDay: saved?.lastDay ?? null,
+      ...(saved?.rest ? { rest: saved.rest } : {}),
       totalMs: saved?.totalMs ?? 0,
+      ...(saved && saved.focusMs > 0
+        ? { prev: { day: saved.day, focusMs: saved.focusMs } }
+        : saved?.prev
+          ? { prev: saved.prev }
+          : {}),
     };
   }
   return { ...saved, streak };
@@ -65,7 +124,9 @@ export function recordFocus(ms: number, finished: boolean, now = Date.now()): St
     totalMs: (stats.totalMs ?? 0) + Math.max(0, ms),
   };
   if (next.focusMs >= STREAK_MIN_MS && next.lastDay !== next.day) {
-    next.streak = next.lastDay === yesterdayOf(now) ? next.streak + 1 : 1;
+    const after = streakAfterStudying(next, next.day);
+    next.streak = after.streak;
+    next.rest = after.rest;
     next.lastDay = next.day;
   }
   writeJson(STATS_KEY, next);

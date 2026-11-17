@@ -462,7 +462,7 @@ export function RoomAdmin() {
   const rules = current ?? ticket.room.rules;
   const close = () => store.setRoomAdminOpen(false);
   return (
-    <Dialog>
+    <Dialog onClose={close}>
       <Panel title={`🗝️ ${ticket.room.name}`} className="panel--dialog panel--rooms">
         <RuleSwitches
           rules={rules}

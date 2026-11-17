@@ -84,6 +84,8 @@ export type Notice =
   | 'phone_silent'
   | 'not_friends'
   | 'seat_taken'
+  /** After a break the player's chair was taken; they wait at the library door. */
+  | 'seat_gone'
   | 'desk_opened'
   | 'no_dance'
   | 'muted'
@@ -92,6 +94,10 @@ export type Notice =
   | 'pet_waits'
   /** A study timer ran out. */
   | 'finished'
+  /** A running block came back after a reload; sit down to carry on. */
+  | 'block_resume'
+  /** A returning player's one-line recap (the value is the line). */
+  | 'welcome_back'
   /** The player's own daily goal was reached today. */
   | 'goal_reached'
   /** An event just started (the value is its room). */
@@ -504,6 +510,10 @@ type GameState = {
   activity: Activity | null;
   timer: LocalTimer | null;
   study: StudySession | null;
+  /** The library chair the player last sat at, to walk back to after a break. */
+  lastSeat: { x: number; y: number } | null;
+  /** "Let's go" after a break was said and the player is on the way to a chair: the block starts on sitting. */
+  walkBack: boolean;
   /** Focus blocks running in the room that could be joined. */
   blocksHere: RunningBlock[];
   dnd: boolean;
@@ -611,6 +621,9 @@ type GameState = {
   /** The break ended; waiting for the player. */
   breakOver: () => void;
   nextRound: () => void;
+  /** "Let's go" away from the table: walk back to the last seat; the next round starts on sitting. */
+  returnToSeat: () => void;
+  setLastSeat: (seat: { x: number; y: number } | null) => void;
   /** The last focus block of the session ended. */
   finishStudy: () => void;
   setBlocksHere: (blocks: RunningBlock[]) => void;
@@ -750,6 +763,8 @@ export const useGameStore = create<GameState>((set) => ({
   activity: null,
   timer: null,
   study: null,
+  lastSeat: null,
+  walkBack: false,
   blocksHere: [],
   dnd: false,
   cooldownUntil: {},
@@ -976,23 +991,26 @@ export const useGameStore = create<GameState>((set) => ({
   // What to work on is asked at the chair, before sitting; once seated, the timer is next
   // (unless a session is already going). Standing up clears the table.
   setSeated: (seated) =>
-    set((state) =>
-      seated
+    set((state) => {
+      // Back from a break and sitting down: now the next block begins.
+      const round = seated && state.walkBack ? nextRoundOf(state.study) : null;
+      if (round) return { seated, sitStep: null, walkBack: false, ...round };
+      return seated
         ? {
             seated,
             sitStep: state.activity
               ? (state.sitStep ?? (state.timer || state.study ? null : 'timer'))
               : 'activity',
           }
-        : { seated, sitStep: null, activity: null },
-    ),
+        : { seated, sitStep: null, activity: null };
+    }),
   setSitStep: (sitStep) => set({ sitStep }),
   setWardrobeOpen: (wardrobeOpen) => set({ wardrobeOpen }),
   setActivity: (activity) => set({ activity }),
   startTimer: (minutes, dnd) =>
     set({ timer: { endsAt: Date.now() + minutes * 60_000, totalMs: minutes * 60_000 }, dnd }),
   // Do not disturb belongs to the timer, so it ends with it.
-  stopTimer: () => set({ timer: null, study: null, dnd: false }),
+  stopTimer: () => set({ timer: null, study: null, dnd: false, walkBack: false }),
   startSession: (plan, rhythm, dnd, join) => {
     const now = Date.now();
     const block = rhythm ? rhythm.workMinutes * 60_000 : 0;
@@ -1022,16 +1040,9 @@ export const useGameStore = create<GameState>((set) => ({
     set((state) =>
       state.study ? { study: { ...state.study, phase: 'between', breakEndsAt: null } } : {},
     ),
-  nextRound: () =>
-    set((state) => {
-      const study = state.study;
-      if (!study?.rhythm) return {};
-      const block = study.rhythm.workMinutes * 60_000;
-      return {
-        study: { ...study, phase: 'work', round: study.round + 1, breakEndsAt: null },
-        timer: { endsAt: Date.now() + block, totalMs: block },
-      };
-    }),
+  nextRound: () => set((state) => nextRoundOf(state.study) ?? {}),
+  returnToSeat: () => set((state) => (state.study?.phase === 'between' ? { walkBack: true } : {})),
+  setLastSeat: (lastSeat) => set({ lastSeat }),
   setBlocksHere: (blocksHere) => set({ blocksHere }),
   finishStudy: () =>
     set((state) => (state.study ? { study: { ...state.study, phase: 'done' }, dnd: false } : {})),
@@ -1055,6 +1066,8 @@ export const useGameStore = create<GameState>((set) => ({
       activity: null,
       timer: null,
       study: null,
+      lastSeat: null,
+      walkBack: false,
       dnd: false,
       role: 'user',
       blocked: [],
@@ -1066,6 +1079,37 @@ export const useGameStore = create<GameState>((set) => ({
       profileId: null,
     }),
 }));
+
+/** Whether any panel or dialog the player opened is up: the menu and the chat button then make room for it. */
+export function panelOpen(s: GameState): boolean {
+  return (
+    s.friendsOpen ||
+    s.phoneOpen ||
+    s.inboxOpen ||
+    s.calendarOpen ||
+    s.goalsOpen ||
+    s.roomsOpen ||
+    s.roomAdminOpen ||
+    s.peopleOpen ||
+    s.adminOpen ||
+    s.statusOpen ||
+    s.wardrobeOpen ||
+    s.jukeboxOpen ||
+    s.game !== null ||
+    s.tableOpen !== null ||
+    s.selected !== null
+  );
+}
+
+/** The state after the break ends and the next focus block starts now, or null when there is no plan to go on with. */
+function nextRoundOf(study: StudySession | null): Pick<GameState, 'study' | 'timer'> | null {
+  if (!study?.rhythm) return null;
+  const block = study.rhythm.workMinutes * 60_000;
+  return {
+    study: { ...study, phase: 'work', round: study.round + 1, breakEndsAt: null },
+    timer: { endsAt: Date.now() + block, totalMs: block },
+  };
+}
 
 /** The player's study status as the server expects it. */
 export function studyStatus(state: GameState = useGameStore.getState()): StudyStatus {

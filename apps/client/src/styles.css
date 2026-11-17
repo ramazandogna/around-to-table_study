@@ -2096,6 +2096,14 @@ button:disabled {
   cursor: pointer;
 }
 
+/* A panel is open: on a phone the chat button steps aside instead of covering its close button. */
+@media (max-width: 700px) {
+  .chat-toggle--aside,
+  .chat-closed--aside {
+    display: none;
+  }
+}
+
 .chat-closed {
   position: relative;
   align-self: flex-end;
@@ -4085,11 +4093,26 @@ button:disabled {
     display: none;
   }
 
+  /* Slim gutters: the chat line needs every pixel beside the joystick (input 160px or more at 390px). */
+  .hud-bottom {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
   .chat-row {
     box-sizing: border-box;
+    gap: 4px;
     width: auto;
     max-width: calc(100% - 124px);
     margin-left: 124px;
+  }
+
+  .chat-row .emote-toggle {
+    min-width: 40px;
+  }
+
+  .chat-row .chat-bar {
+    gap: 4px;
   }
 
   /* Beside the joystick the line is narrow: everything in it may shrink, and Send is a short arrow. */
@@ -4099,8 +4122,8 @@ button:disabled {
   }
 
   .chat-row .chat-bar button {
-    min-width: 46px;
-    padding: 0 8px;
+    min-width: 40px;
+    padding: 0;
   }
 
   .chat-row .chat-bar input {
@@ -4133,6 +4156,27 @@ button:disabled {
     box-sizing: border-box;
     max-width: calc(100% - 124px);
     margin-left: 124px;
+  }
+
+  /* The room tip is one line, full width, above the joystick (and the music card). */
+  .hud-bottom > .coach {
+    position: fixed;
+    right: 8px;
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 266px);
+    left: 8px;
+    max-width: none;
+    margin-left: 0;
+  }
+
+  .coach p {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .coach .mini-button {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 
@@ -5068,4 +5112,10 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* Dialogs and panels take focus for the keyboard; the box itself needs no ring. */
+.dialog:focus,
+.panel:focus {
+  outline: none;
 }

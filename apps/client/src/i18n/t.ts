@@ -10,15 +10,47 @@ export type Language = (typeof LANGUAGES)[number];
 const CATALOGS: Record<Language, Record<string, string>> = { en, tr };
 const KEY = 'att.language';
 
-/** The saved choice, else English: Turkish only when the player picks it. */
+/** A language code ("tr", "tr-TR", "en-GB") as one the game speaks, or null. */
+function asLanguage(code: string | null | undefined): Language | null {
+  const base = code?.trim().toLowerCase().split(/[-_]/)[0];
+  return LANGUAGES.find((l) => l === base) ?? null;
+}
+
+/**
+ * The language to start in: a saved choice wins, then `?lang=` (the website
+ * passes it on its play links), then Turkish for a Turkish browser, else English.
+ */
+export function pickLanguage(
+  saved: string | null,
+  search: string,
+  browser: string | undefined,
+): Language {
+  const kept = LANGUAGES.find((l) => l === saved);
+  if (kept) return kept;
+  const asked = asLanguage(new URLSearchParams(search).get('lang'));
+  if (asked) return asked;
+  return asLanguage(browser) === 'tr' ? 'tr' : 'en';
+}
+
 function startLanguage(): Language {
+  let saved: string | null = null;
   try {
-    const saved = localStorage.getItem(KEY);
-    if (LANGUAGES.includes(saved as Language)) return saved as Language;
+    saved = localStorage.getItem(KEY);
   } catch {
-    // No storage: English.
+    // No storage: nothing saved.
   }
-  return 'en';
+  const search = typeof location === 'undefined' ? '' : location.search;
+  const browser = typeof navigator === 'undefined' ? undefined : navigator.language;
+  const picked = pickLanguage(saved, search, browser);
+  if (!LANGUAGES.includes(saved as Language)) {
+    // Remembered, so the first visit's language sticks (the choice can still be changed).
+    try {
+      localStorage.setItem(KEY, picked);
+    } catch {
+      // This visit only.
+    }
+  }
+  return picked;
 }
 
 let language: Language = startLanguage();

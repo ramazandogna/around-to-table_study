@@ -1,7 +1,7 @@
 import { AREA_RULES, SHOUT_MAX_CHARS, type Shout } from '@att/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { dateLocale, t } from '../i18n/t';
-import { useGameStore, type ChatLine } from '../state/store';
+import { panelOpen, useGameStore, type ChatLine } from '../state/store';
 
 /** Lines from one person this close together share one name and time. */
 const GROUP_MS = 3 * 60_000;
@@ -35,15 +35,20 @@ export function ChatPanel() {
   const setOpen = useGameStore((s) => s.setChatOpen);
   const setTab = useGameStore((s) => s.setChatTab);
   const list = useRef<HTMLOListElement>(null);
+  const panel = useGameStore(panelOpen);
 
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [lines, open]);
 
-  if (!AREA_RULES[area].chatLog) return <ChatClosed />;
+  if (!AREA_RULES[area].chatLog) return <ChatClosed aside={panel} />;
   if (!open) {
     return (
-      <button type="button" className="chat-toggle" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={panel ? 'chat-toggle chat-toggle--aside' : 'chat-toggle'}
+        onClick={() => setOpen(true)}
+      >
         <span aria-hidden>💬</span> {t('chat.title')}
         {unread + shoutUnread > 0 && <span className="chat-unread">{unread + shoutUnread}</span>}
       </button>
@@ -172,10 +177,10 @@ function ShoutLine({
 }
 
 /** In the library: a crossed-out chat icon; pointing at it (or tapping it) says why. */
-function ChatClosed() {
+function ChatClosed({ aside }: { aside: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="chat-closed">
+    <div className={aside ? 'chat-closed chat-closed--aside' : 'chat-closed'}>
       <button
         type="button"
         className="chat-closed-icon"

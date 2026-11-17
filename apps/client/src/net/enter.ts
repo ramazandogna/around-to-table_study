@@ -12,6 +12,8 @@ import {
   signOut as endSession,
   type ServerCharacter,
 } from './account';
+import { resumeBlock } from '../state/block';
+import { sayWelcomeBack } from '../state/welcome';
 import { loadLines } from './session';
 
 /**
@@ -71,6 +73,7 @@ export async function enterAs(character: ServerCharacter): Promise<boolean> {
     gate: 'game',
     lobby: false,
   });
+  if (!resumeBlock(ticket.id)) sayWelcomeBack();
   return true;
 }
 
