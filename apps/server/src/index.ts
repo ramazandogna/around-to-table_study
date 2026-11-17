@@ -141,6 +141,27 @@ async function logout(request: Request, env: Env): Promise<Response> {
   return Response.json({ ok: true }, { headers });
 }
 
+/**
+ * Deleting an account (`POST /api/account/delete`, body `{ confirm: true }`):
+ * everything about it is erased, its characters leave every room, and the
+ * cookies go with it. The typed confirmation is the client's to ask for.
+ */
+async function deleteAccount(request: Request, env: Env): Promise<Response> {
+  const account = await accountFrom(request, env);
+  if (!account) return error('signed_out', 401);
+  const body = (await request.json().catch(() => null)) as { confirm?: unknown } | null;
+  if (body?.confirm !== true) return error('confirm_required', 400);
+  const hub = env.SOCIAL.getByName('hub');
+  // Out of every room first, while the hub still knows which rooms they are in.
+  const ids = (await hub.characterIds(account.id)) ?? [];
+  await sendOut(env, ids);
+  if ((await hub.deleteAccount(account.id)) === null) return error('signed_out', 401);
+  const headers = new Headers();
+  headers.append('set-cookie', clearCookie(request, SESSION_COOKIE));
+  headers.append('set-cookie', clearCookie(request, PASS_COOKIE));
+  return Response.json({ ok: true }, { headers });
+}
+
 /** Whether this account may walk into the game now (see `doorOpen`). */
 async function doorOpenFor(request: Request, env: Env, account: Account): Promise<boolean> {
   const secret = secretOf(env);
@@ -456,6 +477,8 @@ export default {
     if (pathname === '/api/auth/dev') return devSignIn(request, env);
     if (pathname === '/api/me') return me(request, env);
     if (pathname === '/api/logout' && request.method === 'POST') return logout(request, env);
+    if (pathname === '/api/account/delete' && request.method === 'POST')
+      return deleteAccount(request, env);
     if (pathname === '/api/door' && request.method === 'POST') return door(request, env);
     if (pathname === '/api/play' && request.method === 'POST') return play(request, env);
     if (pathname === '/api/characters' || pathname.startsWith('/api/characters/'))

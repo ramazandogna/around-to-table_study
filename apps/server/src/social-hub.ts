@@ -579,6 +579,82 @@ export class SocialHub extends DurableObject<Env> {
     return done > 0;
   }
 
+  /** The ids of an account's characters. */
+  async characterIds(accountId: string): Promise<string[]> {
+    return this.sql
+      .exec<{ id: string }>('SELECT id FROM characters WHERE account_id = ?', accountId)
+      .toArray()
+      .map((row) => row.id);
+  }
+
+  /**
+   * Erases an account: every row about it or its characters in every table
+   * (friendships, phone messages, blocks, focus blocks, shouts, reports,
+   * events, rooms it opened, tries, whereabouts, presence), the sessions and
+   * the Google identity. Its characters leave the building first; their
+   * friends see the friendships go. Returns the characters' ids (for the area
+   * rooms to let them go too), or null when there is no such account.
+   */
+  async deleteAccount(accountId: string): Promise<string[] | null> {
+    const found = this.sql.exec('SELECT 1 FROM accounts WHERE id = ?', accountId).toArray();
+    if (found.length === 0) return null;
+    const ids = this.sql
+      .exec<{ id: string }>('SELECT id FROM characters WHERE account_id = ?', accountId)
+      .toArray()
+      .map((row) => row.id);
+    // Out of the building while their rows still say who their friends are.
+    await this.kick(ids);
+    const friends = new Set<string>();
+    const rooms: string[] = [];
+    for (const id of ids) {
+      for (const row of this.sql
+        .exec<{ a: string; b: string }>('SELECT a, b FROM friends WHERE a = ? OR b = ?', id, id)
+        .toArray()) {
+        friends.add(row.a === id ? row.b : row.a);
+      }
+      for (const row of this.sql
+        .exec<{ code: string }>('SELECT code FROM rooms WHERE owner = ?', id)
+        .toArray()) {
+        rooms.push(row.code);
+      }
+    }
+    for (const id of ids) {
+      this.sql.exec('DELETE FROM users WHERE id = ?', id);
+      this.sql.exec('DELETE FROM friends WHERE a = ? OR b = ?', id, id);
+      this.sql.exec('DELETE FROM messages WHERE a = ? OR b = ? OR sender = ?', id, id, id);
+      this.sql.exec('DELETE FROM admins WHERE id = ? OR granted_by = ?', id, id);
+      this.sql.exec('DELETE FROM blocks WHERE blocker = ? OR blocked = ?', id, id);
+      this.sql.exec('DELETE FROM focus_blocks WHERE user = ?', id);
+      this.sql.exec('DELETE FROM events WHERE by = ?', id);
+      this.sql.exec('DELETE FROM shouts WHERE sender = ?', id);
+      this.sql.exec('DELETE FROM room_bans WHERE user = ?', id);
+      this.sql.exec('DELETE FROM places WHERE id = ?', id);
+      this.sql.exec('DELETE FROM reports WHERE reporter = ? OR target = ?', id, id);
+      this.sql.exec(
+        "DELETE FROM tries WHERE key = ? OR key LIKE 'room:%:' || ?",
+        `report:${id}`,
+        id,
+      );
+      this.sql.exec('DELETE FROM presence WHERE character_id = ?', id);
+    }
+    for (const code of rooms) {
+      this.sql.exec('DELETE FROM room_bans WHERE code = ?', code);
+      this.sql.exec('DELETE FROM rooms WHERE code = ?', code);
+      try {
+        await this.env.AREAS.getByName(`room:${code}`).sendOff(null, 'room_closed');
+      } catch {
+        // The room is already gone.
+      }
+    }
+    this.sql.exec('DELETE FROM tries WHERE key = ?', `acct:${accountId}`);
+    this.sql.exec('DELETE FROM presence WHERE account_id = ?', accountId);
+    this.sql.exec('DELETE FROM sessions WHERE account_id = ?', accountId);
+    this.sql.exec('DELETE FROM characters WHERE account_id = ?', accountId);
+    this.sql.exec('DELETE FROM accounts WHERE id = ?', accountId);
+    for (const friend of friends) this.sendList(friend);
+    return ids;
+  }
+
   /** A character of this account, or null. */
   async characterOf(accountId: string, id: string): Promise<{ id: string; name: string } | null> {
     return (
