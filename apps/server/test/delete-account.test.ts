@@ -82,36 +82,22 @@ async function seeded() {
   sql.exec('INSERT INTO room_bans (code, user) VALUES (?, ?)', room?.code, b1.id);
   sql.exec('INSERT INTO places (id, area, at) VALUES (?, ?, ?)', a1.id, 'hall', now);
   sql.exec('INSERT INTO places (id, area, at) VALUES (?, ?, ?)', b1.id, 'hall', now);
+  const report =
+    'INSERT INTO reports (reporter, target, reason, note, area, lines, at, target_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+  // Ann filed one about Bob, Bob filed one about Ann, and Bob filed one about a third person.
+  sql.exec(report, a1.id, b1.id, 'spam', 'ann says', null, '[]', now, 'Bob One');
   sql.exec(
-    'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    a1.id,
-    b1.id,
-    'spam',
-    '',
-    null,
-    '[]',
-    now,
-  );
-  sql.exec(
-    'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    report,
     b1.id,
     a2.id,
     'spam',
-    '',
+    'evidence',
     null,
-    '[]',
+    '[{"kind":"say","text":"rude words","at":1}]',
     now,
+    'Ann Two',
   );
-  sql.exec(
-    'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    b1.id,
-    b1.id,
-    'spam',
-    'kept',
-    null,
-    '[]',
-    now,
-  );
+  sql.exec(report, b1.id, 'third', 'spam', 'kept', null, '[]', now, 'Third');
   sql.exec(
     'INSERT INTO tries (key, until, count) VALUES (?, ?, 3)',
     `acct:${accountA}`,
@@ -152,6 +138,8 @@ describe('delete my account', () => {
     const ids = await rig.hub.deleteAccount(accountA);
     expect([...(ids ?? [])].sort()).toEqual([a1, a2].sort());
     for (const [table, rows] of dump(rig)) {
+      // Reports about the account stay as evidence, with the name and lines as they were.
+      if (table === 'reports') continue;
       for (const secret of [
         accountA,
         a1,
@@ -169,7 +157,7 @@ describe('delete my account', () => {
   });
 
   it('keeps everyone else, and rows of others that never named the account', async () => {
-    const { rig, accountB, b1 } = await seeded();
+    const { rig, accountB, a2, b1 } = await seeded();
     const accountA = String(rig.sql.all('accounts').find((r) => r['google_sub'] === 'g-a')?.['id']);
     await rig.hub.deleteAccount(accountA);
     const rows = dump(rig);
@@ -183,6 +171,18 @@ describe('delete my account', () => {
     expect(rows.get('tries')).toContain(`acct:${accountB}`);
     // Bob's report about himself names nobody of Ann's.
     expect(rows.get('reports')).toContain('kept');
+    // The reports about Ann stay for moderation, with her name and what was said; the report she
+    // filed stays too, without the link to her.
+    const reports = rig.sql.all('reports');
+    expect(reports.map((r) => r['reporter']).sort()).toEqual(['', b1, b1]);
+    expect(reports.find((r) => r['note'] === 'evidence')).toMatchObject({
+      target: a2,
+      target_name: 'Ann Two',
+    });
+    expect(String(reports.find((r) => r['note'] === 'evidence')?.['lines'])).toContain(
+      'rude words',
+    );
+    expect(JSON.stringify(reports)).not.toContain(accountA);
     // Bob's own room survives; its ban list loses Ann.
     expect(rows.get('rooms')).toContain('Bob room');
     expect(rows.get('room_bans')).not.toContain(accountA);

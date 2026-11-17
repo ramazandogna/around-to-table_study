@@ -321,6 +321,7 @@ export class SocialHub extends DurableObject<Env> {
       'ALTER TABLE users ADD COLUMN messages_sent INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE users ADD COLUMN tz INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE rooms ADD COLUMN rules TEXT',
+      'ALTER TABLE reports ADD COLUMN target_name TEXT',
       'ALTER TABLE events ADD COLUMN theme TEXT',
     ]) {
       try {
@@ -629,7 +630,9 @@ export class SocialHub extends DurableObject<Env> {
       this.sql.exec('DELETE FROM shouts WHERE sender = ?', id);
       this.sql.exec('DELETE FROM room_bans WHERE user = ?', id);
       this.sql.exec('DELETE FROM places WHERE id = ?', id);
-      this.sql.exec('DELETE FROM reports WHERE reporter = ? OR target = ?', id, id);
+      // Reports are evidence for moderation: those about this character stay (with the name and
+      // lines as they were), and those it filed lose only the link to it.
+      this.sql.exec("UPDATE reports SET reporter = '' WHERE reporter = ?", id);
       this.sql.exec('DELETE FROM tries WHERE key = ?', `report:${id}`);
       this.sql.exec('DELETE FROM presence WHERE character_id = ?', id);
     }
@@ -1503,7 +1506,7 @@ export class SocialHub extends DurableObject<Env> {
     }
     lines.sort((x, y) => x.at - y.at);
     this.sql.exec(
-      'INSERT INTO reports (reporter, target, reason, note, area, lines, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO reports (reporter, target, reason, note, area, lines, at, target_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       me.id,
       target,
       message.reason,
@@ -1511,6 +1514,7 @@ export class SocialHub extends DurableObject<Env> {
       area ?? null,
       JSON.stringify(lines.slice(-REPORT_LINES * 3)),
       Date.now(),
+      this.nameOf(target),
     );
     send(ws, { t: 'reported', id: target });
   }
@@ -1526,13 +1530,14 @@ export class SocialHub extends DurableObject<Env> {
         area: AreaId | null;
         lines: string;
         at: number;
+        target_name: string | null;
       }>('SELECT * FROM reports ORDER BY id DESC LIMIT 100')
       .toArray()
       .map((row) => ({
         id: row.id,
         at: row.at,
         reporter: { id: row.reporter, name: this.nameOf(row.reporter) ?? '' },
-        target: { id: row.target, name: this.nameOf(row.target) ?? '' },
+        target: { id: row.target, name: this.nameOf(row.target) ?? row.target_name ?? '' },
         reason: row.reason,
         note: row.note,
         area: row.area,
