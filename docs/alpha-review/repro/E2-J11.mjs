@@ -103,6 +103,8 @@ async function breakIsOver(taken) {
     check('taken: not seated', (await page.locator('.seat-bar').count()) === 0);
   }
   await gotIt(page);
+  // Leave, so the next scenario starts with an empty library and a free chair.
+  await a.context.close();
 }
 
 try {
