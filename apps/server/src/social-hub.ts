@@ -1605,7 +1605,7 @@ export class SocialHub extends DurableObject<Env> {
     return new Set(rows.map((r) => (r.blocker === id ? r.blocked : r.blocker)));
   }
 
-  /** Blocking ends a friendship (and its conversation) and tells the other person. */
+  /** Blocking ends a friendship (and its conversation). The other person is not told. */
   private block(me: Member, to: string): void {
     if (to === me.id || !this.nameOf(to)) return;
     this.sql.exec(
@@ -1616,7 +1616,6 @@ export class SocialHub extends DurableObject<Env> {
     );
     this.unfriend(me.id, to);
     this.sendMe(me.id);
-    this.sendTo(to, { t: 'blockedBy', name: me.name });
   }
 
   /* ---------- Building-wide chat ---------- */

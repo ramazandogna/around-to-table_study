@@ -301,7 +301,7 @@ export type SocialServerMessage =
   | { t: 'events'; events: ProposedEvent[] }
   /** An admin decided on the player's proposal. */
   | { t: 'reviewed'; title: string; verdict: 'approved' | 'rejected' }
-  /** Someone blocked the player. */
+  /** No longer sent: blocking is silent. Kept so older clients still type-check. */
   | { t: 'blockedBy'; name: string }
   | { t: 'admins'; admins: { id: string; name: string }[] }
   /** The report was kept. */
