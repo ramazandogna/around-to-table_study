@@ -9,3 +9,5 @@ One line per phase: phase · agents · expected outputs.
 - Phase 1b+2 · A3 (sonnet), W2 (sonnet), T1 (opus), T2 (sonnet) in parallel · A3.md, W2.md, T1.md, T2.md + shots/ + repro/
 - Phase 3 · LEAD · BACKLOG.md (J01–J16), decisions.md round J note
 - Phase 4 wave 1 · E1 (sonnet, worktree): J01 J02s J04 J06 J07s J08s J16b · E2 (sonnet, worktree): J03 J09g J10 J11 J12 J13 J16s · E3 (sonnet, worktree): J05 J09s J14 J15
+- Phase 4 wave 1 merged (E1, E2, E3); all checks green (shared 216, server 55, client 29)
+- Phase 4 wave 2 · E2: J02 client 'full', J07 report UI, J08 delete account UI, drop blockedBy
