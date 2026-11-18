@@ -7,8 +7,10 @@ import { keepBlock } from './state/block';
 import { useGameStore } from './state/store';
 import './styles.css';
 
-// Tests reach the store before the world exists (the sign-in and the door); dev builds only.
-if (import.meta.env.DEV) Object.assign(window, { __store: useGameStore });
+// Tests reach the store before the world exists (the sign-in and the door): dev builds,
+// and the built game served on this machine (scripts walk between rooms through it).
+const onThisMachine = ['localhost', '127.0.0.1'].includes(location.hostname);
+if (import.meta.env.DEV || onThisMachine) Object.assign(window, { __store: useGameStore });
 
 keepBlock();
 
