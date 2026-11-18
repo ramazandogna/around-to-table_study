@@ -1108,7 +1108,7 @@ button:disabled {
 
 .hud-side {
   position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 132px);
+  top: calc(max(12px, env(safe-area-inset-top)) + 60px);
   left: 16px;
   z-index: 3;
   display: flex;
@@ -1830,50 +1830,126 @@ button:disabled {
   flex: none;
 }
 
-/* ---------- HUD: the plate (top left), the map corner and chat column (right) ---------- */
+/* ---------- HUD: the place pill and dock (left), the map corner and chat column (right) ---------- */
+
+/* Read by screen readers, not drawn. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .hud-title {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
-  left: 12px;
+  left: max(12px, env(safe-area-inset-left));
   /* Above world labels, so a door sign never covers the buttons. */
   z-index: 3;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
-  max-width: min(470px, calc(100vw - 268px));
-  padding: 10px 12px 12px;
+  pointer-events: none;
 }
 
-.hud-heading {
+.hud-title > * {
+  pointer-events: auto;
+}
+
+/* Where you are and who is here, in one slim line; tapping it folds the dock. */
+.hud-place {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+  max-width: min(420px, calc(100vw - 268px));
+  padding: 3px 4px 3px 6px;
 }
 
-.hud-name {
-  font-size: 20px;
-  letter-spacing: 0.02em;
-  text-shadow: 0 2px 0 var(--panel-edge-light);
-}
-
-.hud-area {
+.hud-place-main {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 8px;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 6px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--panel-ink);
+  font: inherit;
   font-size: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hud-place-main:hover {
+  background: var(--panel-well);
+}
+
+.hud-place-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud-count {
   color: var(--panel-ink-soft);
-  font-size: 14px;
+  font-size: 13px;
 }
 
-.hud-links {
+.hud-count-short {
+  display: none;
+}
+
+.hud-fold-arrow {
+  color: var(--panel-ink-soft);
+  font-size: 11px;
+}
+
+.hud-place-main > .hud-dot {
+  position: absolute;
+  top: 2px;
+  right: 0;
+}
+
+.hud-place-sound {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--panel-edge-mid);
+  border-radius: 6px;
+  background: var(--panel-well);
+  cursor: pointer;
+}
+
+.hud-place-sound[aria-pressed='true'] {
+  border-color: var(--panel-select);
+}
+
+/* The dock: the five things people open most, on a small wooden bar in the bottom left. */
+.hud-dock {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: stretch;
+  gap: 4px;
+  padding: 5px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 10px;
+  background: var(--panel-face);
+  box-shadow:
+    inset 0 0 0 2px var(--panel-edge-light),
+    0 4px 0 rgb(0 0 0 / 0.3);
+}
+
+.hud-title--folded .hud-dock {
+  display: none;
 }
 
 .hud-link {
@@ -1906,6 +1982,49 @@ button:disabled {
   border-color: var(--panel-select);
 }
 
+/* In the dock: the icon over its name. */
+.hud-dock-button {
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 54px;
+  min-height: 50px;
+  padding: 4px 5px 3px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.hud-dock-button .hud-icon {
+  font-size: 20px;
+}
+
+/* Not a box of its own: the Menu's list lines up with the dock (or, on a phone, the pill and dock). */
+.hud-dock-menu {
+  display: flex;
+}
+
+.hud-dock-menu > .hud-link {
+  flex: 1;
+}
+
+/* The Menu's list opens over the dock. */
+.hud-menu {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 180px;
+  width: max-content;
+  padding: 10px;
+}
+
+.hud-menu .hud-link {
+  justify-content: flex-start;
+}
+
 .hud-link--quiet {
   min-height: 30px;
   border-color: transparent;
@@ -1914,6 +2033,10 @@ button:disabled {
   color: var(--panel-ink-soft);
   font-size: 12px;
   text-decoration: underline;
+}
+
+.hud-menu .hud-link--quiet {
+  justify-content: center;
 }
 
 .hud-icon {
@@ -1925,6 +2048,27 @@ button:disabled {
   position: absolute;
   top: -8px;
   right: -8px;
+}
+
+.hud-dock-button > .hud-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  margin: 0;
+}
+
+/* On a wide desktop the long keys hint stays between the dock and the right column. */
+@media (min-width: 1241px) {
+  .hud-hint--keys {
+    max-width: min(640px, calc(100vw - 700px));
+  }
+}
+
+/* Between phone and wide desktop the chat line would run into the dock: it moves right of it. */
+@media (min-width: 701px) and (max-width: 1240px), (min-width: 701px) and (pointer: coarse) {
+  .hud-bottom {
+    padding-left: 330px;
+  }
 }
 
 .hud-right {
@@ -2009,8 +2153,7 @@ button:disabled {
   font-weight: normal;
 }
 
-/* Phones fold the plate and the map into small buttons; desktops never show these. */
-.hud-fold,
+/* Phones fold the map into a small button; desktops never show it. */
 .map-fold {
   display: none;
 }
@@ -2096,6 +2239,51 @@ button:disabled {
   cursor: pointer;
 }
 
+/* The closed chat on a desktop: one line with the last thing said; a tap opens it. */
+.chat-strip {
+  align-self: stretch;
+  justify-content: flex-start;
+  min-width: 0;
+  text-align: left;
+}
+
+.chat-strip-title--quiet {
+  display: none;
+}
+
+.chat-strip-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-strip .chat-name {
+  color: var(--panel-ink-soft);
+  font-weight: normal;
+}
+
+/* On a phone it stays the short "Room chat" button. */
+@media (max-width: 700px) {
+  .chat-strip {
+    align-self: flex-end;
+  }
+
+  .chat-strip-title--quiet {
+    display: inline;
+  }
+
+  .chat-strip-line {
+    display: none;
+  }
+
+  .quests-fold-label {
+    display: none;
+  }
+}
+
 /* A panel is open: on a phone the chat button steps aside instead of covering its close button. */
 @media (max-width: 700px) {
   .chat-toggle--aside,
@@ -2152,40 +2340,68 @@ button:disabled {
 
 @media (max-width: 700px) {
   .hud-title {
-    left: 8px;
-    max-width: calc(100vw - 160px);
-    padding: 8px;
-    gap: 6px;
+    left: max(8px, env(safe-area-inset-left));
   }
 
-  .hud-name {
-    font-size: 16px;
+  /* On a phone the pill is short: the room's icon, how many are here, the arrow and the sound. */
+  .hud-place {
+    max-width: calc(100vw - 170px);
+    padding: 2px 3px 2px 4px;
   }
 
-  .hud-area {
-    font-size: 14px;
-  }
-
-  /* Icons only on phones; the names stay for screen readers. */
-  .hud-link {
-    min-height: 34px;
-    min-width: 34px;
-    justify-content: center;
-    padding: 0 4px;
-    font-size: 12px;
-  }
-
-  .hud-link .hud-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  .hud-link--quiet {
+  .hud-place-name,
+  .hud-count-full {
     display: none;
+  }
+
+  .hud-count-short {
+    display: inline;
+    color: var(--panel-ink);
+    font-size: 15px;
+  }
+
+  /* The dock folds out under the pill as a list, each icon with its name. */
+  .hud-dock {
+    position: static;
+    flex-direction: column;
+    padding: 5px;
+  }
+
+  .hud-dock-button {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 12px 0 8px;
+    font-size: 13px;
+  }
+
+  .hud-dock-button .hud-icon {
+    font-size: 18px;
+  }
+
+  .hud-dock-button > .hud-badge {
+    top: 50%;
+    right: 6px;
+    translate: 0 -50%;
+  }
+
+  .hud-dock-button > .hud-dot {
+    top: 50%;
+    right: 8px;
+    translate: 0 -50%;
+  }
+
+  .hud-dock-button:has(> .hud-badge, > .hud-dot) {
+    padding-right: 36px;
+  }
+
+  /* The Menu's list opens beside the dock, level with the Menu button. */
+  .hud-menu {
+    top: auto;
+    bottom: 0;
+    left: calc(100% + 10px);
+    min-width: 0;
   }
 
   .hud-right {
@@ -2204,7 +2420,6 @@ button:disabled {
     font-size: 11px;
   }
 
-  .hud-fold,
   .map-fold {
     display: flex;
     align-items: center;
@@ -2218,27 +2433,6 @@ button:disabled {
     color: var(--panel-ink);
     font-size: 15px;
     cursor: pointer;
-  }
-
-  .hud-fold {
-    align-self: flex-start;
-  }
-
-  .hud-fold-arrow {
-    font-size: 11px;
-  }
-
-  /* Folded, the plate is just its button: where you are and how many are here. */
-  .hud-title--folded {
-    padding: 0;
-    border: 0;
-    background: none;
-    box-shadow: none;
-  }
-
-  .hud-title--folded .hud-heading,
-  .hud-title--folded .hud-links {
-    display: none;
   }
 
   .map-corner {

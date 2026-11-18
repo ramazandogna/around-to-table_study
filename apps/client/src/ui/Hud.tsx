@@ -1,17 +1,15 @@
-import { APP_NAME, isRoomArea, type AreaId } from '@att/shared';
-import { useEffect, useRef } from 'react';
+import { AREA_RULES, isRoomArea, type AreaId } from '@att/shared';
+import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { getLanguage, setLanguage, t } from '../i18n/t';
+import { unreadMessages } from '../net/social';
 import { layerIndex, panelOpen, useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
 import { WorldClock } from './Calendar';
-import { FriendsLink } from './Friends';
-import { InboxLink } from './Inbox';
-import { PhoneLink } from './Phone';
 import { SignOutLink } from './Gate';
 import { StatusLink } from './StatusDialog';
 import { ExitLink } from './ExitGame';
-import { GoalsLink, QuestsPanel } from './Goals';
-import { WardrobeLink } from './Wardrobe';
+import { QuestsPanel } from './Goals';
+import { useDialog } from './useDialog';
 
 const AREA_ICON: Record<AreaId, string> = {
   hall: '🚪',
@@ -23,7 +21,15 @@ const AREA_ICON: Record<AreaId, string> = {
   room9: '🔑',
 };
 
-/** The wooden plate in the top left: where you are, who is here, and everything you can open. */
+const isPhone = () => window.matchMedia('(max-width: 700px)').matches;
+
+/**
+ * The top left corner: a slim pill that says where you are and who is here,
+ * and the dock with the five things people open most. On a desktop the dock
+ * sits in the bottom left; on a phone it folds under the pill, as the menu did.
+ * Everything else (status, sound, language, about, exit, sign out) is in the
+ * dock's Menu, so nothing is more than two taps away.
+ */
 export function HudPlate() {
   const area = useGameStore((s) => s.area);
   const connected = useGameStore((s) => s.connected);
@@ -32,80 +38,277 @@ export function HudPlate() {
   const open = useGameStore((s) => s.plateOpen);
   const layers = useGameStore((s) => s.layers);
   const panel = useGameStore(panelOpen);
-  // On a phone the open plate would cover the panel that just opened (the calendar's title, a card): it folds.
+  const waiting = useGameStore(somethingWaiting);
+  // On a phone the open dock would cover the panel that just opened (the calendar's title, a card): it folds.
   useEffect(() => {
-    if (panel && window.matchMedia('(max-width: 700px)').matches) {
-      useGameStore.getState().setPlateOpen(false);
-    }
+    if (panel && isPhone()) useGameStore.getState().setPlateOpen(false);
   }, [panel]);
-  // In a private room the plate shows its name.
+  // In a private room the pill shows its name.
   const roomName = useGameStore((s) => (isRoomArea(s.area) ? s.room?.room.name : undefined));
   const areaName = roomName ?? t(`area.${area}`);
+  const count = connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline');
   return (
     <header
-      className={`hud-title panel panel--compact${open ? '' : ' hud-title--folded'}`}
+      className={`hud-title${open ? '' : ' hud-title--folded'}`}
       style={{ zIndex: layerIndex(layers, 'plate') }}
     >
-      {/* On phones the plate starts folded to one small button; desktops never see it. */}
-      <button
-        type="button"
-        className="hud-fold"
-        aria-expanded={open}
-        aria-label={t(open ? 'hud.fold' : 'hud.unfold')}
-        onClick={() => useGameStore.getState().setPlateOpen(!open)}
-      >
-        <span aria-hidden>{AREA_ICON[area]}</span>
-        <span className="hud-fold-count">{connected ? playersHere : '…'}</span>
-        <span className="hud-fold-arrow" aria-hidden>
-          {open ? '▴' : '▾'}
-        </span>
-      </button>
-      <div className="hud-heading">
-        <span className="hud-name">
-          <img className="hud-logo" src="/favicon-64.png" alt="" />
-          {APP_NAME}
-        </span>
-        <span className="hud-area">
-          <span aria-hidden>{AREA_ICON[area]}</span> {areaName}
+      <div className="hud-place panel panel--compact">
+        <button
+          type="button"
+          className="hud-place-main"
+          aria-expanded={open}
+          aria-controls="hud-dock"
+          title={t(open ? 'hud.fold' : 'hud.unfold')}
+          onClick={() => useGameStore.getState().setPlateOpen(!open)}
+        >
+          <span aria-hidden>{AREA_ICON[area]}</span>
+          <span className="hud-place-name">{areaName}</span>
           <span className="hud-count">
-            {connected ? `${playersHere} ${t('hud.here')}` : t('hud.offline')}
-            {connected && area === 'library' && ` · ${t('hud.studying', { count: studying })}`}
+            <span className="hud-count-full">{count}</span>
+            <span className="hud-count-short" aria-hidden>
+              {connected ? playersHere : '…'}
+            </span>
+            {connected && area === 'library' && (
+              <span className="hud-count-full">
+                {' · '}
+                {t('hud.studying', { count: studying })}
+              </span>
+            )}
           </span>
-        </span>
+          <span className="visually-hidden">{t(open ? 'hud.fold' : 'hud.unfold')}</span>
+          <span className="hud-fold-arrow" aria-hidden>
+            {open ? '▴' : '▾'}
+          </span>
+          {!open && waiting && <span className="hud-dot" aria-label={t('hud.waiting')} />}
+        </button>
+        <SoundToggle compact />
       </div>
-      {/* On a phone the open plate would cover what a link opens, so it folds away after the tap. */}
-      <nav className="hud-links" aria-label={t('hud.menu')} onClickCapture={foldOnPhone}>
-        <StatusLink />
-        <GoalsLink />
-        <FriendsLink />
-        <PhoneLink />
-        <InboxLink />
-        <WardrobeLink />
-        <SoundToggle />
-        <LanguageToggle />
-        <IntroLink />
-        <ExitLink />
-        <SignOutLink />
-      </nav>
+      <Dock />
     </header>
   );
 }
 
-/** Folds the plate after a tap on one of its links, where the plate folds at all (narrow screens). */
-function foldOnPhone(): void {
-  if (!window.matchMedia('(max-width: 700px)').matches) return;
-  window.setTimeout(() => useGameStore.getState().setPlateOpen(false), 0);
+/** Something in the dock is waiting (a message, a request, a new thing to wear): the folded pill says so. */
+function somethingWaiting(s: ReturnType<typeof useGameStore.getState>): boolean {
+  return (
+    s.inboxUnread > 0 ||
+    s.wardrobeNew ||
+    s.friends.some((f) => f.unread > 0 || f.state === 'incoming')
+  );
 }
 
-/** Turns every sound in the game off or on; remembered on this device. */
-function SoundToggle() {
-  const muted = useGameStore((s) => s.muted);
+/** The five things in the dock, each with its name under it (on phones beside it). */
+function Dock() {
+  // On a phone a tap in the dock folds it, so it never covers what the tap opened.
+  const fold = (event: MouseEvent) => {
+    if (!isPhone()) return;
+    // The menu opens its own list; the dock stays for it.
+    if ((event.target as HTMLElement).closest('.hud-dock-menu > button')) return;
+    window.setTimeout(() => useGameStore.getState().setPlateOpen(false), 0);
+  };
+  return (
+    <nav id="hud-dock" className="hud-dock" aria-label={t('hud.dock')} onClickCapture={fold}>
+      <FriendsButton />
+      <PhoneButton />
+      <GoalsButton />
+      <WardrobeButton />
+      <MenuButton />
+    </nav>
+  );
+}
+
+function DockButton({
+  icon,
+  label,
+  expanded,
+  onClick,
+  children,
+  className = '',
+}: {
+  icon: string;
+  label: string;
+  expanded?: boolean;
+  onClick: () => void;
+  children?: ReactNode;
+  className?: string;
+}) {
   return (
     <button
       type="button"
-      className="hud-link"
+      className={`hud-link hud-dock-button ${className}`}
+      {...(expanded === undefined ? {} : { 'aria-expanded': expanded })}
+      onClick={onClick}
+    >
+      <span className="hud-icon" aria-hidden>
+        {icon}
+      </span>
+      <span className="hud-label">{label}</span>
+      {children}
+    </button>
+  );
+}
+
+/** Friends, with a badge for requests waiting on you. */
+function FriendsButton() {
+  const incoming = useGameStore((s) => s.friends.filter((f) => f.state === 'incoming').length);
+  const open = useGameStore((s) => s.friendsOpen);
+  return (
+    <DockButton
+      icon="🤝"
+      label={t('friends.title')}
+      expanded={open}
+      onClick={() => useGameStore.getState().setFriendsOpen(!open)}
+    >
+      {incoming > 0 && <span className="chat-unread hud-badge">{incoming}</span>}
+    </DockButton>
+  );
+}
+
+/**
+ * The phone, with the bell inside it: one badge for messages and for
+ * everything else that happened (pokes, invites, answers). In the library the
+ * phone stays silent, so the tap opens the bell's list instead, which works
+ * everywhere; messages wait as a dot.
+ */
+function PhoneButton() {
+  const unread = useGameStore((s) => unreadMessages(s.friends));
+  const bell = useGameStore((s) => s.inboxUnread);
+  const phoneOpen = useGameStore((s) => s.phoneOpen);
+  const inboxOpen = useGameStore((s) => s.inboxOpen);
+  const silent = useGameStore((s) => !AREA_RULES[s.area].phone);
+  const open = phoneOpen || inboxOpen;
+
+  function toggle() {
+    const store = useGameStore.getState();
+    if (open) {
+      store.closePhone();
+      store.setInboxOpen(false);
+    } else if (silent) store.setInboxOpen(true);
+    else store.openPhone(null);
+  }
+
+  const count = (silent ? 0 : unread) + bell;
+  return (
+    <DockButton icon="📱" label={t('phone.title')} expanded={open} onClick={toggle}>
+      {count > 0 ? (
+        <span className="chat-unread hud-badge">{count}</span>
+      ) : (
+        unread > 0 && <span className="hud-dot" aria-label={t('phone.waiting')} />
+      )}
+    </DockButton>
+  );
+}
+
+function GoalsButton() {
+  const open = useGameStore((s) => s.goalsOpen);
+  return (
+    <DockButton
+      icon="🎯"
+      label={t('goals.button')}
+      expanded={open}
+      onClick={() => useGameStore.getState().setGoalsOpen(true)}
+    />
+  );
+}
+
+/** The wardrobe, with a dot when there is something new to wear (set by whoever unlocks it). */
+function WardrobeButton() {
+  const fresh = useGameStore((s) => s.wardrobeNew);
+  return (
+    <DockButton
+      icon="👕"
+      label={t('hud.wardrobe')}
+      onClick={() => {
+        const store = useGameStore.getState();
+        store.setWardrobeOpen(true);
+        store.setWardrobeNew(false);
+      }}
+    >
+      {fresh && <span className="hud-dot" aria-label={t('hud.wardrobe.new')} />}
+    </DockButton>
+  );
+}
+
+/** The rest of the menu, in a small list over (desktop) or beside (phone) the dock. */
+function MenuButton() {
+  const open = useGameStore((s) => s.menuOpen);
+  const button = useRef<HTMLButtonElement>(null);
+  return (
+    <div className="hud-dock-menu">
+      <button
+        ref={button}
+        type="button"
+        className="hud-link hud-dock-button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-controls="hud-menu"
+        onClick={() => useGameStore.getState().setMenuOpen(!open)}
+      >
+        <span className="hud-icon" aria-hidden>
+          ☰
+        </span>
+        <span className="hud-label">{t('hud.menu')}</span>
+      </button>
+      {open && <MenuList opener={button} />}
+    </div>
+  );
+}
+
+function MenuList({ opener }: { opener: RefObject<HTMLButtonElement | null> }) {
+  const list = useRef<HTMLDivElement>(null);
+  const close = () => useGameStore.getState().setMenuOpen(false);
+  useDialog(list, close);
+
+  // A tap anywhere else closes the list (the Menu button toggles it itself).
+  useEffect(() => {
+    const away = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (list.current?.contains(target) || opener.current?.contains(target)) return;
+      useGameStore.getState().setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [opener]);
+
+  // Choosing something closes the list once the choice has run; focus goes back to Menu, so the
+  // dialog it opens hands focus back there when it closes.
+  const choose = (event: MouseEvent) => {
+    if (!(event.target as HTMLElement).closest('button')) return;
+    opener.current?.focus({ preventScroll: true });
+    close();
+  };
+
+  return (
+    <div
+      ref={list}
+      id="hud-menu"
+      className="hud-menu panel panel--compact"
+      role="group"
+      aria-label={t('hud.menu')}
+      tabIndex={-1}
+      onClick={choose}
+    >
+      <StatusLink />
+      <SoundToggle />
+      <LanguageToggle />
+      <IntroLink />
+      <ExitLink />
+      <SignOutLink />
+    </div>
+  );
+}
+
+/** Turns every sound in the game off or on; remembered on this device. */
+function SoundToggle({ compact = false }: { compact?: boolean }) {
+  const muted = useGameStore((s) => s.muted);
+  const label = t(muted ? 'hud.sound.on' : 'hud.sound.off');
+  return (
+    <button
+      type="button"
+      className={compact ? 'hud-place-sound' : 'hud-link'}
       aria-pressed={muted}
-      title={t(muted ? 'hud.sound.on' : 'hud.sound.off')}
+      title={label}
+      {...(compact ? { 'aria-label': label } : {})}
       onClick={() => {
         const store = useGameStore.getState();
         store.setMuted(!muted);
@@ -115,7 +318,7 @@ function SoundToggle() {
       <span className="hud-icon" aria-hidden>
         {muted ? '🔇' : '🔊'}
       </span>
-      <span className="hud-label">{t(muted ? 'hud.muted' : 'hud.sound')}</span>
+      {!compact && <span className="hud-label">{t(muted ? 'hud.muted' : 'hud.sound')}</span>}
     </button>
   );
 }

@@ -1044,5 +1044,14 @@
   "elsewhere.title": "Başka yerde açıldı",
   "elsewhere.text": "Oyunu başka bir sekmede ya da cihazda açtın, bu yüzden buradan çıkıldı. Binada aynı anda yalnızca bir kez bulunabilirsin.",
   "elsewhere.here": "Burada oyna",
-  "staff.wetSign": "Islak zemin"
+  "staff.wetSign": "Islak zemin",
+  "hud.dock": "Hızlı menü",
+  "hud.waiting": "Seni bekleyen bir şey var",
+  "hud.wardrobe.new": "Giyecek yeni bir şey var",
+  "chat.strip.open": "Oda sohbetini aç",
+  "guide.arrow": "Kütüphane bu tarafta",
+  "guide.title": "İlk bloğun",
+  "guide.find": "Kütüphaneyi bul",
+  "guide.sit": "Bir masaya otur",
+  "guide.start": "Bir odak bloğu başlat"
 }

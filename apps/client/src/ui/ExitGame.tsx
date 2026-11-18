@@ -51,7 +51,9 @@ function ExitDialog({ onClose }: { onClose: () => void }) {
 
   function exit() {
     const store = useGameStore.getState();
-    store.setPlateOpen(false);
+    // On a phone the dock comes back folded; a desktop keeps its dock.
+    if (window.matchMedia('(max-width: 700px)').matches) store.setPlateOpen(false);
+    store.setMenuOpen(false);
     // The question lives in the store now: closed here, it does not greet the player on the way back in.
     store.setExitOpen(false);
     leaveToSelect();

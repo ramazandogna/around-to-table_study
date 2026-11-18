@@ -24,22 +24,6 @@ const COLLECTIBLES =
 
 const presetIcon = (id: string | null) => GOAL_PRESETS.find((p) => p.id === id)?.icon ?? '🎯';
 
-/** The menu's "Set a goal". */
-export function GoalsLink() {
-  return (
-    <button
-      type="button"
-      className="hud-link"
-      onClick={() => useGameStore.getState().setGoalsOpen(true)}
-    >
-      <span className="hud-icon" aria-hidden>
-        🎯
-      </span>
-      <span className="hud-label">{t('goals.button')}</span>
-    </button>
-  );
-}
-
 /**
  * Setting today's goals: a ready-made one ("Read a book · 60 min") or one in
  * the player's own words, with how long. Focus time from the study timer
@@ -220,6 +204,9 @@ export function QuestsPanel() {
         onClick={() => store().setQuestsFolded(false)}
       >
         <span aria-hidden>📜</span>
+        <span className="quests-fold-label" aria-hidden>
+          {t('quests.title')}
+        </span>
         <span className="quests-count">
           {done}/{all}
         </span>

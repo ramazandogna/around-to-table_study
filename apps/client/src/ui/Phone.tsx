@@ -1,6 +1,5 @@
 import {
   type Appearance,
-  AREA_RULES,
   isRoomArea,
   type AreaId,
   type DirectMessage,
@@ -11,41 +10,27 @@ import {
 } from '@att/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { dateLocale, t, type MessageKey } from '../i18n/t';
-import { unreadMessages } from '../net/social';
 import { useGameStore } from '../state/store';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { Panel } from './Panel';
 import { useDialog } from './useDialog';
 import { portrait } from '../world/portrait';
 
-/**
- * The HUD link to the phone. It works in every room; in the library it only
- * buzzes (a little shaking phone by the player's name) instead of ringing.
- */
-export function PhoneLink() {
-  const unread = useGameStore((s) => unreadMessages(s.friends));
-  const open = useGameStore((s) => s.phoneOpen);
-  const silent = useGameStore((s) => !AREA_RULES[s.area].phone);
-
-  function toggle() {
-    const store = useGameStore.getState();
-    if (open) store.closePhone();
-    else if (silent) store.setNotice('phone_silent');
-    else store.openPhone(null);
-  }
-
+/** The bell lives in the phone: pokes, invites and answers, with how many are new. */
+function BellButton() {
+  const unread = useGameStore((s) => s.inboxUnread);
   return (
-    <button type="button" className="hud-link" aria-expanded={open} onClick={toggle}>
-      <span className="hud-icon" aria-hidden>
-        📱
-      </span>
-      <span className="hud-label">{t('phone.title')}</span>
-      {unread > 0 &&
-        (silent ? (
-          <span className="hud-dot" aria-label={t('phone.waiting')} />
-        ) : (
-          <span className="chat-unread hud-badge">{unread}</span>
-        ))}
+    <button
+      type="button"
+      className="mini-button"
+      onClick={() => {
+        const store = useGameStore.getState();
+        store.closePhone();
+        store.setInboxOpen(true);
+      }}
+    >
+      🔔 {t('inbox.title')}
+      {unread > 0 && <span className="chat-unread hud-badge">{unread}</span>}
     </button>
   );
 }
@@ -113,6 +98,7 @@ function Contacts() {
         </ul>
       )}
       <div className="phone-foot">
+        <BellButton />
         {requests > 0 && (
           <button
             type="button"

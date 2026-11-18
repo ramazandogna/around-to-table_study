@@ -1044,5 +1044,14 @@
   "elsewhere.title": "Opened somewhere else",
   "elsewhere.text": "You opened the game in another tab or on another device, so this one stepped out. You can only be in the building once.",
   "elsewhere.here": "Play here",
-  "staff.wetSign": "Wet floor"
+  "staff.wetSign": "Wet floor",
+  "hud.dock": "Quick menu",
+  "hud.waiting": "Something is waiting for you",
+  "hud.wardrobe.new": "Something new to wear",
+  "chat.strip.open": "Open the room chat",
+  "guide.arrow": "Library this way",
+  "guide.title": "Your first block",
+  "guide.find": "Find the library",
+  "guide.sit": "Sit down at a table",
+  "guide.start": "Start a focus block"
 }
