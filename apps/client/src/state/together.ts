@@ -62,6 +62,9 @@ export const useTogether = create<TogetherState>((set) => ({
   setStudyBeside: (studyBeside) => set({ studyBeside }),
 }));
 
+// Development only (dropped from the production build): a handle for browser tests.
+if (import.meta.env.DEV) Object.assign(window, { __together: useTogether });
+
 /** Badges a block just earned (shown on the reward card). */
 export function newBadges(before: Profile | null, after: Profile | null): string[] {
   if (!before || !after) return [];
