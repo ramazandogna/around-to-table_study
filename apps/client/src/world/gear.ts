@@ -173,7 +173,9 @@ const BUILD: Record<WearableId, Build> = {
     b.dome(hw + 0.06, hd + 0.06, 0.03, 1.15, shade(c, 0.85), base, zc);
   },
   beret(b, fit, c) {
-    const { hw, hd, zc, top } = hatBox(fit);
+    const { hw, hd, zc, top: hairTop } = hatBox(fit);
+    // On a bun the beret sits on the head and the bun comes through, rather than floating above it.
+    const top = Math.min(hairTop, SKULL.top + 0.06);
     const geometry = new CylinderGeometry(0.8, 1, 0.06, 8, 1);
     geometry.rotateY(Math.PI / 8);
     const k = Math.cos(Math.PI / 8);
