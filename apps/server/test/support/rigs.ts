@@ -9,19 +9,27 @@ export const LOOK = { character: 0 };
 
 /** The hub the area rooms talk to, as far as a test needs it. */
 export type HubStub = {
-  recordBlock: (id: string, minutes: number) => Promise<void>;
+  recordBlock: (id: string, minutes: number, shared?: boolean) => Promise<unknown>;
   isBlocked: (a: string, b: string) => Promise<boolean>;
   blockedWith: (id: string) => Promise<string[]>;
   [key: string]: unknown;
 };
 
-export function fakeHub(overrides: Partial<HubStub> = {}): HubStub & { recorded: number[] } {
+export function fakeHub(
+  overrides: Partial<HubStub> = {},
+): HubStub & { recorded: number[]; shared: Record<string, boolean[]> } {
   const recorded: number[] = [];
+  /** Whether each person's recorded blocks were shared, in order. */
+  const shared: Record<string, boolean[]> = {};
   return {
     recorded,
-    recordBlock: async (_id: string, minutes: number) => {
+    shared,
+    recordBlock: async (id: string, minutes: number, isShared = false) => {
       recorded.push(minutes);
+      (shared[id] ??= []).push(isShared);
+      return { before: null, after: null };
     },
+    circleOf: async () => ({ friends: [], blocked: [] }),
     isBlocked: async () => false,
     blockedWith: async () => [],
     placed: async () => {},
@@ -38,13 +46,18 @@ export function areaRig(area: string, hub: HubStub = fakeHub()) {
   const env = { SOCIAL: { getByName: () => hub } } as unknown as Env;
   const room = new AreaRoom(state as unknown as DurableObjectState, env);
 
-  async function join(id: string, hello: Record<string, unknown> = {}): Promise<Client> {
+  async function join(
+    id: string,
+    hello: Record<string, unknown> = {},
+    account = id,
+  ): Promise<Client> {
     const request = new Request('https://x/ws', {
       headers: {
         Upgrade: 'websocket',
         [AREA_HEADERS.id]: id,
         [AREA_HEADERS.name]: id,
         [AREA_HEADERS.area]: area,
+        [AREA_HEADERS.account]: account,
       },
     });
     await room.fetch(request);
