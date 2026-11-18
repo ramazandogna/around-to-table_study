@@ -7,6 +7,7 @@ import { layerIndex, useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { ChatPanel } from './ui/ChatPanel';
 import { Coach } from './ui/Coach';
+import { Guide } from './ui/Guide';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Discovery } from './ui/Discovery';
 import { Games } from './ui/Games';
@@ -23,6 +24,9 @@ import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
 import { CharacterSelect, goalName } from './ui/CharacterSelect';
 import { GoalsDialog } from './ui/Goals';
+import { StatusDialog } from './ui/StatusDialog';
+import { Wardrobe } from './ui/Wardrobe';
+import { ExitGame } from './ui/ExitGame';
 import { addTimePlayed, loadGoals, onFocus, onGoalTime } from './state/stats';
 import { HudPlate, MapCorner } from './ui/Hud';
 import { Intro } from './ui/Intro';
@@ -254,6 +258,7 @@ export function App() {
       <Joystick />
       <footer className="hud-bottom">
         <RoomChip />
+        <Guide />
         <Coach />
         <Notice />
         <SeatBar />
@@ -268,6 +273,9 @@ export function App() {
       <ConfirmDialog />
       <ReportDialog />
       <GoalsDialog />
+      <StatusDialog />
+      <Wardrobe />
+      <ExitGame />
       <Intro />
       <Loader />
     </main>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { t } from '../i18n/t';
 import { readJson, writeJson } from '../net/storage';
 import { useGameStore } from '../state/store';
+import { guideActive } from './Guide';
 
 const SEEN_KEY = 'att.coach';
 const INTRO_KEY = 'att.intro';
@@ -27,6 +28,8 @@ export function Coach() {
   // The welcome note is about to open, or open: its tip waits and is then not needed.
   const welcoming = introOpen || readJson<boolean>(INTRO_KEY) !== true;
   if (seenRooms()[area] || sitting || (area === 'hall' && welcoming)) return null;
+  // A new character's first-steps list stands in for the hall's and library's tips.
+  if ((area === 'hall' || area === 'library') && guideActive()) return null;
 
   function dismiss() {
     markCoachSeen(area);

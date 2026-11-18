@@ -361,9 +361,18 @@ type GameState = {
   world: { online: number; studying: number } | null;
   /** Pets sitting at the library door while their people study, from the social socket. */
   waitingPets: WaitingPet[];
-  /** On phones the title plate and the map fold into small buttons; these open them. */
+  /**
+   * The dock under the place pill (plate) and the map. On phones both start
+   * folded into small buttons; on a desktop the dock starts open and the pill folds it.
+   */
   plateOpen: boolean;
   mapOpen: boolean;
+  /** The dock's Menu list (status, sound, language, about, exit, sign out). */
+  menuOpen: boolean;
+  setMenuOpen: (open: boolean) => void;
+  /** Something new to wear: a dot on the dock's wardrobe until it is opened. */
+  wardrobeNew: boolean;
+  setWardrobeNew: (fresh: boolean) => void;
   /** The event calendar, opened from the clock. */
   calendarOpen: boolean;
   /** A machine in the smoking room being played. */
@@ -511,6 +520,11 @@ type GameState = {
   sitStep: SitStep | null;
   /** The wardrobe takes the keyboard, so arrows and Enter do not reach the world. */
   wardrobeOpen: boolean;
+  /**
+   * The "leave the game" question. Like every dialog the menu opens, it lives
+   * here rather than in the menu, so the menu can close without closing it.
+   */
+  exitOpen: boolean;
   activity: Activity | null;
   timer: LocalTimer | null;
   study: StudySession | null;
@@ -614,6 +628,7 @@ type GameState = {
   setSeated: (seated: boolean) => void;
   setSitStep: (step: SitStep | null) => void;
   setWardrobeOpen: (open: boolean) => void;
+  setExitOpen: (open: boolean) => void;
   setActivity: (activity: Activity | null) => void;
   startTimer: (minutes: number, dnd: boolean) => void;
   stopTimer: () => void;
@@ -667,8 +682,12 @@ export const useGameStore = create<GameState>((set) => ({
   playersHere: 1,
   world: null,
   waitingPets: [],
-  plateOpen: false,
+  plateOpen: typeof window !== 'undefined' && !window.matchMedia('(max-width: 700px)').matches,
   mapOpen: false,
+  menuOpen: false,
+  setMenuOpen: (menuOpen) => set({ menuOpen }),
+  wardrobeNew: false,
+  setWardrobeNew: (wardrobeNew) => set({ wardrobeNew }),
   calendarOpen: false,
   game: null,
   room: null,
@@ -705,10 +724,8 @@ export const useGameStore = create<GameState>((set) => ({
   goalsOpen: false,
   setGoalsOpen: (goalsOpen) => set({ goalsOpen }),
   // On a phone the quests start folded to a small icon, like the map.
-  questsFolded: readFlag(
-    QUESTS_FOLDED_KEY,
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches,
-  ),
+  // Folded to a small "Quests 0/3" pill until opened, on every screen; the choice is remembered.
+  questsFolded: readFlag(QUESTS_FOLDED_KEY, true),
   setQuestsFolded: (questsFolded) => {
     writeFlag(QUESTS_FOLDED_KEY, questsFolded);
     set({ questsFolded });
@@ -760,7 +777,8 @@ export const useGameStore = create<GameState>((set) => ({
   notice: null,
   noticeValue: null,
   chatLog: [],
-  chatOpen: typeof window !== 'undefined' && window.innerWidth >= 900,
+  // The chat starts as its one-line strip; a tap opens it.
+  chatOpen: false,
   unread: 0,
   selected: null,
   statusOpen: false,
@@ -770,6 +788,7 @@ export const useGameStore = create<GameState>((set) => ({
   seated: false,
   sitStep: null,
   wardrobeOpen: false,
+  exitOpen: false,
   activity: null,
   timer: null,
   study: null,
@@ -1018,6 +1037,7 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   setSitStep: (sitStep) => set({ sitStep }),
   setWardrobeOpen: (wardrobeOpen) => set({ wardrobeOpen }),
+  setExitOpen: (exitOpen) => set({ exitOpen }),
   setActivity: (activity) => set({ activity }),
   startTimer: (minutes, dnd) =>
     set({ timer: { endsAt: Date.now() + minutes * 60_000, totalMs: minutes * 60_000 }, dnd }),

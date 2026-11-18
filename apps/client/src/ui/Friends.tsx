@@ -4,22 +4,6 @@ import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { Panel } from './Panel';
 
-/** The HUD link to the friends list, with a badge for requests waiting on you. */
-export function FriendsLink() {
-  const incoming = useGameStore((s) => s.friends.filter((f) => f.state === 'incoming').length);
-  const open = useGameStore((s) => s.friendsOpen);
-  const setOpen = useGameStore((s) => s.setFriendsOpen);
-  return (
-    <button type="button" className="hud-link" aria-expanded={open} onClick={() => setOpen(!open)}>
-      <span className="hud-icon" aria-hidden>
-        🤝
-      </span>
-      <span className="hud-label">{t('friends.title')}</span>
-      {incoming > 0 && <span className="chat-unread hud-badge">{incoming}</span>}
-    </button>
-  );
-}
-
 /** Requests to answer, friends with where they are, and requests you sent. */
 export function FriendsPanel() {
   const open = useGameStore((s) => s.friendsOpen);

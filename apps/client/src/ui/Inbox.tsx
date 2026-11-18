@@ -20,29 +20,10 @@ const ICON: Record<InboxItem['kind'], string> = {
 const time = new Intl.DateTimeFormat(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 
 /**
- * The bell on the HUD: everything that happened to the player (messages,
+ * The bell (inside the dock's phone): everything that happened to the player (messages,
  * pokes, invites, friend requests, buzzes, answers about their events), so
  * nothing is missed while they studied or looked away. Read with a tap.
  */
-export function InboxLink() {
-  const unread = useGameStore((s) => s.inboxUnread);
-  const open = useGameStore((s) => s.inboxOpen);
-  return (
-    <button
-      type="button"
-      className="hud-link"
-      aria-expanded={open}
-      onClick={() => useGameStore.getState().setInboxOpen(!open)}
-    >
-      <span className="hud-icon" aria-hidden>
-        🔔
-      </span>
-      <span className="hud-label">{t('inbox.title')}</span>
-      {unread > 0 && <span className="chat-unread hud-badge">{unread}</span>}
-    </button>
-  );
-}
-
 export function InboxPanel() {
   const open = useGameStore((s) => s.inboxOpen);
   const items = useGameStore((s) => s.inbox);

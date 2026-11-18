@@ -37,25 +37,41 @@ export function ChatPanel() {
   const list = useRef<HTMLOListElement>(null);
   const panel = useGameStore(panelOpen);
 
+  const box = useRef<HTMLElement>(null);
+  const spokeAt = useGameStore(lastSpoken);
+  const openedAt = useRef(0);
+  const [recheck, setRecheck] = useState(0);
+
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [lines, open]);
 
-  if (!AREA_RULES[area].chatLog) return <ChatClosed aside={panel} />;
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className={panel ? 'chat-toggle chat-toggle--aside' : 'chat-toggle'}
-        onClick={() => setOpen(true)}
-      >
-        <span aria-hidden>💬</span> {t('chat.title')}
-        {unread + shoutUnread > 0 && <span className="chat-unread">{unread + shoutUnread}</span>}
-      </button>
+  useEffect(() => {
+    if (open) openedAt.current = Date.now();
+  }, [open]);
+
+  // On a desktop the open chat folds back to its strip once the room has been
+  // quiet for a minute (and the player is not reading or typing in it).
+  useEffect(() => {
+    if (!open || window.matchMedia('(max-width: 700px)').matches) return;
+    const offset = useGameStore.getState().clockOffset;
+    const quietAt = Math.max(openedAt.current, spokeAt - offset) + QUIET_MS;
+    const timer = window.setTimeout(
+      () => {
+        const el = box.current;
+        if (el && (el.matches(':hover') || el.contains(document.activeElement))) {
+          setRecheck((n) => n + 1);
+        } else setOpen(false);
+      },
+      Math.max(quietAt - Date.now(), 5000),
     );
-  }
+    return () => window.clearTimeout(timer);
+  }, [open, spokeAt, recheck, setOpen]);
+
+  if (!AREA_RULES[area].chatLog) return <ChatClosed aside={panel} />;
+  if (!open) return <ChatStrip aside={panel} unread={unread + shoutUnread} />;
   return (
-    <section className="panel panel--compact chat-panel" aria-label={t('chat.title')}>
+    <section ref={box} className="panel panel--compact chat-panel" aria-label={t('chat.title')}>
       <header className="chat-panel-head">
         <div className="chat-tabs" role="tablist">
           {(['room', 'building'] as const).map((option) => (
@@ -173,6 +189,60 @@ function ShoutLine({
       )}
       <span className="chat-text">{line.text}</span>
     </li>
+  );
+}
+
+/** How long the open chat stays open after the last thing anyone said (desktop). */
+const QUIET_MS = 60_000;
+
+/** The newest line someone said (not a coming or going). */
+function lastSaid(lines: readonly ChatLine[]): ChatLine | undefined {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line && (line.kind === 'say' || line.kind === 'whisper')) return line;
+  }
+  return undefined;
+}
+
+/** When someone last said something here or to the building (server clock), or 0. */
+function lastSpoken(s: ReturnType<typeof useGameStore.getState>): number {
+  const said = lastSaid(s.chatLog);
+  return Math.max(said?.at ?? 0, s.shouts[s.shouts.length - 1]?.at ?? 0);
+}
+
+/**
+ * The closed chat: one line with the last thing said (in the room or to the
+ * building), and how many lines are new. A tap opens the whole chat. On a phone
+ * it is the short "Room chat" button it always was.
+ */
+function ChatStrip({ aside, unread }: { aside: boolean; unread: number }) {
+  // Each picked as it is in the store (no new objects), so the strip redraws only when they change.
+  const said = useGameStore((s) => lastSaid(s.chatLog));
+  const shout = useGameStore((s) => s.shouts[s.shouts.length - 1]);
+  const last =
+    shout && (!said || shout.at > said.at)
+      ? { name: shout.name, text: shout.text }
+      : said
+        ? { name: said.name, text: said.text ?? '' }
+        : null;
+  return (
+    <button
+      type="button"
+      className={`chat-toggle chat-strip${aside ? ' chat-toggle--aside' : ''}`}
+      title={t('chat.strip.open')}
+      onClick={() => useGameStore.getState().setChatOpen(true)}
+    >
+      <span aria-hidden>💬</span>
+      <span className={last ? 'chat-strip-title chat-strip-title--quiet' : 'chat-strip-title'}>
+        {t('chat.title')}
+      </span>
+      {last && (
+        <span className="chat-strip-line">
+          <b className="chat-name">{last.name}</b> {last.text}
+        </span>
+      )}
+      {unread > 0 && <span className="chat-unread">{unread}</span>}
+    </button>
   );
 }
 
