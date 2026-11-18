@@ -5172,8 +5172,21 @@ button:disabled {
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
 }
 
+/* On a phone the slot's name goes above its tiles, so the tiles get the whole width. */
+@media (max-width: 600px) {
+  .wear-slot > .option-row--top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .wear-choice {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  }
+}
+
 .wear-card {
-  min-height: 70px;
+  min-height: 64px;
   text-align: center;
   line-height: 1.15;
 }
