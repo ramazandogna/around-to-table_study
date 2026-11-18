@@ -29,6 +29,7 @@ import { TABLE_GAMES, type Table, type TableError, type TableKind } from './tabl
 import type { RoomRules } from './rooms';
 import { STAGE_KINDS, STAGE_LIMITS, type StageState } from './stage';
 import type { AreaId, Point } from './world';
+import type { BookView, Candle, Reward } from './together';
 
 const areaId = z.enum(['hall', 'library', 'smoking', 'conference', 'room3', 'room5', 'room9']);
 const point = z.object({ x: z.number().int(), y: z.number().int() });
@@ -157,6 +158,8 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   }),
   /** The sender's study timer ran out: everyone in the room sees them celebrate. */
   z.object({ t: z.literal('finished') }),
+  /** The reward card for the last finished block was seen; the room forgets it. */
+  z.object({ t: z.literal('rewardSeen') }),
   /** A chair pulled out from its table, or pushed back under it. */
   z.object({ t: z.literal('chair'), tile: point, pulled: z.boolean() }),
   /**
@@ -268,7 +271,19 @@ export type ServerMessage =
       now?: number;
       /** In the conference hall: whether this person may present. */
       presenter?: boolean;
+      /** Tables where people focus now (see `Candle`). */
+      candles?: Candle[];
+      /** Books left on the tables today, as this person may see them. */
+      books?: BookView[];
     }
+  /** In the library and the hall during a table hour: how many focus at the library's tables now. */
+  | { t: 'focusing'; focusing: number }
+  /** Who focuses at which table changed. */
+  | { t: 'candles'; candles: Candle[] }
+  /** A finished block left a book on its table. */
+  | { t: 'book'; book: BookView }
+  /** For the finisher alone: what the block just done earned (sent again after a reconnect until seen). */
+  | { t: 'reward'; reward: Reward }
   /** The conference hall's big screen changed; `now` is the server's clock, to keep in step. */
   | { t: 'staged'; stage: StageState | null; now: number; presenter?: boolean }
   | { t: 'lamped'; index: number; flipped: boolean }
