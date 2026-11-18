@@ -11,6 +11,7 @@ import {
   type Mesh,
 } from 'three';
 import { loadCharacterKit } from './characters';
+import { isSharedGeometry } from './gear';
 
 /** Portraits are drawn this many pixels square (shown at half that, sharp on phones). */
 const SIZE = 96;
@@ -72,7 +73,7 @@ async function draw(look: Appearance): Promise<string> {
   scene.remove(model);
   model.traverse((child) => {
     const mesh = child as Mesh;
-    if (mesh.isMesh) mesh.geometry.dispose();
+    if (mesh.isMesh && !isSharedGeometry(mesh)) mesh.geometry.dispose();
   });
   return url;
 }

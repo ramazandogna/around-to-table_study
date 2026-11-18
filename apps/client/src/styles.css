@@ -5160,3 +5160,29 @@ button:disabled {
 .report-note {
   font-style: italic;
 }
+
+/* Wardrobe: things to wear. Locked tiles are greyed and say how they are earned, never a price. */
+.wear-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wear-choice {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+}
+
+.wear-card {
+  min-height: 70px;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.wear-card--locked {
+  color: var(--panel-ink-soft);
+}
+
+.wear-card-how {
+  font-size: 10.5px;
+  line-height: 1.2;
+}

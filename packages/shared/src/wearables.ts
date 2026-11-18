@@ -158,15 +158,16 @@ export function wearsEarned(look: Appearance): boolean {
 
 /** A look without the items `allowed` turns down (and without their colours). */
 export function lookWithout(look: Appearance, allowed: (id: WearableId) => boolean): Appearance {
-  const next: Record<string, unknown> = { ...look };
+  const dropped = new Set<string>();
   for (const slot of WEAR_SLOTS) {
-    const found = wearable(next[slot]);
-    if (next[slot] !== undefined && (!found || !allowed(found.id))) {
-      delete next[slot];
-      delete next[WEAR_COLOR[slot]];
+    const found = wearable(look[slot]);
+    if (look[slot] !== undefined && (!found || !allowed(found.id))) {
+      dropped.add(slot).add(WEAR_COLOR[slot]);
     }
   }
-  return next as Appearance;
+  return Object.fromEntries(
+    Object.entries(look).filter(([key]) => !dropped.has(key)),
+  ) as Appearance;
 }
 
 /** The look as this person may show it: items they have not earned are taken off. */
