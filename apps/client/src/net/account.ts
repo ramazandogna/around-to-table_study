@@ -121,6 +121,7 @@ export const PROGRESS_KEYS = [
   'att.prizes',
   'att.lastPlan',
   'att.lastSit',
+  'att.guide',
 ] as const;
 
 /**

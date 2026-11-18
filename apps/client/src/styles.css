@@ -1830,6 +1830,83 @@ button:disabled {
   flex: none;
 }
 
+/* ---------- First steps for a new character: the list and the chip to the library ---------- */
+
+.guide-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.coach .guide-title {
+  color: var(--panel-ink-soft);
+  font-size: 12px;
+}
+
+.guide-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.guide-step--done {
+  color: var(--panel-ok);
+}
+
+.guide-arrow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border: 3px solid var(--panel-edge);
+  border-radius: 999px;
+  background: var(--panel-face);
+  box-shadow: 0 3px 0 rgb(0 0 0 / 0.3);
+  color: var(--panel-ink);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.guide-arrow-head {
+  display: inline-block;
+  color: var(--panel-select);
+  font-size: 16px;
+  animation: guide-nudge 1.4s ease-in-out infinite;
+}
+
+@keyframes guide-nudge {
+  50% {
+    translate: 0 -2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-arrow-head {
+    animation: none;
+  }
+}
+
+/* On a phone the list is a few short lines, not one long ellipsis. */
+@media (pointer: coarse) {
+  .hud-bottom > .coach.guide {
+    align-items: flex-start;
+  }
+
+  .coach.guide p {
+    white-space: normal;
+  }
+}
+
 /* ---------- HUD: the place pill and dock (left), the map corner and chat column (right) ---------- */
 
 /* Read by screen readers, not drawn. */

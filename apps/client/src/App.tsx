@@ -7,6 +7,7 @@ import { layerIndex, useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
 import { ChatPanel } from './ui/ChatPanel';
 import { Coach } from './ui/Coach';
+import { Guide } from './ui/Guide';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Discovery } from './ui/Discovery';
 import { Games } from './ui/Games';
@@ -257,6 +258,7 @@ export function App() {
       <Joystick />
       <footer className="hud-bottom">
         <RoomChip />
+        <Guide />
         <Coach />
         <Notice />
         <SeatBar />
