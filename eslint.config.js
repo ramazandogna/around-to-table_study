@@ -14,6 +14,8 @@ export default tseslint.config(
       'site/**',
       // Agent worktrees are full copies of the repo.
       '.claude/**',
+      // Review notes and their scratch scripts are kept local (gitignored).
+      'docs/**',
     ],
   },
   js.configs.recommended,
