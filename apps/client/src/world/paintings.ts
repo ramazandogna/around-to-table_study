@@ -74,6 +74,18 @@ const FIRST: Record<AreaId, number> = {
   room9: 6,
 };
 
+/** Which public room each painting hangs in (by index into PAINTINGS), for staff hints. */
+export function paintingRooms(): Map<number, AreaId> {
+  const rooms = new Map<number, AreaId>();
+  for (const area of ['hall', 'library', 'smoking', 'conference'] as const) {
+    SPOTS[area].forEach((spot, i) => {
+      const painting = spot.painting ?? (FIRST[area] + i) % HALL_GALLERY[0];
+      if (!rooms.has(painting)) rooms.set(painting, area);
+    });
+  }
+  return rooms;
+}
+
 export type HungPainting = {
   /** Index into PAINTINGS. */
   painting: number;

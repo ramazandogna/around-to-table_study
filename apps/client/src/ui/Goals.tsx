@@ -18,9 +18,9 @@ import { todaysTasks } from '../state/daily';
 import { goalName } from './CharacterSelect';
 import { Dialog, Panel } from './Panel';
 
-/** Everything there is to find: every painting and every moment on the shelves. */
+/** Everything there is to find: every painting, every moment on the shelves, and the house cat. */
 const COLLECTIBLES =
-  PAINTINGS.length + SHELF_TOPICS.reduce((sum, topic) => sum + topic.moments.length, 0);
+  PAINTINGS.length + SHELF_TOPICS.reduce((sum, topic) => sum + topic.moments.length, 0) + 1;
 
 const presetIcon = (id: string | null) => GOAL_PRESETS.find((p) => p.id === id)?.icon ?? '🎯';
 

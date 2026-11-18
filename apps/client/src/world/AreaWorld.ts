@@ -27,10 +27,22 @@ import {
   type Point,
   type ServerMessage,
   type WaitingPet,
+  type Weather,
+  CAT_NAME,
 } from '@att/shared';
 import { playMusic, stopMusic } from '../audio/music';
 import { readJson } from '../net/storage';
 import { play, unlockAudio } from '../audio/sound';
+import {
+  coffeeHiss,
+  doorWhoosh,
+  setCoffeeDistance,
+  setRoomPeople,
+  setSoundRoom,
+  setSoundWeather,
+} from '../audio/soundscape';
+import { buildingTime, weatherNow } from '../state/buildingClock';
+import { foundKeys } from '../state/daily';
 import { RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
 import { eventTitle } from '../content/events';
 import { TOPICS } from '../content/topics';
@@ -60,6 +72,9 @@ import { MACHINES, type ArcadeKit } from './arcade';
 import { cursorFor, type CursorKind } from './cursors';
 import { buildEventDecor, type EventDecor } from './eventDecor';
 import { closedSign, Staff } from './Staff';
+import { HouseCat } from './houseCat';
+import { staffLine } from './staffTalk';
+import { buildStreet, type Street } from './street';
 import { Pet, type PetContext } from './Pet';
 import type { PetDress, PetKit } from './pets';
 import type { IsoView } from './IsoView';
@@ -177,6 +192,8 @@ const SHIFT_CHECK_SECONDS = 20;
 
 /** The viewer's hour of the day with its minutes, for the shifts. */
 const localHour = (now = new Date()) => now.getHours() + now.getMinutes() / 60;
+/** The house cat's place among the pets, which go by their person's id. */
+const HOUSE_CAT = 'house';
 /** The right mouse button. */
 const RIGHT_BUTTON = 2;
 
@@ -265,6 +282,11 @@ export class AreaWorld {
   private readonly waiting = new Map<string, Pet>();
   /** Whoever works at this room's desk on this shift, or a "back at" sign when nobody does. */
   private staff: Staff | null = null;
+  /** Simit, the building's cat, in the rooms she visits (round K). */
+  private houseCat: HouseCat | null = null;
+  /** The pavement and the weather outside the hall's street door. */
+  private street: Street | null = null;
+  private weather: Weather | null = null;
   private deskSign: CSS2DObject | null = null;
   private shiftTimer = SHIFT_CHECK_SECONDS;
   /** Chairs at tables by tile ("x,y"): how far out each is and whether it was left out. */
@@ -412,6 +434,21 @@ export class AreaWorld {
     }
     this.seatStaff();
     this.seatWaitingPets(useGameStore.getState().waitingPets);
+    this.houseCat = HouseCat.create(
+      this.assets.pets,
+      this.assets.furniture,
+      this.grid,
+      this.petContext,
+    );
+    if (this.houseCat) {
+      this.view.add(this.houseCat.pet.root);
+      this.view.add(this.houseCat.root);
+    }
+    this.street = buildStreet(this.grid, FLOOR_Y);
+    if (this.street) this.view.add(this.street.root);
+    this.weather = null;
+    this.updateWeather();
+    setSoundRoom(area);
 
     const store = useGameStore.getState();
     store.setArea(area);
@@ -556,6 +593,10 @@ export class AreaWorld {
     this.pets.clear();
     this.waiting.clear();
     this.removeStaff();
+    this.houseCat?.dispose();
+    this.houseCat = null;
+    this.street?.dispose();
+    this.street = null;
     this.decor?.dispose();
     this.decor = null;
     this.eventId = null;
@@ -622,8 +663,10 @@ export class AreaWorld {
       this.shiftTimer = SHIFT_CHECK_SECONDS;
       if ((this.staff?.id ?? null) !== onDuty(this.areaId, localHour())) this.seatStaff();
       this.updateDaylight();
+      this.updateWeather();
     }
     this.updatePets(delta);
+    this.updateBuilding(delta, player);
     this.updateEvent(delta);
     this.arrangeCrowd(delta);
     this.mapTimer -= delta;
@@ -672,6 +715,7 @@ export class AreaWorld {
       case 'joined':
         if (message.player.id === selfId) break;
         this.addOther(message.player, true);
+        doorWhoosh();
         store.addChatLine({ kind: 'joined', name: message.player.name, self: false });
         break;
       case 'left': {
@@ -884,6 +928,20 @@ export class AreaWorld {
       daytime: () => ['morning', 'day', 'afternoon'].includes(dayPhase(localHour())),
     });
     if (this.staff) {
+      const staff = this.staff;
+      staff.talker = (turn) => {
+        const store = useGameStore.getState();
+        return staffLine(turn, {
+          name: store.session?.name ?? '',
+          area: this.areaId,
+          kind: staff.kind,
+          phase: dayPhase(localHour()),
+          weather: weatherNow(),
+          studying: store.world?.studying ?? store.studying,
+          found: foundKeys(),
+          own: staff.ownLines,
+        });
+      };
       this.view.add(this.staff.avatar.root);
       this.view.add(this.staff.props);
       return;
@@ -1051,8 +1109,9 @@ export class AreaWorld {
     for (const [id, other] of this.others) this.walkPet(id, other, this.looks.get(id) ?? null);
   }
 
-  /** A pet in the room by its person ('self' for the player's), walking along or waiting at the door. */
+  /** A pet in the room by its person ('self' for the player's; 'house' for the building's cat). */
   private petOf(owner: string): Pet | null {
+    if (owner === HOUSE_CAT) return this.houseCat?.visible ? this.houseCat.pet : null;
     return this.pets.get(owner) ?? this.waiting.get(owner) ?? null;
   }
 
@@ -1378,7 +1437,21 @@ export class AreaWorld {
       this.arrive(player, { kind: 'pat', owner });
       return;
     }
-    this.goTo(tile, { kind: 'pat', owner });
+    // The house cat lies where she lies: walk up beside her rather than onto her cushion.
+    const beside = owner === HOUSE_CAT ? this.besideTile(tile, player.tile) : null;
+    this.goTo(beside ?? tile, { kind: 'pat', owner });
+  }
+
+  /** The open floor next to a tile nearest to someone, if any. */
+  private besideTile(tile: Point, from: Point): Point | null {
+    const around = [-1, 0, 1].flatMap((dx) =>
+      [-1, 0, 1].map((dy) => ({ x: tile.x + dx, y: tile.y + dy })),
+    );
+    return (
+      around
+        .filter((p) => !sameTile(p, tile) && this.grid.isWalkable(p) && !this.grid.isSeat(p))
+        .sort((a, b) => reach(a, from) - reach(b, from))[0] ?? null
+    );
   }
 
   private readonly onPointerMove = (event: PointerEvent) => {
@@ -1514,7 +1587,8 @@ export class AreaWorld {
   /** Whose pet is under a screen point ('self' for the player's own), the front-most one. */
   private petAt(clientX: number, clientY: number): string | null {
     let best: { owner: string; depth: number } | null = null;
-    for (const [owner, pet] of [...this.pets, ...this.waiting]) {
+    const house: [string, Pet][] = this.houseCat?.visible ? [[HOUSE_CAT, this.houseCat.pet]] : [];
+    for (const [owner, pet] of [...this.pets, ...this.waiting, ...house]) {
       const box = pet.pickBox;
       const depth = box.x + box.z;
       if (this.onScreen(box, clientX, clientY) && (!best || depth > best.depth)) {
@@ -1821,6 +1895,14 @@ export class AreaWorld {
           }
           return;
         }
+        if (examinable.kind === 'coffee') {
+          // The coffee corner: a cup in hand that everyone in the room sees, and the machine's hiss.
+          lookAt({ x: examinable.stand.x - 1, y: examinable.stand.y });
+          this.connection?.emote('coffee');
+          store.setNotice('coffee');
+          coffeeHiss(1);
+          return;
+        }
         if (examinable.kind === 'lamp') {
           const lamp = this.built?.examinables.get(`lamp:${examinable.index}`);
           if (lamp) lookAt({ x: lamp.stand.x, y: lamp.stand.y - 1 });
@@ -1865,11 +1947,81 @@ export class AreaWorld {
         const pet = this.petOf(pending.owner);
         if (!pet) return;
         player.face(pet.position.x - player.position.x, pet.position.z - player.position.z);
+        if (pending.owner === HOUSE_CAT) {
+          this.patHouseCat(player);
+          return;
+        }
         const selfId = store.session?.id;
         const owner = pending.owner === 'self' ? selfId : pending.owner;
         if (owner) this.connection?.pat(owner);
         return;
       }
+    }
+  }
+
+  /**
+   * The building's own life this frame: the house cat (on the server's clock,
+   * so every screen agrees), the street's rain or snow, and what the
+   * soundscape needs to know (who is studying, how near the coffee is).
+   */
+  private updateBuilding(delta: number, player: Avatar): void {
+    this.street?.update(delta);
+    const selfId = useGameStore.getState().session?.id ?? 'self';
+    const everyone: [string, Avatar][] = [[selfId, player], ...this.others];
+    const now = Date.now();
+    const focusers = everyone.flatMap(([id, avatar]) => {
+      const timer = avatar.runningTimer;
+      if (!timer || avatar.seatKind !== 'chair') return [];
+      return [{ id, focusedMs: Math.max(0, timer.totalMs - (timer.endsAt - now)) }];
+    });
+    setRoomPeople(
+      everyone.length,
+      focusers.map((f) => f.id),
+    );
+    const coffee = this.built?.coffee;
+    setCoffeeDistance(
+      coffee ? Math.hypot(player.position.x - coffee.x, player.position.z - coffee.z) : Infinity,
+    );
+    const cat = this.houseCat;
+    if (!cat) return;
+    const pets = [...this.pets.values(), ...this.waiting.values()];
+    cat.update(delta, buildingTime(), {
+      focusers,
+      seatOf: (id) => {
+        const avatar = id === selfId ? player : this.others.get(id);
+        return avatar?.isSeated ? avatar.tile : null;
+      },
+      // Nobody's tile and no pet's: she never lies down where someone stands or sits.
+      taken: (tile) =>
+        everyone.some(([, a]) => !a.isMoving && sameTile(a.tile, tile)) ||
+        pets.some(
+          (p) => Math.floor(p.position.x) === tile.x && Math.floor(p.position.z) === tile.y,
+        ),
+    });
+  }
+
+  /** The building's weather, checked now and then: in the windows, on the street, in the sound. */
+  private updateWeather(): void {
+    const weather = weatherNow();
+    if (weather === this.weather) return;
+    this.weather = weather;
+    this.built?.ambience.setWeather(weather);
+    this.street?.setWeather(weather);
+    setSoundWeather(weather);
+  }
+
+  /**
+   * Petting Simit: only on this screen (she is nobody's, so nothing goes to the
+   * server). A purr and a heart, except in the library, where she just leans
+   * in. The first time, she is a find of her own.
+   */
+  private patHouseCat(player: Avatar): void {
+    const cat = this.houseCat;
+    if (!cat) return;
+    if (AREA_RULES[this.areaId].effectsVisible) player.play('poke');
+    if (cat.pat()) play('purr');
+    if (!foundKeys().has('cat:0')) {
+      useGameStore.getState().setDiscovery({ kind: 'cat', index: 0, pick: 0 });
     }
   }
 
@@ -2141,7 +2293,7 @@ export class AreaWorld {
       case 'person':
         return t('tip.person', { name: this.others.get(target.id)?.name ?? '' });
       case 'pet':
-        return t('tip.pet');
+        return target.owner === HOUSE_CAT ? t('tip.houseCat', { cat: CAT_NAME }) : t('tip.pet');
       case 'examine': {
         const { examinable } = target;
         if (examinable.kind === 'shelf') {
@@ -2153,6 +2305,7 @@ export class AreaWorld {
           return t(examinable.index === 0 ? 'tip.darts' : 'tip.gameTable');
         if (examinable.kind === 'jukebox') return t('tip.jukebox');
         if (examinable.kind === 'lost') return t('tip.lost');
+        if (examinable.kind === 'coffee') return t('tip.coffee');
         if (examinable.kind === 'lamp') {
           return t(this.lampOn(examinable.index) ? 'tip.lamp.off' : 'tip.lamp.on');
         }

@@ -67,6 +67,11 @@ export function remember(key: string): boolean {
   return true;
 }
 
+/** Everything found so far on this device, e.g. for staff to hint at what is left. */
+export function foundKeys(): ReadonlySet<string> {
+  return new Set(readJson<Found>(FOUND_KEY) ?? []);
+}
+
 export function foundCount(): number {
   return (readJson<Found>(FOUND_KEY) ?? []).length;
 }

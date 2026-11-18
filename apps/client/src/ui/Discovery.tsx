@@ -1,3 +1,4 @@
+import { CAT_NAME } from '@att/shared';
 import { useEffect } from 'react';
 import { FLAW_IDS, FLAWS, PAINTINGS, RENOVATION_NOTES, SHELF_TOPICS } from '../content/discoveries';
 import { t } from '../i18n/t';
@@ -59,6 +60,15 @@ const LOST_ITEMS = [
 ] as const;
 
 function Body({ found }: { found: Found }) {
+  if (found.kind === 'cat') {
+    return (
+      <>
+        <p className="discovery-kicker">{t('discovery.cat.kicker')}</p>
+        <h3>{t('discovery.cat.title', { cat: CAT_NAME })}</h3>
+        <p>{t('discovery.cat.text')}</p>
+      </>
+    );
+  }
   if (found.kind === 'lost') {
     // A different handful each day (the day is the pick), the same for everyone that day.
     const day = found.pick;
