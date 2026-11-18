@@ -49,3 +49,30 @@ export function chance(seed: number): number {
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
+
+/**
+ * What staff talk about when someone taps them, in order, one per tap: a
+ * hello by name for the time of day, a hint toward something the player has
+ * not found yet, how many people are studying (only with two or more, so
+ * nobody alone is pointed at), the weather, and then their own lines. Never
+ * how long someone was away: nobody should feel counted.
+ */
+export const STAFF_TOPICS = ['greet', 'hint', 'company', 'weather', 'own'] as const;
+export type StaffTopic = (typeof STAFF_TOPICS)[number];
+
+/** Fewer people studying than this and staff keep the number to themselves. */
+export const COMPANY_AT_LEAST = 2;
+
+export function staffTopics({
+  hint,
+  studying,
+}: {
+  /** Whether there is something left to point the player to. */
+  hint: boolean;
+  /** People studying in the building right now. */
+  studying: number;
+}): StaffTopic[] {
+  return STAFF_TOPICS.filter(
+    (topic) => (topic !== 'hint' || hint) && (topic !== 'company' || studying >= COMPANY_AT_LEAST),
+  );
+}
