@@ -39,6 +39,7 @@ import { EmoteMenu } from './ui/EmoteMenu';
 import { FriendsPanel } from './ui/Friends';
 import { PhonePanel } from './ui/Phone';
 import { TimerHud } from './ui/TimerHud';
+import { Reward, TableHourLine } from './ui/Reward';
 import { WorldCanvas } from './world/WorldCanvas';
 
 export function App() {
@@ -255,6 +256,8 @@ export function App() {
       <footer className="hud-bottom">
         <RoomChip />
         <Coach />
+        <Reward />
+        <TableHourLine />
         <Notice />
         <SeatBar />
         <div className="chat-row">

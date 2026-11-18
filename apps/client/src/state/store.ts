@@ -105,6 +105,9 @@ export type Notice =
   | 'room_full'
   /** A returning player's one-line recap (the value is the line). */
   | 'welcome_back'
+  /** "Study beside": the person stood up or left, or their table has no free chair. */
+  | 'beside_gone'
+  | 'beside_full'
   /** The player's own daily goal was reached today. */
   | 'goal_reached'
   /** An event just started (the value is its room). */

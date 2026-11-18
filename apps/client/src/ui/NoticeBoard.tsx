@@ -5,6 +5,7 @@ import { HALL_EVENTS, LIBRARY_SESSIONS, type Pinned } from '../content/boards';
 import { dateLocale, t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { useNow } from './Calendar';
+import { TableHoursText } from './Reward';
 
 /**
  * The board you stand next to, drawn like the real thing. The hall has a cork
@@ -124,6 +125,9 @@ function LibraryNotices() {
       <Notice heading={`🌱 ${t('board.grow.title')}`} wide>
         <p>{t('board.grow.text')}</p>
         <p className="note-sub">{t('board.grow.now', { count: seats })}</p>
+      </Notice>
+      <Notice heading={`🕯️ ${t('tablehour.title')}`}>
+        <TableHoursText />
       </Notice>
       <Notice heading={`⏱ ${t('board.sessions.title')}`}>
         {LIBRARY_SESSIONS.length === 0 ? (

@@ -163,6 +163,11 @@ export class AreaConnection {
     this.send({ t: 'finished' });
   }
 
+  /** The reward card was seen: the room need not send it again. */
+  rewardSeen(): void {
+    this.send({ t: 'rewardSeen' });
+  }
+
   /** Asks someone here to come to the player's private room. */
   invite(to: string, code: string, name: string): void {
     this.send({ t: 'invite', to, code, name });
