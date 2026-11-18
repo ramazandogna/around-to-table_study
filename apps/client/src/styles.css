@@ -5431,3 +5431,42 @@ button:disabled {
 .report-note {
   font-style: italic;
 }
+
+/* Wardrobe: things to wear. Locked tiles are greyed and say how they are earned, never a price. */
+.wear-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wear-choice {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+}
+
+/* On a phone the slot's name goes above its tiles, so the tiles get the whole width. */
+@media (max-width: 600px) {
+  .wear-slot > .option-row--top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .wear-choice {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  }
+}
+
+.wear-card {
+  min-height: 64px;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.wear-card--locked {
+  color: var(--panel-ink-soft);
+}
+
+.wear-card-how {
+  font-size: 10.5px;
+  line-height: 1.2;
+}

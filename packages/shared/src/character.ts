@@ -6,6 +6,17 @@
  * optional pet. The server validates by range and the client decides how to
  * draw it.
  */
+import {
+  ACCENTS,
+  WEAR_COLOR,
+  WEAR_ITEMS,
+  WEAR_SLOTS,
+  type BackItemId,
+  type FaceItemId,
+  type HatId,
+  type NeckItemId,
+} from './wearables';
+
 export const CHARACTERS = [
   'female-a',
   'female-b',
@@ -83,6 +94,21 @@ export type PetAccessory = (typeof PET_ACCESSORIES)[number];
 
 export type Appearance = {
   character: number;
+  /**
+   * The face and hair, from another character (an index into CHARACTERS):
+   * all twelve share one skull and rig, so any head fits any body. Left out,
+   * the character's own.
+   */
+  head?: number | undefined;
+  /** Things worn (see `wearables.ts`); colours are indexes into ACCENTS. */
+  hat?: HatId | undefined;
+  face?: FaceItemId | undefined;
+  neck?: NeckItemId | undefined;
+  back?: BackItemId | undefined;
+  hatColor?: number | undefined;
+  faceColor?: number | undefined;
+  neckColor?: number | undefined;
+  backColor?: number | undefined;
   pet?: PetKind | undefined;
   petSex?: PetSex | undefined;
   /** Index into PET_COLORS. */
@@ -105,7 +131,17 @@ export function isValidAppearance(look: unknown): look is Appearance {
   if (pet !== undefined && !PETS_AVAILABLE.includes(pet as PetKind)) return false;
   if (petSex !== undefined && !PET_SEXES.includes(petSex as PetSex)) return false;
   if (petColor !== undefined && !isIndex(petColor, PET_COLORS.length)) return false;
-  return petAccessory === undefined || PET_ACCESSORIES.includes(petAccessory as PetAccessory);
+  if (petAccessory !== undefined && !PET_ACCESSORIES.includes(petAccessory as PetAccessory)) {
+    return false;
+  }
+  if (fields.head !== undefined && !isIndex(fields.head, CHARACTERS.length)) return false;
+  for (const slot of WEAR_SLOTS) {
+    const id = fields[slot];
+    if (id !== undefined && !(WEAR_ITEMS[slot] as readonly unknown[]).includes(id)) return false;
+    const color = fields[WEAR_COLOR[slot]];
+    if (color !== undefined && !isIndex(color, ACCENTS.length)) return false;
+  }
+  return true;
 }
 
 export function randomAppearance(random: () => number = Math.random): Appearance {

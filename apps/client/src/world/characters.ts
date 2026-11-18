@@ -5,13 +5,15 @@ import {
   Vector3,
   type AnimationClip,
   type Group,
+  type Material,
   type Mesh,
   type MeshStandardMaterial,
   type SkinnedMesh,
 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { dressMesh, mapOutfit, type OutfitMap } from './outfit';
+import { dressGear, measureHead, type HeadFit } from './gear';
+import { dressMesh, mapOutfit, skinSwatchOf, type OutfitMap } from './outfit';
 import { createDances, createSmokeCycle, createStudyPose, createWaveGesture } from './poses';
 
 const PATH = 'models/characters/';
@@ -49,7 +51,17 @@ export type CharacterKit = {
   seatedHipHeight: number;
 };
 
-type Loaded = { scene: Group; clips: CharacterClips; outfit: OutfitMap; hand: Vector3 };
+type Loaded = {
+  scene: Group;
+  clips: CharacterClips;
+  outfit: OutfitMap;
+  hand: Vector3;
+  /** The head mesh (face and hair), which any other body can wear, and its size. */
+  head: SkinnedMesh;
+  fit: HeadFit;
+  /** The swatch the body's skin (hands) is drawn in, which a borrowed face matches. */
+  skin: number | undefined;
+};
 
 let kit: Promise<CharacterKit> | null = null;
 
@@ -88,9 +100,13 @@ async function loadKit(): Promise<CharacterKit> {
       const animations = gltf.animations;
       const sit = clipNamed(animations, 'sit');
       const idle = clipNamed(animations, 'idle');
+      const outfit = mapOutfit(head, body);
       return {
         scene,
-        outfit: mapOutfit(head, body),
+        outfit,
+        head,
+        fit: measureHead(scene, head),
+        skin: skinSwatchOf(body, outfit.get(body.name)),
         hand: measureHand(scene),
         clips: {
           idle,
@@ -113,12 +129,32 @@ async function loadKit(): Promise<CharacterKit> {
     seatedHipHeight: measureSeatedHip(first),
     create: (look) => {
       const source = loaded[look.character] ?? first;
+      const headIndex = look.head !== undefined && loaded[look.head] ? look.head : look.character;
+      const face = loaded[headIndex] ?? source;
+      const swapped = face !== source;
       const model = clone(source.scene) as Group;
+      // The whole figure is as tall as the face's own character (its hair decides the height).
+      model.scale.copy(face.scene.scale);
+      let headMaterial = null as Material | null;
       // Clones share geometry; each one gets its own, coloured for this look.
       model.traverse((child) => {
         const mesh = child as SkinnedMesh;
-        if (mesh.isSkinnedMesh) dressMesh(mesh, source.outfit.get(mesh.name), look);
+        if (!mesh.isSkinnedMesh) return;
+        if (mesh.name !== source.head.name) {
+          dressMesh(mesh, source.outfit.get(mesh.name), look);
+          return;
+        }
+        headMaterial = mesh.material as Material;
+        // Every rig binds its head the same way, so another face drops straight in.
+        if (swapped) mesh.geometry = face.head.geometry;
+        dressMesh(
+          mesh,
+          face.outfit.get(face.head.name),
+          look,
+          swapped && look.skin === undefined ? source.skin : undefined,
+        );
       });
+      if (headMaterial) dressGear(model, look, headIndex, face.fit, headMaterial);
       return { model, clips: source.clips, hand: source.hand };
     },
   };

@@ -11,6 +11,7 @@ import {
   type Mesh,
 } from 'three';
 import { loadCharacterKit, type CharacterKit } from './characters';
+import { isSharedGeometry } from './gear';
 import { loadPetKit, type PetKit } from './pets';
 
 const TURN_EASE = 8;
@@ -110,7 +111,7 @@ export class PreviewStage {
     this.model.removeFromParent();
     this.model.traverse((child) => {
       const mesh = child as Mesh;
-      if (mesh.isMesh) mesh.geometry.dispose();
+      if (mesh.isMesh && !isSharedGeometry(mesh)) mesh.geometry.dispose();
     });
     this.model = null;
   }

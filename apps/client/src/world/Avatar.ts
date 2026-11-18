@@ -25,6 +25,7 @@ import { t } from '../i18n/t';
 import { ACTIVITY_ICON, DOING_ICON, formatClock, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { CHAIR_INSET, FLOOR_Y, SEAT_HEIGHT, SOFA_SEAT_HEIGHT, TABLE_HEIGHT } from './buildArea';
 import type { Character, CharacterClips, CharacterKit } from './characters';
+import { isSharedGeometry } from './gear';
 import { groundAt } from './ground';
 import { showEmote } from './emotes';
 import { facing } from './instancing';
@@ -324,7 +325,8 @@ export class Avatar {
     model.traverse((child) => {
       const mesh = child as Mesh;
       if (!mesh.isMesh) return;
-      this.geometries.push(mesh.geometry);
+      // Worn things share their geometry with everyone wearing the same (see `gear.ts`).
+      if (!isSharedGeometry(mesh)) this.geometries.push(mesh.geometry);
       const material = (mesh.material as MeshStandardMaterial).clone();
       mesh.material = material;
       this.materials.push(material);

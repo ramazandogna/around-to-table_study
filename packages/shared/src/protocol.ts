@@ -11,6 +11,7 @@ import {
   type OutfitPart,
   type PetKind,
 } from './character';
+import { ACCENTS, BACK_ITEMS, FACE_ITEMS, HATS, NECK_ITEMS } from './wearables';
 import { hasProfanity } from './profanity';
 import { JUKEBOX, type JukeboxState } from './jukebox';
 import {
@@ -48,6 +49,15 @@ export const appearanceSchema = z.object({
   petSex: z.enum(PET_SEXES).optional(),
   petColor: index(PET_COLORS.length).optional(),
   petAccessory: z.enum(PET_ACCESSORIES).optional(),
+  head: index(CHARACTERS.length).optional(),
+  hat: z.enum(HATS).optional(),
+  face: z.enum(FACE_ITEMS).optional(),
+  neck: z.enum(NECK_ITEMS).optional(),
+  back: z.enum(BACK_ITEMS).optional(),
+  hatColor: index(ACCENTS.length).optional(),
+  faceColor: index(ACCENTS.length).optional(),
+  neckColor: index(ACCENTS.length).optional(),
+  backColor: index(ACCENTS.length).optional(),
 });
 const studyStatus = z.object({
   activity: z.enum(ACTIVITIES).nullable(),

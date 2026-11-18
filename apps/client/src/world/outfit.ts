@@ -16,6 +16,7 @@ import { BufferAttribute, Color, type BufferGeometry, type SkinnedMesh } from 't
 type Label = OutfitPart | 'keep';
 const LABELS: readonly Label[] = [...OUTFIT_PARTS, 'keep'];
 const KEEP = LABELS.indexOf('keep');
+const SKIN = LABELS.indexOf('skin');
 
 const GRID = 8;
 /** The atlas's white swatch: column 4 of the lower pair of rows. */
@@ -48,6 +49,18 @@ function swatchOf(u: number, v: number): number {
   const column = Math.min(GRID - 1, Math.floor(u * GRID));
   const pair = Math.floor(Math.min(GRID - 1, Math.floor(v * GRID)) / 2);
   return column * 4 + pair;
+}
+
+const place = (swatch: number) => ({ column: Math.floor(swatch / 4), pair: swatch % 4 });
+
+/** The swatch a mesh's skin is drawn in, or undefined if it shows no skin. */
+export function skinSwatchOf(
+  mesh: SkinnedMesh,
+  labels: Uint8Array | undefined,
+): number | undefined {
+  const uv = mesh.geometry.attributes.uv as BufferAttribute;
+  const i = labels?.indexOf(SKIN) ?? -1;
+  return i >= 0 ? swatchOf(uv.getX(i), uv.getY(i)) : undefined;
 }
 
 function verticesOf(mesh: SkinnedMesh): Vertex[] {
@@ -167,6 +180,7 @@ export function dressMesh(
   mesh: SkinnedMesh,
   labels: Uint8Array | undefined,
   look: Appearance,
+  skinTo?: number,
 ): void {
   const geometry: BufferGeometry = mesh.geometry.clone();
   mesh.geometry = geometry;
@@ -180,18 +194,21 @@ export function dressMesh(
   });
   if (labels) {
     for (let i = 0; i < uv.count; i++) {
-      const tint = tints[labels[i] ?? KEEP];
-      if (!tint) continue;
+      const label = labels[i] ?? KEEP;
+      const tint = tints[label];
+      // A face from another character takes the body's skin, unless the skin is recoloured.
+      const target = tint ? WHITE : label === SKIN && skinTo !== undefined ? place(skinTo) : null;
+      if (!target) continue;
       const swatch = swatchOf(uv.getX(i), uv.getY(i));
       const column = Math.floor(swatch / 4);
       const pair = swatch % 4;
       // Same place inside the swatch, so the gradient (the shading) carries over.
       uv.setXY(
         i,
-        uv.getX(i) + (WHITE.column - column) / GRID,
-        uv.getY(i) + ((WHITE.pair - pair) * 2) / GRID,
+        uv.getX(i) + (target.column - column) / GRID,
+        uv.getY(i) + ((target.pair - pair) * 2) / GRID,
       );
-      colors.set([tint.r, tint.g, tint.b], i * 3);
+      if (tint) colors.set([tint.r, tint.g, tint.b], i * 3);
     }
     uv.needsUpdate = true;
   }

@@ -1,5 +1,8 @@
 import {
+  ACCENTS,
   CHARACTERS,
+  earnProgress,
+  isEarned,
   normalizeName,
   OUTFIT_PARTS,
   PALETTES,
@@ -9,17 +12,26 @@ import {
   PETS,
   PETS_AVAILABLE,
   randomAppearance,
+  randomWear,
+  WEAR_COLOR,
+  WEAR_ITEMS,
+  WEAR_SLOTS,
+  WEARABLES,
   type Appearance,
   type OutfitPart,
   type PetKind,
+  type WearableId,
+  type WearProfile,
+  type WearSlot,
 } from '@att/shared';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { FOOTSTEPS, getFootsteps, previewStep, setFootsteps, type Footsteps } from '../audio/sound';
-import { getLanguage, t } from '../i18n/t';
-import { createCharacter, isError } from '../net/account';
+import { getLanguage, t, type MessageKey } from '../i18n/t';
+import { createCharacter, fetchMe, isError } from '../net/account';
 import { enterAs, refreshAccount } from '../net/enter';
 import { useGameStore } from '../state/store';
 import { CharacterPreview } from './CharacterPreview';
+import { slotBuiltIn } from '../world/gear';
 import { Panel, Stepper, Swatches } from './Panel';
 
 /**
@@ -42,8 +54,72 @@ const bodyOf = (look: Appearance): Body =>
   CHARACTERS[look.character]?.startsWith('male-') ? 'male' : 'female';
 
 /** The creator's pages, so it fits a phone. */
-type Tab = 'look' | 'colours' | 'extras';
-const TABS: readonly Tab[] = ['look', 'colours', 'extras'];
+type Tab = 'face' | 'outfit' | 'colours' | 'wear' | 'pet';
+const TABS: readonly Tab[] = ['face', 'outfit', 'colours', 'wear', 'pet'];
+
+/** The face (head) a look shows: its own, or one borrowed from another character. */
+const headOf = (look: Appearance) => look.head ?? look.character;
+
+/** A look with this face and these clothes; a face that is the clothes' own is left implied. */
+function withHeadAndBody(look: Appearance, head: number, character: number): Appearance {
+  const { head: _head, ...rest } = look;
+  void _head;
+  return head === character ? { ...rest, character } : { ...rest, character, head };
+}
+
+const WEAR_ICON: Record<WearableId, string> = {
+  beanie: '🧶',
+  cap: '🧢',
+  bucket: '🎣',
+  beret: '🎨',
+  headphones: '🎧',
+  flowers: '🌸',
+  sunhat: '👒',
+  earmuffs: '❄️',
+  round: '👓',
+  square: '🤓',
+  sunglasses: '🕶️',
+  scarf: '🧣',
+  bowtie: '🎀',
+  tote: '👜',
+  backpack: '🎒',
+};
+
+/** A look wearing this item in its slot, or nothing there (and then no colour for it). */
+function withWear(look: Appearance, slot: WearSlot, id: WearableId | undefined): Appearance {
+  const rest = Object.fromEntries(
+    Object.entries(look).filter(([key]) => key !== slot && (id || key !== WEAR_COLOR[slot])),
+  ) as Appearance;
+  return id ? ({ ...rest, [slot]: id } as Appearance) : rest;
+}
+
+function withWearColour(look: Appearance, slot: WearSlot, index: number | undefined): Appearance {
+  const key = WEAR_COLOR[slot];
+  const rest = Object.fromEntries(Object.entries(look).filter(([k]) => k !== key)) as Appearance;
+  return index === undefined ? rest : { ...rest, [key]: index };
+}
+
+/** The profile the wear rules read: the one of the character being dressed, if it has one. */
+function useWearProfile(mode: CreatorMode): WearProfile | null {
+  const profile = useGameStore((s) =>
+    mode === 'new' ? null : (s.characters.find((c) => c.id === s.session?.id)?.profile ?? null),
+  );
+  useEffect(() => {
+    if (mode !== 'wardrobe') return;
+    // Opening the wardrobe has seen whatever was new in it (the dock's dot, when there is one).
+    const store = useGameStore.getState() as { setWardrobeNew?: (value: boolean) => void };
+    store.setWardrobeNew?.(false);
+    // Blocks finished since coming in count at once: the profile is asked for again.
+    let live = true;
+    void fetchMe().then((me) => {
+      if (live && me?.account) useGameStore.getState().setAccount(me.account, me.characters);
+    });
+    return () => {
+      live = false;
+    };
+  }, [mode]);
+  return profile;
+}
 
 const PET_ICON: Record<PetKind, string> = {
   cat: '🐱',
@@ -103,22 +179,44 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
   const [name, setName] = useState('');
   const [error, setError] = useState<CreateError | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>('look');
+  const [tab, setTab] = useState<Tab>('face');
   const [steps, setSteps] = useState<Footsteps>(getFootsteps);
+  const profile = useWearProfile(mode);
 
   const body = bodyOf(look);
   const choices = choicesFor(body);
   const position = Math.max(0, choices.indexOf(look.character));
+  const head = headOf(look);
+  // Trying other clothes keeps the face, the colours, what is worn and the pet.
+  const dressAs = (character: number) => setLook(withHeadAndBody(look, head, character));
   const step = (direction: -1 | 1) => {
     const next = choices[(position + direction + choices.length) % choices.length];
-    // Colours and the pet stay when trying another character.
-    if (next !== undefined) setLook({ ...look, character: next });
+    if (next !== undefined) dressAs(next);
   };
   const pickBody = (next: Body) => {
     if (next === body) return;
     // Keep the same place in the list, so switching back and forth is predictable.
     const index = choicesFor(next)[position];
-    if (index !== undefined) setLook({ ...look, character: index });
+    if (index !== undefined) dressAs(index);
+  };
+  const stepFace = (direction: -1 | 1) =>
+    setLook(
+      withHeadAndBody(
+        look,
+        (head + direction + CHARACTERS.length) % CHARACTERS.length,
+        look.character,
+      ),
+    );
+  const roll = () => {
+    const next = randomAppearance();
+    // Half the time someone else's face; a few free things to wear; the pet stays.
+    const face =
+      Math.random() < 0.5 ? Math.floor(Math.random() * CHARACTERS.length) : next.character;
+    setLook({
+      ...withHeadAndBody(next, face, next.character),
+      ...randomWear(),
+      ...(look.pet ? { pet: look.pet } : {}),
+    });
   };
 
   async function submit(event: FormEvent) {
@@ -173,9 +271,7 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                 className="icon-button"
                 title={t('creator.random')}
                 aria-label={t('creator.random')}
-                onClick={() =>
-                  setLook({ ...randomAppearance(), ...(look.pet ? { pet: look.pet } : {}) })
-                }
+                onClick={roll}
               >
                 🎲
               </button>
@@ -219,7 +315,19 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                 </button>
               ))}
             </div>
-            {tab === 'look' && (
+            {tab === 'face' && (
+              <>
+                <Stepper
+                  label={t('look.part.face')}
+                  value={t('look.style', { n: head + 1, of: CHARACTERS.length })}
+                  previous={t('creator.previous')}
+                  next={t('creator.next')}
+                  onStep={stepFace}
+                />
+                <p className="creator-note">{t('look.faceNote')}</p>
+              </>
+            )}
+            {tab === 'outfit' && (
               <>
                 <div className="option-row">
                   <span className="option-label">{t('look.part.body')}</span>
@@ -246,8 +354,11 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                   next={t('creator.next')}
                   onStep={step}
                 />
-                <p className="creator-note">{t('look.note')}</p>
+                <p className="creator-note">{t('look.outfitNote')}</p>
               </>
+            )}
+            {tab === 'wear' && (
+              <WearPicker look={look} profile={profile} isNew={mode === 'new'} onChange={setLook} />
             )}
             {tab === 'colours' &&
               OUTFIT_PARTS.map((part) => (
@@ -260,7 +371,7 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
                   onChange={(index) => setLook(withColour(look, part, index))}
                 />
               ))}
-            {tab === 'extras' && (
+            {tab === 'pet' && (
               <>
                 <div className="option-row option-row--top">
                   <span className="option-label">{t('look.part.pet')}</span>
@@ -409,6 +520,97 @@ export function CharacterCreator({ mode, onClose }: { mode: CreatorMode; onClose
         </div>
       </form>
     </Panel>
+  );
+}
+
+/** The Wear page: one row of tiles per slot, locked tiles saying how they are earned. */
+function WearPicker({
+  look,
+  profile,
+  isNew,
+  onChange,
+}: {
+  look: Appearance;
+  profile: WearProfile | null;
+  isNew: boolean;
+  onChange: (look: Appearance) => void;
+}) {
+  const head = headOf(look);
+  return (
+    <>
+      {WEAR_SLOTS.map((slot) => {
+        const label = t(`wear.slot.${slot}`);
+        if (slotBuiltIn(head, slot)) {
+          return (
+            <div key={slot} className="option-row">
+              <span className="option-label">{label}</span>
+              <p className="creator-note">{t(`wear.builtIn.${slot}` as MessageKey)}</p>
+            </div>
+          );
+        }
+        const worn = look[slot];
+        return (
+          <div key={slot} className="wear-slot">
+            <div className="option-row option-row--top">
+              <span className="option-label">{label}</span>
+              <div className="pet-choice wear-choice" role="radiogroup" aria-label={label}>
+                <button
+                  type="button"
+                  role="radio"
+                  className="pet-card"
+                  aria-checked={!worn}
+                  onClick={() => onChange(withWear(look, slot, undefined))}
+                >
+                  <span className="pet-card-icon" aria-hidden>
+                    ✕
+                  </span>
+                  {t('pet.none')}
+                </button>
+                {WEAR_ITEMS[slot].map((id) => {
+                  const open = isEarned(id, profile);
+                  const progress = earnProgress(id, profile);
+                  const rule = WEARABLES[id].earn;
+                  const how =
+                    rule && progress
+                      ? `${t(`wear.earn.${rule.kind}` as MessageKey, { n: rule.need })}${
+                          isNew ? '' : ` · ${progress.have}/${progress.need}`
+                        }`
+                      : '';
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      className={`pet-card wear-card${open ? '' : ' wear-card--locked'}`}
+                      aria-checked={worn === id}
+                      disabled={!open}
+                      title={open ? undefined : how}
+                      onClick={() => onChange(withWear(look, slot, id))}
+                    >
+                      <span className="pet-card-icon" aria-hidden>
+                        {open ? WEAR_ICON[id] : '🔒'}
+                      </span>
+                      {t(`wear.item.${id}` as MessageKey)}
+                      {!open && <span className="wear-card-how">{how}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {worn && (
+              <Swatches
+                label={t('wear.colour')}
+                colors={ACCENTS}
+                value={look[WEAR_COLOR[slot]]}
+                original={t('look.original')}
+                onChange={(index) => onChange(withWearColour(look, slot, index))}
+              />
+            )}
+          </div>
+        );
+      })}
+      <p className="creator-note">{t(isNew ? 'wear.noteNew' : 'wear.note')}</p>
+    </>
   );
 }
 

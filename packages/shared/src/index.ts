@@ -18,3 +18,4 @@ export * from './world';
 export * from './profanity';
 export * from './parlor';
 export * from './stage';
+export * from './wearables';
