@@ -30,6 +30,13 @@ export const FURNITURE = [
   'cardboardBoxClosed',
   'cardboardBoxOpen',
   'coatRackStanding',
+  // The smoking room's coffee corner and the house cat's bed (round K).
+  'kitchenCabinet',
+  'kitchenBar',
+  'kitchenCoffeeMachine',
+  'stoolBar',
+  'plantSmall1',
+  'pillow',
 ] as const;
 
 export type FurnitureName = (typeof FURNITURE)[number];

@@ -19,3 +19,6 @@ export * from './profanity';
 export * from './parlor';
 export * from './stage';
 export * from './wearables';
+export * from './clock';
+export * from './weather';
+export * from './houseCat';

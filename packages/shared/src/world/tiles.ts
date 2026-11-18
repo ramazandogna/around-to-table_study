@@ -46,6 +46,8 @@ export const TILE = {
   microphone: 'I',
   /** A theatre chair in rows facing the stage; sat on like a sofa, facing the stage. */
   theaterSeat: 'W',
+  /** The smoking room's coffee corner: a counter with a coffee machine, against a wall. */
+  coffeeCounter: 'F',
 } as const;
 
 export type TileChar = (typeof TILE)[keyof typeof TILE];

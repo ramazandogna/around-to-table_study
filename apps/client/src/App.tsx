@@ -2,6 +2,7 @@ import { EMPTY_LINES, normalizeRoomCode } from '@att/shared';
 import { useEffect, useState } from 'react';
 
 import { unlockAudio } from './audio/sound';
+import { initSoundscape } from './audio/soundscape';
 import { t } from './i18n/t';
 import { layerIndex, useGameStore } from './state/store';
 import { ChatBar } from './ui/ChatBar';
@@ -121,6 +122,7 @@ export function App() {
         }
         if (found.kind === 'painting') now.addFound(`painting:${found.index}`);
         if (found.kind === 'shelf') now.addFound(`shelf:${found.index}:${found.pick}`);
+        if (found.kind === 'cat') now.addFound('cat:0');
       }
       if (now.dancing && !before.dancing) mark('dance');
       const me = now.session?.id;
@@ -198,6 +200,7 @@ export function App() {
   }, [linesUntil]);
 
   // Browsers keep sound off until the first touch or key press.
+  useEffect(() => initSoundscape(), []);
   useEffect(() => {
     window.addEventListener('pointerdown', unlockAudio);
     window.addEventListener('keydown', unlockAudio);

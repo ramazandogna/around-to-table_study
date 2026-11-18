@@ -1,12 +1,15 @@
-import type { DayPhase } from '@att/shared';
+import type { DayPhase, Weather } from '@att/shared';
 import {
   BoxGeometry,
   CanvasTexture,
   CylinderGeometry,
   Group,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
+  PlaneGeometry,
   PointLight,
+  RepeatWrapping,
   SRGBColorSpace,
   type Material,
 } from 'three';
@@ -61,8 +64,65 @@ const PANE = { width: 0.27, bottom: 0.885, height: 1.12 };
 /** An open window tilts in at the top this far. */
 const OPEN_ANGLE = 0.42;
 
-/** The sky of each part of the day on a narrow pane, drawn once per room. */
-function skyTexture(phase: DayPhase, seed: number): CanvasTexture {
+/** How the weather greys the sky: a wash over it, and how many clouds. */
+const OVERCAST: Record<Weather, { wash: string; clouds: number }> = {
+  clear: { wash: 'rgba(0,0,0,0)', clouds: 2 },
+  cloudy: { wash: 'rgba(150,158,170,0.45)', clouds: 5 },
+  rain: { wash: 'rgba(90,100,115,0.6)', clouds: 6 },
+  snow: { wash: 'rgba(205,212,222,0.55)', clouds: 4 },
+};
+
+/** Rain falls this fast down the glass, and snow this fast, in panes per second. */
+const FALL_SPEED: Record<Weather, number> = { clear: 0, cloudy: 0, rain: 1.6, snow: 0.18 };
+
+/** Whether the player asked their system for less motion: rain and snow then stand still. */
+export const REDUCED_MOTION =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * What falls past the window: thin streaks of rain or soft flakes of snow, on
+ * clear glass, drawn once and slid down the pane (see `update`).
+ */
+function fallTexture(weather: 'rain' | 'snow'): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 128;
+  const c = canvas.getContext('2d');
+  if (c) {
+    const random = (n: number) => {
+      const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    if (weather === 'rain') {
+      c.strokeStyle = 'rgba(220,232,245,0.75)';
+      c.lineWidth = 1;
+      for (let i = 0; i < 26; i++) {
+        const x = random(i) * 32;
+        const y = random(i + 50) * 128;
+        c.beginPath();
+        c.moveTo(x, y);
+        c.lineTo(x - 1.5, y + 9 + random(i + 9) * 8);
+        c.stroke();
+      }
+    } else {
+      c.fillStyle = 'rgba(255,255,255,0.95)';
+      for (let i = 0; i < 22; i++) {
+        const size = 1 + Math.round(random(i + 7));
+        c.fillRect(random(i) * 32, random(i + 40) * 128, size, size);
+      }
+    }
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  return texture;
+}
+
+/** The sky of each part of the day on a narrow pane, drawn once per room and weather. */
+function skyTexture(phase: DayPhase, seed: number, weather: Weather = 'clear'): CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 32;
   canvas.height = 128;
@@ -85,10 +145,20 @@ function skyTexture(phase: DayPhase, seed: number): CanvasTexture {
       const x = Math.sin(seed * 91.7 + n * 47.3) * 43758.5453;
       return x - Math.floor(x);
     };
-    if (phase === 'morning' || phase === 'day') {
-      // A few soft clouds.
-      c.fillStyle = 'rgba(255,255,255,0.8)';
-      for (let i = 0; i < 2; i++) {
+    const overcast = OVERCAST[weather];
+    if (weather !== 'clear') {
+      c.fillStyle = overcast.wash;
+      c.fillRect(0, 0, 32, 128);
+    }
+    if (phase === 'morning' || phase === 'day' || weather !== 'clear') {
+      // A few soft clouds by day; more, and greyer, when the weather turns.
+      c.fillStyle =
+        weather === 'clear'
+          ? 'rgba(255,255,255,0.8)'
+          : phase === 'night' || phase === 'evening'
+            ? 'rgba(70,74,90,0.7)'
+            : 'rgba(225,228,234,0.85)';
+      for (let i = 0; i < overcast.clouds; i++) {
         const y = 20 + random(i) * 50;
         c.beginPath();
         c.ellipse(8 + random(i + 3) * 16, y, 9, 4, 0, 0, Math.PI * 2);
@@ -110,7 +180,7 @@ function skyTexture(phase: DayPhase, seed: number): CanvasTexture {
         c.fillStyle = phase === 'night' ? '#070912' : '#241a30';
       }
     }
-    if (phase === 'night') {
+    if (phase === 'night' && weather === 'clear') {
       c.fillStyle = '#fffbe8';
       for (let i = 0; i < 10; i++) c.fillRect(random(i) * 32, random(i + 20) * 60, 1, 1);
       // The moon, reflected in the glass.
@@ -119,7 +189,7 @@ function skyTexture(phase: DayPhase, seed: number): CanvasTexture {
       c.arc(20, 26, 6, 0, Math.PI * 2);
       c.fill();
     }
-    if (phase === 'afternoon') {
+    if (phase === 'afternoon' && weather === 'clear') {
       c.fillStyle = 'rgba(255,240,190,0.9)';
       c.beginPath();
       c.arc(10, 70, 7, 0, Math.PI * 2);
@@ -133,6 +203,8 @@ function skyTexture(phase: DayPhase, seed: number): CanvasTexture {
 
 export type Ambience = {
   setPhase: (phase: DayPhase) => void;
+  /** The building's weather in the panes: a greyer sky, and rain or snow on the glass. */
+  setWeather: (weather: Weather) => void;
   /** Opens or closes a window (by its index in `windows`). */
   setWindowOpen: (index: number, open: boolean) => void;
   isWindowOpen: (index: number) => boolean;
@@ -156,14 +228,18 @@ export function buildAmbience(
   floorY: number,
   materials: Material[],
 ): Ambience {
-  const textures = new Map<DayPhase, CanvasTexture>();
+  const textures = new Map<string, CanvasTexture>();
   const pane = new MeshStandardMaterial({
     roughness: 0.15,
     metalness: 0.1,
     emissiveIntensity: 0.55,
   });
   const frame = new MeshStandardMaterial({ color: '#d4a96c', roughness: 0.7 });
-  materials.push(pane, frame);
+  // Rain or snow on the glass: a see-through layer just inside each pane.
+  const fall = new MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: 0.85 });
+  const falls = new Map<'rain' | 'snow', CanvasTexture>();
+  const fallPanes: Mesh[] = [];
+  materials.push(pane, frame, fall);
   const sashes: Sash[] = windows.map((w) => {
     // Outer group faces into the room; the pivot hinges at the bottom of the opening.
     const outer = new Group();
@@ -176,6 +252,11 @@ export function buildAmbience(
     const glass = new Mesh(new BoxGeometry(PANE.width, PANE.height, 0.01), pane);
     glass.position.y = PANE.height / 2;
     pivot.add(glass);
+    const wet = new Mesh(new PlaneGeometry(PANE.width, PANE.height), fall);
+    wet.position.set(0, PANE.height / 2, 0.007);
+    wet.visible = false;
+    fallPanes.push(wet);
+    pivot.add(wet);
     for (const [x, y, w2, h] of [
       [0, PANE.height, PANE.width + 0.03, 0.03],
       [0, 0, PANE.width + 0.03, 0.03],
@@ -262,18 +343,43 @@ export function buildAmbience(
   }
 
   let phase: DayPhase | null = null;
+  let weather: Weather = 'clear';
+  let fallSpeed = 0;
+  const paintSky = () => {
+    if (!phase) return;
+    const key = `${phase}:${weather}`;
+    let texture = textures.get(key);
+    if (!texture) {
+      texture = skyTexture(phase, windows.length, weather);
+      textures.set(key, texture);
+    }
+    pane.map = texture;
+    pane.emissiveMap = texture;
+    pane.needsUpdate = true;
+  };
   return {
     windows,
+    setWeather: (next) => {
+      if (next === weather) return;
+      weather = next;
+      paintSky();
+      const falling = next === 'rain' || next === 'snow' ? next : null;
+      if (falling) {
+        let texture = falls.get(falling);
+        if (!texture) {
+          texture = fallTexture(falling);
+          falls.set(falling, texture);
+        }
+        fall.map = texture;
+        fall.needsUpdate = true;
+      }
+      for (const wet of fallPanes) wet.visible = falling !== null;
+      fallSpeed = REDUCED_MOTION ? 0 : FALL_SPEED[next];
+    },
     setPhase: (next) => {
       if (next === phase) return;
       phase = next;
-      let texture = textures.get(next);
-      if (!texture) {
-        texture = skyTexture(next, windows.length);
-        textures.set(next, texture);
-      }
-      pane.map = texture;
-      pane.emissiveMap = texture;
+      paintSky();
       pane.emissive.set('#ffffff');
       pane.emissiveIntensity = next === 'night' || next === 'evening' ? 0.75 : 0.5;
       pane.needsUpdate = true;
@@ -305,9 +411,13 @@ export function buildAmbience(
         sash.pivot.rotation.x = sash.angle;
       }
       for (const fan of fans) fan.rotation.z += delta * 14;
+      if (fall.map && fallSpeed > 0)
+        fall.map.offset.y = (fall.map.offset.y + delta * fallSpeed) % 1;
     },
     dispose: () => {
       for (const texture of textures.values()) texture.dispose();
+      for (const texture of falls.values()) texture.dispose();
+      for (const wet of fallPanes) wet.geometry.dispose();
     },
   };
 }

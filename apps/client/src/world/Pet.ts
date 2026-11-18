@@ -89,7 +89,7 @@ const TRAITS: Record<
 /** Where on a pet a tap counts as on it, around its middle. */
 export const PET_PICK = { radius: 0.3, height: 0.5 } as const;
 
-type Mode = 'follow' | 'wander' | 'wait';
+type Mode = 'follow' | 'wander' | 'wait' | 'guided';
 /** What a wandering pet is busy with. */
 type Task =
   | { kind: 'rest'; left: number }
@@ -164,6 +164,15 @@ export class Pet {
   /** Up on its hind legs (0 down, 1 up), eased so it never snaps. */
   private rear = 0;
   private rearWanted = 0;
+  /** No words, no feelings over its head and no sound of its own (the library). */
+  private quiet = false;
+  /** Where a guided pet walks next (see `walkRoute`). */
+  private route: FloorXZ[] = [];
+  /** Curled up asleep: lying low, breathing slowly (0 awake, 1 asleep), eased. */
+  private nap = 0;
+  private napWanted = 0;
+  /** Up on something (a sofa) this far above the floor. */
+  private perch = 0;
 
   constructor(
     kit: PetKit,
@@ -221,18 +230,21 @@ export class Pet {
     };
   }
 
-  /** Someone pets it: it stops, leans in and purrs, with hearts. */
+  /** Someone pets it: it stops, leans in and purrs, with hearts (a quiet pet just leans in). */
   pat(): void {
     this.pettedFor = PETTED_SECONDS;
     this.tilt.rotation.z = 0;
-    this.emote('heart');
     this.play('yes');
-    this.chatter(t(`pet.purr.${this.kind}`));
+    if (!this.quiet) {
+      this.emote('heart');
+      this.chatter(t(`pet.purr.${this.kind}`));
+    }
     if (this.mode === 'wander') this.task = { kind: 'rest', left: PETTED_SECONDS };
   }
 
   /** A word in its own language over its head, e.g. "mrrp?". */
   chatter(text?: string): void {
+    if (this.quiet) return;
     const words = t(`pet.say.${this.kind}`).split('|');
     this.bubble.textContent = text ?? words[Math.floor(this.random() * words.length)] ?? '';
     this.bubble.hidden = false;
@@ -292,8 +304,55 @@ export class Pet {
 
   /** A feeling over its head, like a person's emote. */
   emote(emote: Emote): void {
+    if (this.quiet) return;
     this.stopEmote?.();
     this.stopEmote = showEmote(this.emoteHost, emote, true);
+  }
+
+  /**
+   * Keeps it quiet (no words or feelings over its head), e.g. in the library;
+   * whatever was showing goes away at once.
+   */
+  setQuiet(quiet: boolean): void {
+    this.quiet = quiet;
+    if (!quiet) return;
+    this.stopEmote?.();
+    this.stopEmote = null;
+    this.bubble.hidden = true;
+  }
+
+  /** A pet nobody walks with (the house cat): goes along these points, then rests there. */
+  walkRoute(points: readonly FloorXZ[]): void {
+    this.mode = 'guided';
+    this.route = [...points];
+    this.napWanted = 0;
+  }
+
+  /** Puts a guided pet down somewhere at once (on coming into the room mid-way). */
+  placeAt(at: FloorXZ, facing?: FloorXZ): void {
+    this.mode = 'guided';
+    this.route = [];
+    this.root.position.set(at.x, FLOOR_Y + this.perch, at.z);
+    if (facing) {
+      this.heading = Math.atan2(facing.x, facing.z);
+      this.root.rotation.y = this.heading;
+    }
+    this.speed = 0;
+  }
+
+  /** Whether a guided pet still has some way to go. */
+  get walking(): boolean {
+    return this.route.length > 0;
+  }
+
+  /** Curls up and sleeps where it is, or wakes up. */
+  setNapping(napping: boolean): void {
+    this.napWanted = napping ? 1 : 0;
+  }
+
+  /** Sits up on something this high (a sofa's cushions), or 0 for the floor. */
+  setPerch(height: number): void {
+    this.perch = height;
   }
 
   update(delta: number, owner: Owner | null): void {
@@ -318,14 +377,25 @@ export class Pet {
       // Held still under the hand, whatever it was up to.
       this.pettedFor -= delta;
       this.speed = 0;
-    } else if (this.mode === 'wait' || !owner) this.waitStep(delta);
+    } else if (this.mode === 'guided') this.guidedStep(delta);
+    else if (this.mode === 'wait' || !owner) this.waitStep(delta);
     else this.followStep(delta, owner);
     // Up the step onto the conference hall's stage, and down again.
-    const ground = FLOOR_Y + groundUnder(this.root.position.x, this.root.position.z);
+    const ground = FLOOR_Y + groundUnder(this.root.position.x, this.root.position.z) + this.perch;
     this.root.position.y = MathUtils.damp(this.root.position.y, ground, 12, delta);
     // A rabbit goes in little hops.
     if (this.traits.hop && this.speed > 0.15) {
       this.tilt.position.y += Math.abs(Math.sin(this.clock * 11)) * 0.06;
+    }
+    // Asleep: lying low on its side, curled, breathing slowly.
+    this.nap = MathUtils.damp(this.nap, this.pettedFor > 0 ? 0 : this.napWanted, 3, delta);
+    if (this.nap > 0.01) {
+      this.tilt.rotation.z = this.nap * 1.2;
+      this.tilt.position.y = -this.nap * 0.05;
+      this.tilt.scale.y = 1 - this.nap * 0.08 + Math.sin(this.clock * 1.6) * 0.02 * this.nap;
+    } else if (this.mode === 'guided') {
+      this.tilt.rotation.z = 0;
+      this.tilt.scale.y = 1;
     }
     this.animate();
     const turn =
@@ -608,6 +678,17 @@ export class Pet {
     return move >= distance;
   }
 
+  /** Along its route at a stroll; once there, it rests (and naps, when told to). */
+  private guidedStep(delta: number): void {
+    const next = this.route[0];
+    if (!next) {
+      this.speed = MathUtils.damp(this.speed, 0, 10, delta);
+      return;
+    }
+    this.speed = MathUtils.damp(this.speed, STROLL_SPEED * 1.3, 6, delta);
+    if (this.moveTowards(next, this.speed * delta)) this.route.shift();
+  }
+
   /** At the library door: sits quietly, now and then washing or dozing off. */
   private waitStep(delta: number): void {
     this.speed = 0;
@@ -654,7 +735,7 @@ export class Pet {
     this.loops.walk.setEffectiveWeight(walking * (1 - running) * rest);
     this.loops.run.setEffectiveWeight(walking * running * rest);
     this.loops.walk.timeScale = MathUtils.clamp(this.speed / 1.2, 0.6, 1.6);
-    this.loops.idle.timeScale = this.mode === 'wait' ? 0.6 : 1;
+    this.loops.idle.timeScale = this.nap > 0.5 ? 0.25 : this.mode === 'wait' ? 0.6 : 1;
   }
 
   private between([low, high]: readonly [number, number]): number {

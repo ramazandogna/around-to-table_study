@@ -111,6 +111,8 @@ export type Notice =
   | 'event_started'
   /** A coffee from the vending machine. */
   | 'vending'
+  /** A coffee from the smoking room's coffee corner. */
+  | 'coffee'
   /** A prize from the claw machine (the value is the prize). */
   | 'prize'
   /** A score at the arcade worth telling about (the value is the score). */
@@ -272,7 +274,7 @@ export type SitStep = 'activity' | 'timer';
 
 /** Something found by looking closely: a shelf moment, a painting, the renovation. */
 export type Discovery = {
-  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'lost';
+  kind: 'shelf' | 'painting' | 'renovation' | 'flaw' | 'lost' | 'cat';
   /** Index into the content list for its kind. */
   index: number;
   /** Which moment of a shelf, or which note of the renovation. */

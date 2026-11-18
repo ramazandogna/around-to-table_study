@@ -1,6 +1,7 @@
 import { JUKEBOX, playedSeconds } from '@att/shared';
 import { useEffect, useRef, useState } from 'react';
 import { unlockAudio } from '../audio/sound';
+import { setMusicPlaying } from '../audio/soundscape';
 import { COZY, COZY_ARTIST, COZY_LICENSE, cozyAt } from '../content/cozy';
 import { t } from '../i18n/t';
 import { useGameStore } from '../state/store';
@@ -223,6 +224,11 @@ function Cozy({
       });
     };
     element.addEventListener('ended', play);
+    // The rooms' background sound steps aside while this plays.
+    const playing = () => setMusicPlaying('cozy', true);
+    const paused = () => setMusicPlaying('cozy', false);
+    element.addEventListener('playing', playing);
+    element.addEventListener('pause', paused);
     window.addEventListener('att-music-tap', play);
     // The first touch anywhere is enough for browsers that waited for one.
     const firstTouch = () => {
@@ -232,6 +238,9 @@ function Cozy({
     play();
     return () => {
       element.removeEventListener('ended', play);
+      element.removeEventListener('playing', playing);
+      element.removeEventListener('pause', paused);
+      setMusicPlaying('cozy', false);
       window.removeEventListener('att-music-tap', play);
       window.removeEventListener('pointerdown', firstTouch);
       element.pause();
@@ -326,6 +335,7 @@ function YouTubeSong({
               event.target.playVideo();
             },
             onStateChange: (event) => {
+              setMusicPlaying('jukebox', event.data === PLAYING);
               if (event.data !== PLAYING) return;
               onBlocked(false);
               // The first screen to know the song's length tells the room, so it moves on in time.
@@ -341,6 +351,7 @@ function YouTubeSong({
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
+      setMusicPlaying('jukebox', false);
       window.clearInterval(check);
       window.removeEventListener('att-music-tap', tap);
       player.current?.destroy();

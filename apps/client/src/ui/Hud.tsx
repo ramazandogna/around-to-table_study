@@ -4,6 +4,7 @@ import { getLanguage, setLanguage, t } from '../i18n/t';
 import { unreadMessages } from '../net/social';
 import { layerIndex, panelOpen, useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
+import { AmbienceToggle } from './AmbienceToggle';
 import { WorldClock } from './Calendar';
 import { SignOutLink } from './Gate';
 import { StatusLink } from './StatusDialog';
@@ -290,6 +291,7 @@ function MenuList({ opener }: { opener: RefObject<HTMLButtonElement | null> }) {
     >
       <StatusLink />
       <SoundToggle />
+      <AmbienceToggle />
       <LanguageToggle />
       <IntroLink />
       <ExitLink />

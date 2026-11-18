@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { soundscapeState } from '../audio/soundscape';
 import { t } from '../i18n/t';
 import { AreaWorld } from './AreaWorld';
 import { loadCharacterKit } from './characters';
@@ -30,8 +31,14 @@ export function WorldCanvas() {
         if (cancelled) return;
         world = new AreaWorld(view, { furniture, characters, pets, arcade }, fade);
         world.enter('hall');
-        // Development only (dropped from the production build): handles for browser tests.
-        if (import.meta.env.DEV) Object.assign(window, { __world: world, __store: useGameStore });
+        // Handles for browser tests: dev builds, and the built game served on this machine.
+        if (import.meta.env.DEV || ['localhost', '127.0.0.1'].includes(location.hostname)) {
+          Object.assign(window, {
+            __world: world,
+            __store: useGameStore,
+            __soundscape: soundscapeState,
+          });
+        }
         setStatus('ready');
       })
       .catch((error: unknown) => {

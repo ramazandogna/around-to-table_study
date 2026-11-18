@@ -266,10 +266,26 @@ export class Staff {
     return this.person.kind;
   }
 
-  /** Says the next of their lines. */
+  /** Their own lines, in their own voice, said after the ones about the player (see `staffTalk`). */
+  get ownLines(): readonly MessageKey[] {
+    return this.person.lines;
+  }
+
+  /**
+   * What to say on the n-th tap, given by the room: a hello by name, a hint,
+   * the weather (see `staffTalk.ts`). Without it they say their own lines.
+   */
+  talker: ((turn: number) => string) | null = null;
+
+  /** Says the next thing they have to say. */
   talk(): void {
+    const turn = this.lineIndex++;
+    if (this.talker) {
+      this.avatar.say(this.talker(turn));
+      return;
+    }
     const { lines } = this.person;
-    const line = lines[this.lineIndex++ % lines.length];
+    const line = lines[turn % lines.length];
     if (line) this.avatar.say(t(line));
   }
 
