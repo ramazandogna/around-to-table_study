@@ -23,6 +23,9 @@ import { PlayerCard } from './ui/PlayerCard';
 import { CharacterCreator } from './ui/CharacterCreator';
 import { CharacterSelect, goalName } from './ui/CharacterSelect';
 import { GoalsDialog } from './ui/Goals';
+import { StatusDialog } from './ui/StatusDialog';
+import { Wardrobe } from './ui/Wardrobe';
+import { ExitGame } from './ui/ExitGame';
 import { addTimePlayed, loadGoals, onFocus, onGoalTime } from './state/stats';
 import { HudPlate, MapCorner } from './ui/Hud';
 import { Intro } from './ui/Intro';
@@ -268,6 +271,9 @@ export function App() {
       <ConfirmDialog />
       <ReportDialog />
       <GoalsDialog />
+      <StatusDialog />
+      <Wardrobe />
+      <ExitGame />
       <Intro />
       <Loader />
     </main>

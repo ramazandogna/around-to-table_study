@@ -511,6 +511,11 @@ type GameState = {
   sitStep: SitStep | null;
   /** The wardrobe takes the keyboard, so arrows and Enter do not reach the world. */
   wardrobeOpen: boolean;
+  /**
+   * The "leave the game" question. Like every dialog the menu opens, it lives
+   * here rather than in the menu, so the menu can close without closing it.
+   */
+  exitOpen: boolean;
   activity: Activity | null;
   timer: LocalTimer | null;
   study: StudySession | null;
@@ -614,6 +619,7 @@ type GameState = {
   setSeated: (seated: boolean) => void;
   setSitStep: (step: SitStep | null) => void;
   setWardrobeOpen: (open: boolean) => void;
+  setExitOpen: (open: boolean) => void;
   setActivity: (activity: Activity | null) => void;
   startTimer: (minutes: number, dnd: boolean) => void;
   stopTimer: () => void;
@@ -770,6 +776,7 @@ export const useGameStore = create<GameState>((set) => ({
   seated: false,
   sitStep: null,
   wardrobeOpen: false,
+  exitOpen: false,
   activity: null,
   timer: null,
   study: null,
@@ -1018,6 +1025,7 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   setSitStep: (sitStep) => set({ sitStep }),
   setWardrobeOpen: (wardrobeOpen) => set({ wardrobeOpen }),
+  setExitOpen: (exitOpen) => set({ exitOpen }),
   setActivity: (activity) => set({ activity }),
   startTimer: (minutes, dnd) =>
     set({ timer: { endsAt: Date.now() + minutes * 60_000, totalMs: minutes * 60_000 }, dnd }),

@@ -12,19 +12,26 @@ const COUNTDOWN = 3;
  * character select screen (the server sees the player leave). From there
  * "Join" comes straight back.
  */
-export function ExitGame() {
-  const [asking, setAsking] = useState(false);
+export function ExitLink() {
   return (
-    <>
-      <button type="button" className="hud-link" onClick={() => setAsking(true)}>
-        <span className="hud-icon" aria-hidden>
-          🚪
-        </span>
-        <span className="hud-label">{t('exit.button')}</span>
-      </button>
-      {asking && <ExitDialog onClose={() => setAsking(false)} />}
-    </>
+    <button
+      type="button"
+      className="hud-link"
+      onClick={() => useGameStore.getState().setExitOpen(true)}
+    >
+      <span className="hud-icon" aria-hidden>
+        🚪
+      </span>
+      <span className="hud-label">{t('exit.button')}</span>
+    </button>
   );
+}
+
+/** The question itself, mounted beside the world so the menu that asked can close. */
+export function ExitGame() {
+  const open = useGameStore((s) => s.exitOpen);
+  if (!open) return null;
+  return <ExitDialog onClose={() => useGameStore.getState().setExitOpen(false)} />;
 }
 
 function ExitDialog({ onClose }: { onClose: () => void }) {
@@ -43,7 +50,10 @@ function ExitDialog({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   function exit() {
-    useGameStore.getState().setPlateOpen(false);
+    const store = useGameStore.getState();
+    store.setPlateOpen(false);
+    // The question lives in the store now: closed here, it does not greet the player on the way back in.
+    store.setExitOpen(false);
     leaveToSelect();
   }
 

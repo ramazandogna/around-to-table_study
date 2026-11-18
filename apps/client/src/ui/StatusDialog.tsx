@@ -13,24 +13,33 @@ import { useGameStore } from '../state/store';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { Dialog, Panel } from './Panel';
 
-/** Sets the three lines over your head: an announcement, what you are doing and how you feel. */
+/** The menu's way to the status lines. */
+export function StatusLink() {
+  return (
+    <button
+      type="button"
+      className="hud-link"
+      onClick={() => useGameStore.getState().setStatusOpen(true)}
+    >
+      <span className="hud-icon" aria-hidden>
+        💭
+      </span>
+      <span className="hud-label">{t('hud.status')}</span>
+    </button>
+  );
+}
+
+/**
+ * Sets the three lines over your head: an announcement, what you are doing and how you feel.
+ * Mounted once beside the world, not inside the menu, so closing the menu leaves it open.
+ */
 export function StatusDialog() {
   const open = useGameStore((s) => s.statusOpen);
-  const setOpen = useGameStore((s) => s.setStatusOpen);
+  if (!open) return null;
   return (
-    <>
-      <button type="button" className="hud-link" onClick={() => setOpen(true)}>
-        <span className="hud-icon" aria-hidden>
-          💭
-        </span>
-        <span className="hud-label">{t('hud.status')}</span>
-      </button>
-      {open && (
-        <Dialog>
-          <StatusForm onClose={() => setOpen(false)} />
-        </Dialog>
-      )}
-    </>
+    <Dialog>
+      <StatusForm onClose={() => useGameStore.getState().setStatusOpen(false)} />
+    </Dialog>
   );
 }
 

@@ -8,10 +8,10 @@ import { FriendsLink } from './Friends';
 import { InboxLink } from './Inbox';
 import { PhoneLink } from './Phone';
 import { SignOutLink } from './Gate';
-import { StatusDialog } from './StatusDialog';
-import { ExitGame } from './ExitGame';
+import { StatusLink } from './StatusDialog';
+import { ExitLink } from './ExitGame';
 import { GoalsLink, QuestsPanel } from './Goals';
-import { Wardrobe } from './Wardrobe';
+import { WardrobeLink } from './Wardrobe';
 
 const AREA_ICON: Record<AreaId, string> = {
   hall: '🚪',
@@ -75,16 +75,16 @@ export function HudPlate() {
       </div>
       {/* On a phone the open plate would cover what a link opens, so it folds away after the tap. */}
       <nav className="hud-links" aria-label={t('hud.menu')} onClickCapture={foldOnPhone}>
-        <StatusDialog />
+        <StatusLink />
         <GoalsLink />
         <FriendsLink />
         <PhoneLink />
         <InboxLink />
-        <Wardrobe />
+        <WardrobeLink />
         <SoundToggle />
         <LanguageToggle />
         <IntroLink />
-        <ExitGame />
+        <ExitLink />
         <SignOutLink />
       </nav>
     </header>
