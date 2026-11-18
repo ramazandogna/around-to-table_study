@@ -1,6 +1,9 @@
+import { lookForNewCharacter, lookToSave } from './looks';
 import {
   AREA_RULES,
   type Appearance,
+  allowedLook,
+  wearsEarned,
   isValidAppearance,
   conferenceEnd,
   conferenceRole,
@@ -548,7 +551,9 @@ export class SocialHub extends DurableObject<Env> {
     name: string,
     look: unknown,
   ): Promise<{ id: string } | { error: 'too_many' | 'name_taken' | 'invalid' }> {
-    if (!isValidAppearance(look)) return { error: 'invalid' };
+    // Only the free things to wear: nothing is earned yet.
+    const start = lookForNewCharacter(look);
+    if (!start) return { error: 'invalid' };
     const count = this.sql
       .exec<{ n: number }>('SELECT COUNT(*) AS n FROM characters WHERE account_id = ?', accountId)
       .toArray()[0]?.n;
@@ -564,7 +569,7 @@ export class SocialHub extends DurableObject<Env> {
       accountId,
       name,
       key,
-      JSON.stringify(look),
+      JSON.stringify(start),
       Date.now(),
     );
     return { id };
@@ -672,11 +677,13 @@ export class SocialHub extends DurableObject<Env> {
   }
 
   async setCharacterLook(accountId: string, id: string, look: unknown): Promise<boolean> {
-    if (!isValidAppearance(look)) return false;
+    // Things not earned (yet) are taken off before saving.
+    const kept = lookToSave(look, this.profile(id));
+    if (!kept) return false;
     return (
       this.sql.exec(
         'UPDATE characters SET look = ? WHERE id = ? AND account_id = ?',
-        JSON.stringify(look),
+        JSON.stringify(kept),
         id,
         accountId,
       ).rowsWritten > 0
@@ -928,7 +935,9 @@ export class SocialHub extends DurableObject<Env> {
           petSex: message.petSex,
           petAccessory: message.petAccessory,
         },
-        ...(message.look && isValidAppearance(message.look) ? { look: message.look } : {}),
+        ...(message.look && isValidAppearance(message.look)
+          ? { look: this.shownLook(me.id, message.look) }
+          : {}),
         lines,
         tz: cleanOffset(message.tz),
       };
@@ -1687,6 +1696,15 @@ export class SocialHub extends DurableObject<Env> {
       clean,
       Date.now(),
     );
+  }
+
+  /** A look as this person may show it: earned things they have not earned are taken off. */
+  async allowedLook(id: string, look: Appearance): Promise<Appearance> {
+    return this.shownLook(id, look);
+  }
+
+  private shownLook(id: string, look: Appearance): Appearance {
+    return wearsEarned(look) ? allowedLook(look, this.profile(id)) : look;
   }
 
   /** A person's own profile, for the character select screen (asked with their token). */

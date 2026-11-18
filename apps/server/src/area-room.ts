@@ -1,3 +1,4 @@
+import { withAllowedLook } from './looks';
 import {
   AREA_RULES,
   SWEARS,
@@ -240,6 +241,10 @@ export class AreaRoom extends DurableObject<Env> {
       me.stageUntil = until;
       this.save(ws, me);
     }
+    // Earned things to wear are shown only if the hub agrees they were earned.
+    const checked = await withAllowedLook(message, (look) =>
+      this.env.SOCIAL.getByName('hub').allowedLook(me.id, look),
+    );
     // The chat cooldown outlives the socket, so leaving and coming back does not reset it.
     const said = message.t === 'hello' ? await this.ctx.storage.get<number>(saidKey(me.id)) : 0;
     // What a person says, emotes and dances is not shown to anyone they blocked or who blocked them.
@@ -255,7 +260,7 @@ export class AreaRoom extends DurableObject<Env> {
       this.handle(
         ws,
         { ...current, lastSayAt: Math.max(current.lastSayAt, said ?? 0) },
-        message,
+        checked,
         Date.now(),
       );
     } finally {
