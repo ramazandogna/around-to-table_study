@@ -17,6 +17,7 @@ import { eventShort, eventText, eventTitle } from '../content/events';
 import { dateLocale, t } from '../i18n/t';
 import { useGameStore } from '../state/store';
 import { Dialog } from './Panel';
+import { TableHoursText } from './Reward';
 
 const DAY = 24 * 60 * 60_000;
 /** Two weeks ahead on the calendar. */
@@ -196,6 +197,10 @@ function CalendarDialog({ now, onClose }: { now: number; onClose: () => void }) 
           })}
         </ol>
         <ul className="calendar-list">
+          <li className="calendar-event calendar-event--daily">
+            <h3>🕯️ {t('tablehour.title')}</h3>
+            <TableHoursText />
+          </li>
           {occurrences.length === 0 && <li>{t('calendar.none')}</li>}
           {occurrences.slice(1).map((o) => (
             <EventLine key={`${o.start}:${eventTitle(o.event)}`} occurrence={o} now={now} />

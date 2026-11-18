@@ -462,6 +462,8 @@ async function joinArea(request: Request, env: Env, area: string): Promise<Respo
   headers.set(AREA_HEADERS.id, session.id);
   headers.set(AREA_HEADERS.name, encodeURIComponent(session.name));
   headers.set(AREA_HEADERS.area, area as AreaId);
+  // Whose character this is: two characters of one account never count as studying together.
+  headers.set(AREA_HEADERS.account, session.acct);
   if (rules) headers.set(AREA_HEADERS.rules, rules);
   if (role) headers.set(AREA_HEADERS.role, role);
   return env.AREAS.getByName(object).fetch(new Request(request, { headers }));

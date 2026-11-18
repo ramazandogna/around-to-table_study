@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { dateLocale, t, type MessageKey } from '../i18n/t';
 import { formatDuration } from '../state/stats';
 import { useGameStore, type Selected } from '../state/store';
+import { useTogether } from '../state/together';
 import { DOING_ICON, MOOD_ICON, VIBE_ICON } from '../state/study';
 import { Panel } from './Panel';
 
@@ -32,12 +33,22 @@ function Card({ id, name, lines, view }: Selected) {
   const role = useGameStore((s) => s.role);
   const profile = useGameStore((s) => (s.profile?.id === id ? s.profile : null));
   const cooldownUntil = useGameStore((s) => s.cooldownUntil[s.area] ?? 0);
+  // "Study beside": they sit at a table in the library (or a private room) you are in, or a
+  // friend studies in the library while you are in the hall.
+  const atTable = useTogether((s) => s.atTables.includes(id));
+  const friendInLibrary = useGameStore((s) =>
+    s.friends.some(
+      (f) => f.id === id && f.state === 'friend' && f.area === 'library' && f.studying,
+    ),
+  );
   const store = useGameStore.getState();
   const rules = AREA_RULES[area];
   const [whispering, setWhispering] = useState(view === 'whisper');
   const [text, setText] = useState('');
   const close = () => store.setSelected(null);
   const mine = id === myId;
+  const canStudyBeside =
+    !mine && ((area !== 'hall' && atTable) || (area === 'hall' && friendInLibrary));
 
   // The numbers come from the server, fresh each time the card opens.
   useEffect(() => {
@@ -112,6 +123,18 @@ function Card({ id, name, lines, view }: Selected) {
         <Stats profile={profile} />
       ) : (
         <p className="creator-note">{t('card.loading')}</p>
+      )}
+      {canStudyBeside && !whispering && (
+        <button
+          type="button"
+          className="panel-ok card-beside"
+          onClick={() => {
+            useTogether.getState().setStudyBeside(id);
+            close();
+          }}
+        >
+          📚 {t('card.studyBeside')}
+        </button>
       )}
       {mine && (
         <p className="creator-note card-id">

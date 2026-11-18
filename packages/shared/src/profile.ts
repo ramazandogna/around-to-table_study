@@ -39,6 +39,12 @@ export type Profile = {
   messages: number;
   /** Their longest run of days with at least one focus block. */
   bestStreak: number;
+  /**
+   * Focus blocks a table-mate (another person) sat through with them: the
+   * candle was shared. Always sent by the server; optional only so older
+   * profiles (and hand-made ones in tests) still type.
+   */
+  sharedBlocks?: number;
 };
 
 /** Sorts a finished block by its length: 25 minutes is a pomodoro, 50 deep, 90 a marathon. */

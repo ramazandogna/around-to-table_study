@@ -14,6 +14,7 @@ export * from './status';
 export * from './study';
 export * from './tables';
 export * from './time';
+export * from './together';
 export * from './world';
 export * from './profanity';
 export * from './parlor';

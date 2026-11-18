@@ -88,6 +88,9 @@ import { createSeatMarkers } from './seatMarkers';
 import { STAGE_HEIGHT } from './conferenceProps';
 import { setGround } from './ground';
 import { stageView, type ScreenQuad } from './stageView';
+import { TogetherLayer } from './together';
+import { useTogether } from '../state/together';
+import { tableOfSeat, tablesOf, type BookView } from '@att/shared';
 
 /** With this many people around, far and off-screen people are drawn with less detail. */
 const DETAIL_CROWD = 12;
@@ -217,6 +220,8 @@ type Target =
   | { kind: 'person'; id: string }
   | { kind: 'pet'; owner: string }
   | { kind: 'examine'; examinable: Examinable }
+  /** A book someone left on a table (see world/together.ts). */
+  | { kind: 'book'; book: BookView }
   | { kind: 'tile'; tile: Point };
 
 /** Runs one area at a time: builds the room, moves avatars and talks to the server. */
@@ -306,7 +311,13 @@ export class AreaWorld {
   private eventTimer = 0;
   /** Every chair and sofa that is open, for tapping them by any part. */
   private seatTiles: Point[] = [];
+  /** Candles and books on the tables (see world/together.ts). */
+  private together: TogetherLayer | null = null;
+  /** A tapped book's line stays up this long (performance clock). */
+  private bookTipUntil = 0;
+  private besideTimer = 0;
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeTogether: () => void;
 
   constructor(
     private readonly view: IsoView,
@@ -373,6 +384,10 @@ export class AreaWorld {
       this.player?.setStatus(status);
       this.connection?.status(status);
     });
+    // "Study beside" on someone's card: off to a free chair at their table.
+    this.unsubscribeTogether = useTogether.subscribe((state, before) => {
+      if (state.studyBeside && state.studyBeside !== before.studyBeside) this.studyBeside();
+    });
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
@@ -399,6 +414,7 @@ export class AreaWorld {
     this.areaId = area;
     useGameStore.getState().setRoomRules(isRoomArea(area) && ticket ? ticket.room.rules : null);
     this.peopleKey = '';
+    this.together = new TogetherLayer(this.view, area);
     this.buildRoom(useGameStore.getState().opened[area] ?? 0);
     this.view.setBounds(this.grid.width, this.grid.height);
     this.boards = [];
@@ -479,6 +495,7 @@ export class AreaWorld {
   dispose(): void {
     this.teardown();
     this.unsubscribe();
+    this.unsubscribeTogether();
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
@@ -505,6 +522,7 @@ export class AreaWorld {
       roomRules: useGameStore.getState().roomRules,
     });
     this.view.add(this.built.root);
+    this.together?.build(this.grid);
     const grid = this.grid;
     setGround((tile) => (grid.isStage(tile) ? STAGE_HEIGHT : 0));
     const stage = this.built.stage;
@@ -612,6 +630,8 @@ export class AreaWorld {
     const store = useGameStore.getState();
     store.setSeated(false);
     store.ask(null);
+    this.together?.dispose();
+    this.together = null;
     this.removeRoom();
   }
 
@@ -668,6 +688,12 @@ export class AreaWorld {
     this.updatePets(delta);
     this.updateBuilding(delta, player);
     this.updateEvent(delta);
+    this.together?.update(delta);
+    this.besideTimer -= delta;
+    if (this.besideTimer <= 0) {
+      this.besideTimer = 1;
+      this.listAtTables();
+    }
     this.arrangeCrowd(delta);
     this.mapTimer -= delta;
     if (this.mapTimer <= 0) {
@@ -686,6 +712,7 @@ export class AreaWorld {
     const self = store.session;
     const selfId = self?.id;
     const nameOf = (id: string) => (id === selfId ? self?.name : this.others.get(id)?.name) ?? '?';
+    if (message.t !== 'welcome' && this.together?.onMessage(message)) return;
     switch (message.t) {
       case 'welcome':
         store.setLoading(false);
@@ -697,11 +724,14 @@ export class AreaWorld {
         for (const index of message.lamps ?? []) this.lampFlips.set(index, performance.now());
         this.applyLamps();
         store.setClock(message.now);
+        this.together?.onMessage(message);
         if (this.areaId === 'conference') {
           store.setStage(message.stage ?? null, message.now, message.presenter ?? false);
           this.built?.stage?.setLit(!!message.stage);
         }
         message.players.forEach((p) => this.addOther(p));
+        // Came through the door to study beside someone: on to their table.
+        if (useTogether.getState().studyBeside) this.studyBeside();
         // After a reconnect the server puts us at the door; walk back to where we are,
         // then repeat the status, since an activity only counts once seated.
         if (this.player && !sameTile(message.tile, this.player.tile)) {
@@ -1384,6 +1414,12 @@ export class AreaWorld {
         this.ripple(event, 'look');
         this.goTo(target.examinable.stand, { kind: 'examine', examinable: target.examinable });
         return;
+      case 'book':
+        // Read where it is: who left it (a friend's name, else "someone"), how long, when.
+        this.ripple(event, 'look');
+        this.showTip(this.together?.bookLabel(target.book) ?? '', event.clientX, event.clientY);
+        this.bookTipUntil = performance.now() + 3500;
+        return;
       case 'tile': {
         const { tile } = target;
         const kind = this.cursorKind(tile);
@@ -1472,6 +1508,8 @@ export class AreaWorld {
     if (pet) return { kind: 'pet', owner: pet };
     // A chair or sofa anywhere on it, back and seat alike, before what stands behind it.
     const seat = this.seatOnScreen(clientX, clientY);
+    const book = seat ? null : (this.together?.bookAt(clientX, clientY) ?? null);
+    if (book) return { kind: 'book', book };
     const examinable = seat ? null : this.examinableAt(clientX, clientY);
     if (examinable) return { kind: 'examine', examinable };
     const tile = seat ?? this.pickTile(clientX, clientY);
@@ -2249,11 +2287,16 @@ export class AreaWorld {
     this.view.canvas.style.cursor = cursor ? cursorFor(cursor) : kind ? 'pointer' : '';
 
     const label = target && at ? this.hoverLabel(target) : null;
+    // A tapped book keeps its line up a little while (touch screens have no hover).
+    if (!label && performance.now() < this.bookTipUntil) return;
     this.tip.hidden = !label;
-    if (label && at) {
-      if (this.tip.textContent !== label) this.tip.textContent = label;
-      this.tip.style.translate = `${at.x + 18}px ${at.y + 20}px`;
-    }
+    if (label && at) this.showTip(label, at.x, at.y);
+  }
+
+  private showTip(label: string, x: number, y: number): void {
+    this.tip.hidden = !label;
+    if (this.tip.textContent !== label) this.tip.textContent = label;
+    this.tip.style.translate = `${x + 18}px ${y + 20}px`;
   }
 
   private targetCursor(target: Target): CursorKind | null {
@@ -2264,6 +2307,7 @@ export class AreaWorld {
       case 'pet':
         return 'talk';
       case 'examine':
+      case 'book':
         return 'look';
       case 'tile':
         return this.cursorKind(target.tile);
@@ -2313,6 +2357,8 @@ export class AreaWorld {
           return t(`tip.game.${MACHINES[examinable.index] ?? 'arcade'}`);
         return t(examinable.kind === 'painting' ? 'tip.painting' : 'tip.peek');
       }
+      case 'book':
+        return this.together?.bookLabel(target.book) ?? null;
       case 'tile':
         break;
     }
@@ -2645,6 +2691,64 @@ export class AreaWorld {
     }
     if (seat) store.setNotice('seat_gone');
     this.walkTo(this.grid.arrivalPoint('hall'));
+  }
+
+  /**
+   * "Study beside" someone: in the library, to the free chair nearest them at
+   * their table, where the sit dialog asks as usual; from the hall, through
+   * the library door first (the walk goes on after the welcome).
+   */
+  private studyBeside(): void {
+    const together = useTogether.getState();
+    const id = together.studyBeside;
+    const player = this.player;
+    if (!id || !player || this.leaving) return;
+    if (this.areaId === 'hall') {
+      const door = this.doorTiles('library')[0];
+      if (door) this.leaveSeat(player, () => this.walkTo(door));
+      else together.setStudyBeside(null);
+      return;
+    }
+    together.setStudyBeside(null);
+    const other = this.others.get(id);
+    const table = other ? tableOfSeat(this.areaId, other.tile) : null;
+    const group = table === null ? null : tablesOf(this.areaId)[table];
+    if (!other || !group) {
+      useGameStore.getState().setNotice('beside_gone');
+      return;
+    }
+    const free = group.seats
+      .filter((seat) => this.grid.isWalkable(seat) && !this.personAt(seat))
+      .sort((a, b) => reach(a, other.tile) - reach(b, other.tile));
+    const seat = free[0];
+    if (!seat) {
+      useGameStore.getState().setNotice('beside_full');
+      return;
+    }
+    if (sameTile(seat, player.tile) && player.isSeated) return;
+    this.walkTo(seat);
+  }
+
+  /** Every tile of the door to `to`. */
+  private doorTiles(to: AreaId): Point[] {
+    const tiles: Point[] = [];
+    this.grid.area.layout.forEach((row, y) =>
+      [...row].forEach((_, x) => {
+        if (this.grid.doorTarget({ x, y }) === to) tiles.push({ x, y });
+      }),
+    );
+    return tiles;
+  }
+
+  /** Who sits at a table here now, for the "Study beside" button on their card. */
+  private listAtTables(): void {
+    const ids = [...this.others]
+      .filter(([, other]) => !other.isMoving && tableOfSeat(this.areaId, other.tile) !== null)
+      .map(([id]) => id);
+    const before = useTogether.getState().atTables;
+    if (ids.length !== before.length || ids.some((id, i) => id !== before[i])) {
+      useTogether.getState().setAtTables(ids);
+    }
   }
 
   private travel(to: AreaId): void {

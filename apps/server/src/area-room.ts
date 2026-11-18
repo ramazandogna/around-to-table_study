@@ -44,6 +44,21 @@ import {
   type StudyStatus,
 } from '@att/shared';
 import { cleanStage, controlStage, STAGE_LIMITS, type StageState } from '@att/shared';
+import {
+  blockCredit,
+  candleCount,
+  candles,
+  mayLeaveBook,
+  pruneBooks,
+  pruneLog,
+  tableHourNow,
+  tableOfSeat,
+  viewBook,
+  type Book,
+  type BookView,
+  type FocusSpan,
+  type Reward,
+} from '@att/shared';
 import { DurableObject } from 'cloudflare:workers';
 import { doorTag } from './accounts';
 import type { Env } from './env';
@@ -82,6 +97,11 @@ type Connection = {
   door?: string;
   /** When the socket connected, for telling vanished ones apart (see `sweep`). */
   since: number;
+  /** The account behind the character (see `AREA_HEADERS.account`). */
+  acct?: string;
+  /** Friends and blocked people, asked of the hub on arrival: who may see whose name on a book. */
+  friends?: string[];
+  blocked?: string[];
 };
 
 /** Timers are kept as an end time on the server's clock and sent out as time left. */
@@ -104,6 +124,12 @@ const LAMPS_KEY = 'lamps';
 const EPOCH_KEY = 'epoch';
 const JUKEBOX_KEY = 'jukebox';
 const STAGE_KEY = 'stage';
+/** Who focused at which chair lately, and the books left on the tables (see together.ts). */
+const FOCUS_KEY = 'focus';
+const BOOKS_KEY = 'books';
+const rewardKey = (id: string) => `reward:${id}`;
+/** A reward card not seen within this long (a long time away) is let go. */
+const REWARD_KEEP_MS = 30 * 60_000;
 const tableKey = (kind: TableKind) => `table:${kind}`;
 /** Songs queued per person per minute, on top of the queue's own limits. */
 const TUNES_PER_MINUTE = 4;
@@ -118,6 +144,8 @@ export const AREA_HEADERS = {
   rules: 'x-room-rules',
   /** In the conference hall: 'presenter' or 'audience'. */
   role: 'x-conference-role',
+  /** The account the character belongs to. */
+  account: 'x-account-id',
 } as const;
 const RULES_KEY = 'rules';
 /** Games a private room's table offers (darts needs the smoking room's cabinet). */
@@ -144,6 +172,10 @@ export class AreaRoom extends DurableObject<Env> {
   private rules: RoomRules | null = null;
   /** When each person last queued songs, for `TUNES_PER_MINUTE`. */
   private readonly tuneWindows = new Map<string, RateWindow>();
+  /** Who focused where lately; loaded from storage on the first message. */
+  private focusLog: FocusSpan[] | null = null;
+  /** Books left on the tables; loaded with the log. */
+  private books: Book[] | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -199,6 +231,7 @@ export class AreaRoom extends DurableObject<Env> {
       afk: false,
       smoking: false,
       presenter: request.headers.get(AREA_HEADERS.role) === 'presenter',
+      acct: request.headers.get(AREA_HEADERS.account) ?? id,
       door: await this.doorTag(),
       since: Date.now(),
     });
@@ -225,6 +258,12 @@ export class AreaRoom extends DurableObject<Env> {
     this.opened ??= (await this.ctx.storage.get<number>(OPENED_KEY)) ?? 0;
     this.flippedLamps ??= new Set((await this.ctx.storage.get<number[]>(LAMPS_KEY)) ?? []);
     await this.loadPlay();
+    await this.loadTogether();
+    // Friends see each other's names on the books; asked once on arrival, where there are tables.
+    if (message.t === 'hello' && countsForFocus(me.area)) {
+      const circle = await this.env.SOCIAL.getByName('hub').circleOf(me.id);
+      this.save(ws, { ...(this.load(ws) ?? me), friends: circle.friends, blocked: circle.blocked });
+    }
     // Who presents changes as events start and end, so it is asked again at each change of the screen.
     const toStage =
       message.t === 'move' && me.area === 'conference' && this.grid(me.area).isStage(message.to);
@@ -266,12 +305,14 @@ export class AreaRoom extends DurableObject<Env> {
     } finally {
       this.hiddenFrom = null;
     }
+    if (message.t === 'hello') await this.welcomeTogether(ws, me.id);
   }
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
     // After hibernation the tables are not in memory yet; without them the
     // leaver would stay seated at a game forever.
     await this.loadPlay();
+    await this.loadTogether();
     this.leave(ws);
   }
 
@@ -282,6 +323,7 @@ export class AreaRoom extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const now = Date.now();
     await this.loadPlay();
+    await this.loadTogether();
     const door = await this.doorTag();
     for (const ws of this.ctx.getWebSockets()) {
       const me = this.load(ws);
@@ -290,6 +332,7 @@ export class AreaRoom extends DurableObject<Env> {
     }
     this.advanceIfOver(now);
     this.dropAbsentPlayers(now);
+    this.closeAbsentFocus(now);
     if (this.ctx.getWebSockets().length > 0) await this.armSweep();
   }
 
@@ -428,6 +471,7 @@ export class AreaRoom extends DurableObject<Env> {
     ids: readonly string[] | null,
     why: 'kicked' | 'banned' | 'room_closed',
   ): Promise<void> {
+    await this.loadTogether();
     const sockets = ids
       ? ids.flatMap((id) => this.ctx.getWebSockets(id))
       : this.ctx.getWebSockets();
@@ -470,6 +514,7 @@ export class AreaRoom extends DurableObject<Env> {
   /** Someone started over: everyone they were before leaves the room at once. */
   async kick(ids: readonly string[]): Promise<void> {
     await this.loadPlay();
+    await this.loadTogether();
     for (const id of ids) for (const ws of this.ctx.getWebSockets(id)) this.leave(ws);
   }
 
@@ -486,6 +531,7 @@ export class AreaRoom extends DurableObject<Env> {
 
   override async webSocketError(ws: WebSocket): Promise<void> {
     await this.loadPlay();
+    await this.loadTogether();
     this.leave(ws);
   }
 
@@ -524,7 +570,11 @@ export class AreaRoom extends DurableObject<Env> {
           ...(me.area === 'conference'
             ? { stage: this.stage ?? null, presenter: !!me.presenter }
             : {}),
+          ...(countsForFocus(me.area)
+            ? { candles: candles(this.focusLog ?? [], now), books: this.booksFor(joined) }
+            : {}),
         });
+        this.syncFocus(joined, now);
         this.broadcast({ t: 'joined', player: snapshot(joined, now) }, ws);
         // The hub trusts this, not the phone, about where the person is.
         void this.env.SOCIAL.getByName('hub').placed(me.id, me.area);
@@ -561,8 +611,10 @@ export class AreaRoom extends DurableObject<Env> {
         // Standing up clears what was on the table and walking stops a dance;
         // everyone else does the same on "moved".
         const study = { ...me.study, activity: null };
-        this.save(ws, { ...me, moves, tile: message.to, study, dancing: false, smoking: false });
+        const moved = { ...me, moves, tile: message.to, study, dancing: false, smoking: false };
+        this.save(ws, moved);
         this.broadcast({ t: 'moved', id: me.id, to: message.to }, ws);
+        this.syncFocus(moved, now);
         return;
       }
       case 'look': {
@@ -587,6 +639,7 @@ export class AreaRoom extends DurableObject<Env> {
         );
         this.save(ws, { ...me, statuses, study });
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
+        this.syncFocus({ ...me, study }, now);
         return;
       }
       case 'say': {
@@ -736,8 +789,20 @@ export class AreaRoom extends DurableObject<Env> {
         this.broadcast({ t: 'finished', id: me.id });
         // It counts on the person's profile: the time the room saw it run, in places for studying.
         const minutes = countsForFocus(me.area) ? focusMinutes(timer, now) : 0;
-        if (minutes > 0) void this.env.SOCIAL.getByName('hub').recordBlock(me.id, minutes);
+        // Weighed over that measured stretch, before the finisher's own span in the log closes.
+        const credit = blockCredit(
+          this.focusLog ?? [],
+          { id: me.id, acct: me.acct ?? me.id },
+          minutes * 60_000,
+          now,
+        );
         this.broadcast({ t: 'status', id: me.id, status: publicStudy(study, now) });
+        this.syncFocus({ ...me, study }, now);
+        if (minutes > 0) void this.rewardBlock(ws, me, minutes, credit, now);
+        return;
+      }
+      case 'rewardSeen': {
+        void this.ctx.storage.delete(rewardKey(me.id));
         return;
       }
       case 'stageShow': {
@@ -817,6 +882,189 @@ export class AreaRoom extends DurableObject<Env> {
         this.send(ws, whisper);
         return;
       }
+    }
+  }
+
+  /* ---------- Studying together: the focus log, candles, books, rewards ---------- */
+
+  /** Loads the focus log and the books once per wake-up. */
+  private async loadTogether(): Promise<void> {
+    if (this.focusLog && this.books) return;
+    const stored = await this.ctx.storage.get<FocusSpan[] | Book[]>([FOCUS_KEY, BOOKS_KEY]);
+    const now = Date.now();
+    this.focusLog ??= pruneLog((stored.get(FOCUS_KEY) as FocusSpan[] | undefined) ?? [], now);
+    this.books ??= pruneBooks((stored.get(BOOKS_KEY) as Book[] | undefined) ?? [], now);
+  }
+
+  /**
+   * Keeps the log in step with one person: a stretch of focus is open while
+   * they sit at a table's chair with a timer running, and closes when they
+   * stand up, stop, finish or leave. Everyone is told when a table's candle changes.
+   */
+  private syncFocus(me: Connection, now: number): void {
+    const log = this.focusLog;
+    if (!log || !countsForFocus(me.area)) return;
+    const timer = me.study.timer;
+    const seat = me.joined && me.tile && timer && timer.endsAt > now ? me.tile : null;
+    const table = seat ? tableOfSeat(me.area, seat) : null;
+    const open = log.find((s) => s.id === me.id && s.end === null);
+    const sameSeat = open && seat && open.seat.x === seat.x && open.seat.y === seat.y;
+    let changed = false;
+    if (open && sameSeat && timer) {
+      // A new timer at the same chair (the next round, a longer block) carries on.
+      if (open.until === timer.endsAt) return;
+      open.until = timer.endsAt;
+      changed = true;
+    } else {
+      if (open) {
+        open.end = Math.min(now, open.until);
+        changed = true;
+      }
+      if (seat && timer && table !== null) {
+        log.push({
+          seat: { ...seat },
+          table,
+          acct: me.acct ?? me.id,
+          id: me.id,
+          name: me.name,
+          top: me.look?.top ?? -1,
+          start: now,
+          end: null,
+          until: timer.endsAt,
+        });
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.focusLog = pruneLog(log, now);
+    void this.ctx.storage.put(FOCUS_KEY, this.focusLog);
+    this.broadcast({ t: 'candles', candles: candles(this.focusLog, now) });
+  }
+
+  /** Stretches left open by people no longer in the room (a socket that vanished while it slept). */
+  private closeAbsentFocus(now: number): void {
+    const log = this.focusLog;
+    if (!log) return;
+    const here = new Set(
+      this.ctx
+        .getWebSockets()
+        .map((ws) => this.load(ws))
+        .filter((c): c is Connection => !!c?.joined)
+        .map((c) => c.id),
+    );
+    const gone = log.filter((s) => s.end === null && !here.has(s.id));
+    for (const span of gone) span.end = Math.min(now, span.until);
+    const pruned = pruneLog(log, now);
+    if (gone.length === 0 && pruned.length === log.length) return;
+    this.focusLog = pruned;
+    void this.ctx.storage.put(FOCUS_KEY, pruned);
+    if (gone.length > 0) this.broadcast({ t: 'candles', candles: candles(pruned, now) });
+  }
+
+  /** How many people focus at a table here now; asked by the hall during a table hour. */
+  async focusingNow(): Promise<number> {
+    await this.loadTogether();
+    const now = Date.now();
+    return candles(this.focusLog ?? [], now).reduce((sum, c) => sum + candleCount(c, now), 0);
+  }
+
+  /** The books on the tables, as one person may see them. */
+  private booksFor(viewer: Connection): BookView[] {
+    const circle = {
+      id: viewer.id,
+      friends: new Set(viewer.friends ?? []),
+      blocked: new Set(viewer.blocked ?? []),
+    };
+    return pruneBooks(this.books ?? [], Date.now()).flatMap((book) => {
+      const view = viewBook(book, circle);
+      return view ? [view] : [];
+    });
+  }
+
+  /**
+   * After the welcome: a reward card not yet seen (the connection dropped as
+   * the block ended), and during a table hour how many sit at the library's tables.
+   */
+  private async welcomeTogether(ws: WebSocket, id: string): Promise<void> {
+    const me = this.load(ws);
+    if (!me?.joined) return;
+    const reward = await this.ctx.storage.get<Reward>(rewardKey(id));
+    if (reward && Date.now() - reward.at < REWARD_KEEP_MS) this.send(ws, { t: 'reward', reward });
+    else if (reward) void this.ctx.storage.delete(rewardKey(id));
+    if ((me.area !== 'hall' && me.area !== 'library') || !tableHourNow(Date.now())) return;
+    const focusing =
+      me.area === 'library'
+        ? await this.focusingNow()
+        : await this.env.AREAS.getByName('library').focusingNow();
+    this.send(ws, { t: 'focusing', focusing });
+  }
+
+  /**
+   * A finished block: counted on the profile (shared when a table-mate sat
+   * through it), a book left on the table when it was long enough, and the
+   * reward card for the finisher. Names on the card are friends' only, and
+   * people either blocked never appear.
+   */
+  private async rewardBlock(
+    ws: WebSocket,
+    me: Connection,
+    minutes: number,
+    credit: ReturnType<typeof blockCredit>,
+    now: number,
+  ): Promise<void> {
+    const blocked = new Set(me.blocked ?? []);
+    const friends = new Set(me.friends ?? []);
+    const spans = this.focusLog ?? [];
+    const mateSpan = (id: string) => [...spans].reverse().find((s) => s.id === id);
+    const shared = credit.shared.filter((id) => !blocked.has(id));
+    const beside = credit.beside.filter((id) => !blocked.has(id));
+    const { before, after } = await this.env.SOCIAL.getByName('hub').recordBlock(
+      me.id,
+      minutes,
+      shared.length > 0,
+    );
+    const seat = credit.seen ? credit.seat : null;
+    if (seat && this.books && mayLeaveBook(this.books, seat, minutes, now)) {
+      const pair = shared[0] ? (mateSpan(shared[0])?.top ?? null) : null;
+      this.leaveBook({
+        id: crypto.randomUUID().slice(0, 8),
+        seat,
+        top: me.look?.top ?? -1,
+        pair,
+        minutes,
+        at: now,
+        by: me.id,
+        name: me.name,
+      });
+    }
+    const reward: Reward = {
+      minutes,
+      shared: shared.length > 0,
+      mates: beside.map((id) => ({
+        id,
+        name: friends.has(id) ? (mateSpan(id)?.name ?? null) : null,
+      })),
+      at: now,
+      before,
+      after,
+    };
+    void this.ctx.storage.put(rewardKey(me.id), reward);
+    this.send(ws, { t: 'reward', reward });
+  }
+
+  /** A book on the table: kept for the day and shown to everyone here, named for friends only. */
+  private leaveBook(book: Book): void {
+    this.books = [...pruneBooks(this.books ?? [], book.at), book];
+    void this.ctx.storage.put(BOOKS_KEY, this.books);
+    for (const ws of this.ctx.getWebSockets()) {
+      const viewer = this.load(ws);
+      if (!viewer?.joined) continue;
+      const view = viewBook(book, {
+        id: viewer.id,
+        friends: new Set(viewer.friends ?? []),
+        blocked: new Set(viewer.blocked ?? []),
+      });
+      if (view) this.send(ws, { t: 'book', book: view });
     }
   }
 
@@ -966,6 +1214,7 @@ export class AreaRoom extends DurableObject<Env> {
       this.save(ws, { ...me, joined: false });
       this.broadcast({ t: 'left', id: me.id }, ws);
       void this.env.SOCIAL.getByName('hub').unplaced(me.id, me.area);
+      this.syncFocus({ ...me, joined: false }, Date.now());
       // Whoever leaves the room gets up from its tables too.
       for (const [kind, record] of this.tables ?? []) {
         if (record.table.players.some((p) => p.id === me.id)) {
