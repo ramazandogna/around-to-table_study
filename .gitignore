@@ -19,3 +19,6 @@ ROADMAP.md
 # Local assets
 assets/
 *.zip
+
+# Docs and review notes (kept local)
+docs/
