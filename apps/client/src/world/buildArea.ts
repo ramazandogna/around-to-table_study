@@ -39,6 +39,7 @@ import { buildAmbience, LAMP_SHADE, type Ambience } from './ambience';
 import { lostBox, umbrellaStand, wallClock } from './smallProps';
 import { dartCabinet, jukeboxModel, tableGames } from './smokingProps';
 import { buildStage, theaterChairs, type BuiltStage } from './conferenceProps';
+import { buildCoffeeCorner } from './coffeeCorner';
 
 /** Top of the floor tiles; furniture stands on this. */
 export const FLOOR_Y = 0.05;
@@ -106,7 +107,9 @@ export type Examinable = {
     | 'jukebox'
     | 'lost'
     /** A library lamp with its own switch. */
-    | 'lamp';
+    | 'lamp'
+    /** The smoking room's coffee corner: a coffee for whoever taps it. */
+    | 'coffee';
   /** Index into the content list for its kind. */
   index: number;
   /** Where to stand to look at it. */
@@ -130,6 +133,8 @@ export type BuiltArea = {
   setChair: (tile: Point, offset: number) => void;
   /** The conference hall's stage and big screen; null in other rooms. */
   stage: BuiltStage | null;
+  /** The coffee machine in the smoking room's corner, on the floor plan; null elsewhere. */
+  coffee: { x: number; z: number } | null;
 };
 
 /** What a room is built with beyond its layout: a private room's rules. */
@@ -581,6 +586,13 @@ export function buildArea(
     pickables.push(mesh);
   }
   addDoorSigns(grid, root);
+  const coffee = buildCoffeeCorner(grid, furniture, FLOOR_Y);
+  if (coffee) {
+    root.add(coffee.root);
+    materials.push(...coffee.materials);
+    pickables.push(coffee.root);
+    examinables.set('coffee', { id: 'coffee', kind: 'coffee', index: 0, stand: coffee.stand });
+  }
   const stage = buildStage(grid, FLOOR_Y);
   if (stage) {
     root.add(stage.root);
@@ -617,6 +629,7 @@ export function buildArea(
     ambience,
     setChair,
     stage,
+    coffee: coffee?.machine ?? null,
     update: (delta, people) => {
       doors.update(delta, people);
       ambience.update(delta);
