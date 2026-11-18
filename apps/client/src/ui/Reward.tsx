@@ -25,7 +25,10 @@ const LINE_MS = 10_000;
  */
 export function Reward() {
   const reward = useTogether((s) => s.reward);
-  return reward ? <Card key={reward.at} reward={reward} /> : null;
+  // A finished block opens the study ring around the seat, and its buttons sit where the
+  // card would: the card waits until the ring is closed, and only then starts its clock.
+  const choosing = useGameStore((s) => s.sitStep !== null);
+  return reward && !choosing ? <Card key={reward.at} reward={reward} /> : null;
 }
 
 function Card({ reward }: { reward: RewardData }) {
