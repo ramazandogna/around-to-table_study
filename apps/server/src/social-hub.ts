@@ -323,6 +323,8 @@ export class SocialHub extends DurableObject<Env> {
       'ALTER TABLE rooms ADD COLUMN rules TEXT',
       'ALTER TABLE reports ADD COLUMN target_name TEXT',
       'ALTER TABLE events ADD COLUMN theme TEXT',
+      // A block a table-mate (another account) sat through too: the candle was shared.
+      'ALTER TABLE focus_blocks ADD COLUMN shared INTEGER NOT NULL DEFAULT 0',
     ]) {
       try {
         this.sql.exec(column);
@@ -1677,16 +1679,41 @@ export class SocialHub extends DurableObject<Env> {
 
   /* ---------- Focus blocks and profiles ---------- */
 
-  /** A focus block that really ran out (the room checked its timer). */
-  async recordBlock(id: string, minutes: number): Promise<void> {
+  /**
+   * A focus block that really ran out (the room checked its timer), and
+   * whether a table-mate sat through it too. The profile before and after
+   * comes back, so the room can tell the finisher what it just earned.
+   */
+  async recordBlock(
+    id: string,
+    minutes: number,
+    shared = false,
+  ): Promise<{ before: Profile | null; after: Profile | null }> {
     const clean = Math.round(minutes);
-    if (!Number.isFinite(clean) || clean < 1 || clean > 240) return;
+    if (!Number.isFinite(clean) || clean < 1 || clean > 240) return { before: null, after: null };
+    const before = this.profile(id);
     this.sql.exec(
-      'INSERT INTO focus_blocks (user, minutes, at) VALUES (?, ?, ?)',
+      'INSERT INTO focus_blocks (user, minutes, at, shared) VALUES (?, ?, ?, ?)',
       id,
       clean,
       Date.now(),
+      shared ? 1 : 0,
     );
+    return { before, after: this.profile(id) };
+  }
+
+  /**
+   * A person's friends and everyone blocked either way, for the rooms: names
+   * on books and reward cards go to friends only, and blocked people see
+   * nothing of each other there.
+   */
+  async circleOf(id: string): Promise<{ friends: string[]; blocked: string[] }> {
+    return {
+      friends: this.rows(id)
+        .filter((r) => r.accepted)
+        .map((r) => r.other),
+      blocked: [...this.blockSet(id)],
+    };
   }
 
   /** A person's own profile, for the character select screen (asked with their token). */
@@ -1762,6 +1789,12 @@ export class SocialHub extends DurableObject<Env> {
       friends: this.rows(id).filter((r) => r.accepted).length,
       messages: user.messages_sent,
       bestStreak: longestStreak(times, user.tz),
+      sharedBlocks: this.sql
+        .exec<{ n: number }>(
+          'SELECT COUNT(*) AS n FROM focus_blocks WHERE user = ? AND shared = 1',
+          id,
+        )
+        .one().n,
     };
   }
 
