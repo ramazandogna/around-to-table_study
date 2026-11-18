@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { getLanguage, setLanguage, t } from '../i18n/t';
 import { layerIndex, panelOpen, useGameStore } from '../state/store';
 import { minimap } from '../world/minimap';
+import { AmbienceToggle } from './AmbienceToggle';
 import { WorldClock } from './Calendar';
 import { FriendsLink } from './Friends';
 import { InboxLink } from './Inbox';
@@ -82,6 +83,7 @@ export function HudPlate() {
         <InboxLink />
         <Wardrobe />
         <SoundToggle />
+        <AmbienceToggle />
         <LanguageToggle />
         <IntroLink />
         <ExitGame />

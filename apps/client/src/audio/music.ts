@@ -1,5 +1,6 @@
 import { readJson, writeJson } from '../net/storage';
 import { audioOut } from './sound';
+import { setMusicPlaying } from './soundscape';
 
 /**
  * Music for events, played on the spot like the sounds: a soft lo-fi loop of
@@ -69,6 +70,7 @@ export function playMusic(style: MusicStyle): void {
   bus.gain.exponentialRampToValueAtTime(1, ctx.currentTime + 2);
   bus.connect(out.out);
   playing = style;
+  setMusicPlaying('event', true);
   beat = 0;
   nextBeat = ctx.currentTime + 0.1;
   timer = window.setInterval(() => schedule(ctx), 150);
@@ -78,6 +80,7 @@ export function stopMusic(): void {
   window.clearInterval(timer);
   timer = 0;
   playing = null;
+  setMusicPlaying('event', false);
   if (bus) {
     const fading = bus;
     const ctx = fading.context;
